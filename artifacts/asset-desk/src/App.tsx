@@ -3,12 +3,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { AssetProvider } from "@/context/AssetContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
 import Forbidden from "@/pages/Forbidden";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
+import AddAsset from "@/pages/AddAsset";
+import EditAsset from "@/pages/EditAsset";
 import AssetDetail from "@/pages/AssetDetail";
 import Tickets from "@/pages/Tickets";
 import RaiseTicket from "@/pages/RaiseTicket";
@@ -49,9 +52,7 @@ function ProtectedRoute({
 
 function Router() {
   const { isAuthenticated, currentUser } = useAuth();
-
-  const homeRedirect =
-    currentUser?.role === "end_user" ? "/tickets" : "/";
+  const homeRedirect = currentUser?.role === "end_user" ? "/tickets" : "/";
 
   return (
     <Switch>
@@ -60,17 +61,23 @@ function Router() {
         {isAuthenticated ? <Redirect to={homeRedirect} /> : <Login />}
       </Route>
 
-      {/* Dashboard — all authenticated roles */}
+      {/* Dashboard — all roles */}
       <Route path="/">
         <ProtectedRoute component={Dashboard} />
       </Route>
 
       {/* Assets — super_admin + agent */}
-      <Route path="/assets">
-        <ProtectedRoute component={Assets} allowedRoles={["super_admin", "agent"]} />
+      <Route path="/assets/new">
+        <ProtectedRoute component={AddAsset} allowedRoles={["super_admin"]} />
+      </Route>
+      <Route path="/assets/:id/edit">
+        <ProtectedRoute component={EditAsset} allowedRoles={["super_admin", "agent"]} />
       </Route>
       <Route path="/assets/:id">
         <ProtectedRoute component={AssetDetail} allowedRoles={["super_admin", "agent"]} />
+      </Route>
+      <Route path="/assets">
+        <ProtectedRoute component={Assets} allowedRoles={["super_admin", "agent"]} />
       </Route>
 
       {/* Tickets — all roles */}
@@ -107,9 +114,7 @@ function Router() {
       {/* 404 */}
       <Route>
         {isAuthenticated ? (
-          <Layout>
-            <NotFound />
-          </Layout>
+          <Layout><NotFound /></Layout>
         ) : (
           <Redirect to="/login" />
         )}
@@ -123,10 +128,12 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
+          <AssetProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </AssetProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
