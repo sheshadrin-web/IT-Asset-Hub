@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AssetProvider } from "@/context/AssetContext";
+import { TicketProvider } from "@/context/TicketContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
 import Forbidden from "@/pages/Forbidden";
@@ -51,14 +52,13 @@ function ProtectedRoute({
 }
 
 function Router() {
-  const { isAuthenticated, currentUser } = useAuth();
-  const homeRedirect = currentUser?.role === "end_user" ? "/tickets" : "/";
+  const { isAuthenticated } = useAuth();
 
   return (
     <Switch>
       {/* Public */}
       <Route path="/login">
-        {isAuthenticated ? <Redirect to={homeRedirect} /> : <Login />}
+        {isAuthenticated ? <Redirect to="/" /> : <Login />}
       </Route>
 
       {/* Dashboard — all roles */}
@@ -129,10 +129,12 @@ function App() {
       <TooltipProvider>
         <AuthProvider>
           <AssetProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
-            <Toaster />
+            <TicketProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+              <Toaster />
+            </TicketProvider>
           </AssetProvider>
         </AuthProvider>
       </TooltipProvider>
