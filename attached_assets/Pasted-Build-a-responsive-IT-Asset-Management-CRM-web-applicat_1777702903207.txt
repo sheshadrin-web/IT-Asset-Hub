@@ -1,0 +1,163 @@
+Build a responsive IT Asset Management CRM web application called "Asset Desk Demo".
+
+Purpose:
+This app is for managing laptop and mobile assets and allowing end users to raise asset-related tickets.
+
+Important:
+Use demo/sample data only. Do not use any real company data.
+
+User roles:
+1. Super Admin
+2. IT Agent
+3. End User
+
+Access rules:
+- Super Admin can access everything.
+- Super Admin can create/edit/delete users, agents, assets, tickets, categories, and reports.
+- IT Agent can view assets, manage assigned tickets, update ticket status, and add ticket comments.
+- End User can only raise asset issue tickets and view their own tickets.
+
+Main pages:
+1. Login page
+2. Dashboard
+3. Asset Management
+4. Add/Edit Asset
+5. Asset Details
+6. Ticket Management
+7. Raise Ticket
+8. Ticket Details
+9. User Management
+10. Reports
+11. Settings
+
+Login page:
+Create a clean login screen with email and password fields.
+Show demo login buttons:
+- Login as Super Admin
+- Login as Agent
+- Login as End User
+
+Dashboard:
+Show cards:
+- Total Assets
+- Assigned Assets
+- Available Assets
+- Assets Under Repair
+- Open Tickets
+- Critical Tickets
+- Resolved Tickets This Month
+
+Asset module:
+Asset types:
+- Laptop
+- Mobile
+
+Asset fields:
+- Asset ID
+- Asset Type
+- Brand
+- Model
+- Serial Number
+- IMEI Number for mobile
+- Purchase Date
+- Warranty End Date
+- Status
+- Assigned To
+- Department
+- Location
+- Accessories
+- Remarks
+
+Asset statuses:
+- Available
+- Assigned
+- Under Repair
+- Lost
+- Retired
+
+Asset features:
+- Add asset
+- Edit asset
+- View asset details
+- Assign asset to user
+- Mark asset as returned
+- Mark asset as under repair
+- Search by Asset ID, Serial Number, User Name, User Email
+- Filter by asset type and status
+
+Ticket module:
+End users should be able to raise tickets for asset issues.
+
+Ticket fields:
+- Ticket ID
+- Raised By
+- Asset ID
+- Category
+- Subcategory
+- Priority
+- Status
+- Assigned Agent
+- Description
+- Attachment upload placeholder
+- Created Date
+- Updated Date
+- Resolution Note
+
+Ticket categories:
+1. Laptop Issue
+   - Battery Issue
+   - Display Issue
+   - Keyboard Issue
+   - Charger Issue
+   - Software Issue
+   - Slow Performance
+2. Mobile Issue
+   - Battery Issue
+   - Screen Issue
+   - SIM Issue
+   - App Issue
+   - Network Issue
+3. Asset Request
+   - New Laptop Request
+   - Replacement Request
+   - Mobile Request
+4. Asset Return
+   - Resignation Handover
+   - Device Return
+5. Lost or Damage
+   - Lost Device
+   - Physical Damage
+6. Accessory Request
+   - Charger
+   - Mouse
+   - Keyboard
+   - Laptop Bag
+
+Ticket statuses:
+- Open
+- Assigned
+- In Progress
+- Waiting for User
+- Resolved
+- Closed
+- Rejected
+
+Ticket priorities:
+- Low
+- Medium
+- High
+- Critical
+
+UI requirements:
+- Modern clean SaaS dashboard design
+- Left sidebar navigation
+- Top header
+- Mobile responsive design
+- Tables with search and filters
+- Status badges with different colors
+- Modal forms for add/edit
+- Clean cards and charts
+- Use sample data
+
+Do not connect to real backend yet.
+First create a working frontend prototype with sample data.
