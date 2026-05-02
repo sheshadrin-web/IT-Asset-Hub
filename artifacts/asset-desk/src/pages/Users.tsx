@@ -35,26 +35,26 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { mockUsers, User, UserRole, UserStatus } from "@/data/mockData";
+import { mockUsers, User, UserRole, UserStatus, ROLE_LABELS } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 
 const roleColors: Record<UserRole, string> = {
-  "Super Admin": "bg-purple-500/15 text-purple-600 border-purple-500/20",
-  "IT Agent": "bg-blue-500/15 text-blue-600 border-blue-500/20",
-  "End User": "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  super_admin: "bg-purple-500/15 text-purple-600 border-purple-500/20",
+  agent:       "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  end_user:    "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
 };
 
 const statusColors: Record<UserStatus, string> = {
-  Active: "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Active:   "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
   Inactive: "bg-gray-500/15 text-gray-500 border-gray-500/20",
 };
 
 const userSchema = z.object({
-  name: z.string().min(2, "Required"),
-  email: z.string().email("Invalid email"),
-  role: z.enum(["Super Admin", "IT Agent", "End User"]),
+  name:       z.string().min(2, "Required"),
+  email:      z.string().email("Invalid email"),
+  role:       z.enum(["super_admin", "agent", "end_user"]),
   department: z.string().min(1, "Required"),
-  status: z.enum(["Active", "Inactive"]),
+  status:     z.enum(["Active", "Inactive"]),
 });
 
 type UserFormValues = z.infer<typeof userSchema>;
@@ -69,7 +69,7 @@ export default function Users() {
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userSchema),
-    defaultValues: { name: "", email: "", role: "End User", department: "", status: "Active" },
+    defaultValues: { name: "", email: "", role: "end_user", department: "", status: "Active" },
   });
 
   const filtered = users.filter((u) => {
@@ -81,7 +81,7 @@ export default function Users() {
 
   const openAdd = () => {
     setEditingUser(null);
-    form.reset({ name: "", email: "", role: "End User", department: "", status: "Active" });
+    form.reset({ name: "", email: "", role: "end_user", department: "", status: "Active" });
     setModalOpen(true);
   };
 
@@ -143,9 +143,9 @@ export default function Users() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="Super Admin">Super Admin</SelectItem>
-                <SelectItem value="IT Agent">IT Agent</SelectItem>
-                <SelectItem value="End User">End User</SelectItem>
+                <SelectItem value="super_admin">Super Admin</SelectItem>
+                <SelectItem value="agent">IT Agent</SelectItem>
+                <SelectItem value="end_user">End User</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -167,6 +167,13 @@ export default function Users() {
                 </tr>
               </thead>
               <tbody>
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                      No users found.
+                    </td>
+                  </tr>
+                )}
                 {filtered.map((user) => {
                   const initials = user.name.split(" ").map((n) => n[0]).join("").toUpperCase();
                   return (
@@ -186,7 +193,7 @@ export default function Users() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${roleColors[user.role]}`}>
-                          {user.role}
+                          {ROLE_LABELS[user.role]}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{user.department}</td>
@@ -230,7 +237,6 @@ export default function Users() {
         </CardContent>
       </Card>
 
-      {/* User Modal */}
       <Dialog open={modalOpen} onOpenChange={(v) => !v && setModalOpen(false)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -261,9 +267,9 @@ export default function Users() {
                         <SelectTrigger data-testid="select-user-role"><SelectValue /></SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="Super Admin">Super Admin</SelectItem>
-                        <SelectItem value="IT Agent">IT Agent</SelectItem>
-                        <SelectItem value="End User">End User</SelectItem>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                        <SelectItem value="agent">IT Agent</SelectItem>
+                        <SelectItem value="end_user">End User</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

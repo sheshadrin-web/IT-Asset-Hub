@@ -15,32 +15,44 @@ import {
   Shield,
   UserCheck,
   User,
+  Plus,
+  Package,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { UserRole, ROLE_LABELS } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "/", roles: ["Super Admin", "IT Agent"] },
-  { label: "Assets", icon: Monitor, href: "/assets", roles: ["Super Admin", "IT Agent"] },
-  { label: "Tickets", icon: Ticket, href: "/tickets", roles: ["Super Admin", "IT Agent", "End User"] },
-  { label: "Users", icon: Users, href: "/users", roles: ["Super Admin"] },
-  { label: "Reports", icon: BarChart2, href: "/reports", roles: ["Super Admin"] },
-  { label: "Settings", icon: Settings, href: "/settings", roles: ["Super Admin"] },
+interface NavItem {
+  label: string;
+  icon: React.ElementType;
+  href: string;
+  roles: UserRole[];
+}
+
+const navItems: NavItem[] = [
+  { label: "Dashboard",    icon: LayoutDashboard, href: "/",           roles: ["super_admin", "agent", "end_user"] },
+  { label: "Assets",       icon: Monitor,         href: "/assets",     roles: ["super_admin", "agent"] },
+  { label: "Tickets",      icon: Ticket,          href: "/tickets",    roles: ["super_admin", "agent"] },
+  { label: "My Tickets",   icon: Ticket,          href: "/tickets",    roles: ["end_user"] },
+  { label: "Raise Ticket", icon: Plus,            href: "/tickets/new",roles: ["end_user"] },
+  { label: "My Assets",    icon: Package,         href: "/my-assets",  roles: ["end_user"] },
+  { label: "Users",        icon: Users,           href: "/users",      roles: ["super_admin"] },
+  { label: "Reports",      icon: BarChart2,       href: "/reports",    roles: ["super_admin", "agent"] },
+  { label: "Settings",     icon: Settings,        href: "/settings",   roles: ["super_admin"] },
 ];
 
-const roleColors: Record<string, string> = {
-  "Super Admin": "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  "IT Agent": "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  "End User": "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+const roleColors: Record<UserRole, string> = {
+  super_admin: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  agent:       "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  end_user:    "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
 };
 
-const roleIcons: Record<string, typeof Shield> = {
-  "Super Admin": Shield,
-  "IT Agent": UserCheck,
-  "End User": User,
+const roleIcons: Record<UserRole, React.ElementType> = {
+  super_admin: Shield,
+  agent:       UserCheck,
+  end_user:    User,
 };
 
 interface LayoutProps {
@@ -65,6 +77,12 @@ export default function Layout({ children }: LayoutProps) {
     .toUpperCase();
 
   const RoleIcon = roleIcons[currentUser.role];
+  const roleLabel = ROLE_LABELS[currentUser.role];
+
+  const activeLabel = visibleItems.find((item) => {
+    if (item.href === "/") return location === "/";
+    return location.startsWith(item.href) && item.href !== "/";
+  })?.label ?? "Page";
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -121,7 +139,7 @@ export default function Layout({ children }: LayoutProps) {
               )}
             >
               <RoleIcon className="h-3 w-3" />
-              {currentUser.role}
+              {roleLabel}
             </span>
           </div>
         </div>
@@ -129,18 +147,18 @@ export default function Layout({ children }: LayoutProps) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
-            {visibleItems.map((item) => {
+            {visibleItems.map((item, idx) => {
               const Icon = item.icon;
               const isActive =
                 item.href === "/"
                   ? location === "/"
-                  : location.startsWith(item.href);
+                  : location === item.href || (item.href !== "/" && location.startsWith(item.href) && item.href.length > 1);
               return (
-                <li key={item.href}>
+                <li key={`${item.href}-${idx}`}>
                   <Link
                     href={item.href}
                     onClick={() => setSidebarOpen(false)}
-                    data-testid={`nav-${item.label.toLowerCase().replace(" ", "-")}`}
+                    data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                     className={cn(
                       "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                       isActive
@@ -156,6 +174,15 @@ export default function Layout({ children }: LayoutProps) {
               );
             })}
           </ul>
+
+          {/* Role-based section label */}
+          {currentUser.role === "end_user" && (
+            <div className="mt-4 px-3">
+              <p className="text-xs font-medium text-sidebar-foreground/40 uppercase tracking-wider">
+                End User Portal
+              </p>
+            </div>
+          )}
         </nav>
 
         {/* Logout */}
@@ -186,16 +213,10 @@ export default function Layout({ children }: LayoutProps) {
             <Menu className="h-5 w-5" />
           </Button>
 
-          {/* Breadcrumb / Page title */}
           <div className="flex-1">
-            <p className="text-sm text-muted-foreground">
-              {visibleItems.find((item) =>
-                item.href === "/" ? location === "/" : location.startsWith(item.href)
-              )?.label ?? "Page"}
-            </p>
+            <p className="text-sm font-medium text-foreground">{activeLabel}</p>
           </div>
 
-          {/* Right side */}
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
               <Bell className="h-4 w-4" />

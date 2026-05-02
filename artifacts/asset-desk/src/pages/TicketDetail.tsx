@@ -42,11 +42,11 @@ export default function TicketDetail() {
   const [newComment, setNewComment] = useState("");
 
   const ticket = allTickets.find((t) => t.ticketId === id);
-  const isAdmin = currentUser?.role === "Super Admin";
-  const isAgent = currentUser?.role === "IT Agent";
+  const isAdmin = currentUser?.role === "super_admin";
+  const isAgent = currentUser?.role === "agent";
   const canManage = isAdmin || isAgent;
 
-  const agents = mockUsers.filter((u) => u.role === "IT Agent" || u.role === "Super Admin");
+  const agents = mockUsers.filter((u) => u.role === "agent" || u.role === "super_admin");
 
   const updateTicket = (updates: Partial<Ticket>) => {
     setAllTickets((prev) =>

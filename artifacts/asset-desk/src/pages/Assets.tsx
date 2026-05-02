@@ -48,7 +48,7 @@ export default function Assets() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
 
-  const isAdmin = currentUser?.role === "Super Admin";
+  const isAdmin = currentUser?.role === "super_admin";
 
   const filtered = assets.filter((a) => {
     const q = search.toLowerCase();

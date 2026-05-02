@@ -49,7 +49,7 @@ export default function Tickets() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
 
-  const isEndUser = currentUser?.role === "End User";
+  const isEndUser = currentUser?.role === "end_user";
 
   let baseTickets = mockTickets;
   if (isEndUser) {

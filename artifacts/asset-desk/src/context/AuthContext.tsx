@@ -4,8 +4,10 @@ import { User, UserRole, mockUsers } from "@/data/mockData";
 interface AuthContextType {
   currentUser: User | null;
   login: (role: UserRole) => void;
+  loginByEmail: (email: string) => boolean;
   logout: () => void;
   isAuthenticated: boolean;
+  hasRole: (...roles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -18,11 +20,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) setCurrentUser(user);
   };
 
+  const loginByEmail = (email: string): boolean => {
+    const user = mockUsers.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (user) {
+      setCurrentUser(user);
+      return true;
+    }
+    return false;
+  };
+
   const logout = () => setCurrentUser(null);
+
+  const hasRole = (...roles: UserRole[]): boolean => {
+    if (!currentUser) return false;
+    return roles.includes(currentUser.role);
+  };
 
   return (
     <AuthContext.Provider
-      value={{ currentUser, login, logout, isAuthenticated: currentUser !== null }}
+      value={{ currentUser, login, loginByEmail, logout, isAuthenticated: currentUser !== null, hasRole }}
     >
       {children}
     </AuthContext.Provider>

@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
+import Forbidden from "@/pages/Forbidden";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
@@ -14,22 +16,28 @@ import TicketDetail from "@/pages/TicketDetail";
 import Users from "@/pages/Users";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import MyAssets from "@/pages/MyAssets";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
 
 function ProtectedRoute({
   component: Component,
-  roles,
+  allowedRoles,
 }: {
   component: React.ComponentType;
-  roles?: string[];
+  allowedRoles?: UserRole[];
 }) {
   const { currentUser, isAuthenticated } = useAuth();
 
   if (!isAuthenticated) return <Redirect to="/login" />;
-  if (roles && currentUser && !roles.includes(currentUser.role)) {
-    return <Redirect to="/tickets" />;
+
+  if (allowedRoles && currentUser && !allowedRoles.includes(currentUser.role)) {
+    return (
+      <Layout>
+        <Forbidden />
+      </Layout>
+    );
   }
 
   return (
@@ -42,42 +50,61 @@ function ProtectedRoute({
 function Router() {
   const { isAuthenticated, currentUser } = useAuth();
 
+  const homeRedirect =
+    currentUser?.role === "end_user" ? "/tickets" : "/";
+
   return (
     <Switch>
+      {/* Public */}
       <Route path="/login">
-        {isAuthenticated ? (
-          <Redirect to={currentUser?.role === "End User" ? "/tickets" : "/"} />
-        ) : (
-          <Login />
-        )}
+        {isAuthenticated ? <Redirect to={homeRedirect} /> : <Login />}
       </Route>
+
+      {/* Dashboard — all authenticated roles */}
       <Route path="/">
-        <ProtectedRoute component={Dashboard} roles={["Super Admin", "IT Agent"]} />
+        <ProtectedRoute component={Dashboard} />
       </Route>
+
+      {/* Assets — super_admin + agent */}
       <Route path="/assets">
-        <ProtectedRoute component={Assets} roles={["Super Admin", "IT Agent"]} />
+        <ProtectedRoute component={Assets} allowedRoles={["super_admin", "agent"]} />
       </Route>
       <Route path="/assets/:id">
-        <ProtectedRoute component={AssetDetail} roles={["Super Admin", "IT Agent"]} />
+        <ProtectedRoute component={AssetDetail} allowedRoles={["super_admin", "agent"]} />
       </Route>
-      <Route path="/tickets">
-        <ProtectedRoute component={Tickets} />
-      </Route>
+
+      {/* Tickets — all roles */}
       <Route path="/tickets/new">
         <ProtectedRoute component={RaiseTicket} />
       </Route>
       <Route path="/tickets/:id">
         <ProtectedRoute component={TicketDetail} />
       </Route>
+      <Route path="/tickets">
+        <ProtectedRoute component={Tickets} />
+      </Route>
+
+      {/* My Assets — end_user only */}
+      <Route path="/my-assets">
+        <ProtectedRoute component={MyAssets} allowedRoles={["end_user"]} />
+      </Route>
+
+      {/* Users — super_admin only */}
       <Route path="/users">
-        <ProtectedRoute component={Users} roles={["Super Admin"]} />
+        <ProtectedRoute component={Users} allowedRoles={["super_admin"]} />
       </Route>
+
+      {/* Reports — super_admin + agent */}
       <Route path="/reports">
-        <ProtectedRoute component={Reports} roles={["Super Admin"]} />
+        <ProtectedRoute component={Reports} allowedRoles={["super_admin", "agent"]} />
       </Route>
+
+      {/* Settings — super_admin only */}
       <Route path="/settings">
-        <ProtectedRoute component={Settings} roles={["Super Admin"]} />
+        <ProtectedRoute component={Settings} allowedRoles={["super_admin"]} />
       </Route>
+
+      {/* 404 */}
       <Route>
         {isAuthenticated ? (
           <Layout>
