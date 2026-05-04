@@ -19,6 +19,7 @@ interface TicketContextType {
   updateTicket: (ticketId: string, updates: Partial<Ticket>) => void;
   addComment: (ticketId: string, comment: TicketComment) => void;
   deleteTicket: (ticketId: string) => void;
+  deleteTickets: (ids: string[]) => void;
 }
 
 const TicketContext = createContext<TicketContextType | null>(null);
@@ -29,9 +30,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
   const getTicket = (id: string) => tickets.find((t) => t.ticketId === id);
 
   const addTicket = (data: AddTicketInput): Ticket => {
-    const ids = tickets.map((t) =>
-      parseInt(t.ticketId.replace("TKT-", ""), 10)
-    );
+    const ids = tickets.map((t) => parseInt(t.ticketId.replace("TKT-", ""), 10));
     const nextNum = ids.length > 0 ? Math.max(...ids) + 1 : 1;
     const today = new Date().toISOString().split("T")[0];
     const newTicket: Ticket = {
@@ -72,9 +71,13 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     setTickets((prev) => prev.filter((t) => t.ticketId !== ticketId));
   };
 
+  const deleteTickets = (ids: string[]) => {
+    setTickets((prev) => prev.filter((t) => !ids.includes(t.ticketId)));
+  };
+
   return (
     <TicketContext.Provider
-      value={{ tickets, getTicket, addTicket, updateTicket, addComment, deleteTicket }}
+      value={{ tickets, getTicket, addTicket, updateTicket, addComment, deleteTicket, deleteTickets }}
     >
       {children}
     </TicketContext.Provider>

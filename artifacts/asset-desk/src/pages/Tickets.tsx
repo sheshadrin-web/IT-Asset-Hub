@@ -6,6 +6,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -31,14 +32,12 @@ const PRIORITY_COLORS: Record<TicketPriority, string> = {
   Medium:   "bg-blue-500/15 text-blue-600 border-blue-500/20",
   Low:      "bg-gray-500/15 text-gray-500 border-gray-500/20",
 };
-
 const PRIORITY_DOT: Record<TicketPriority, string> = {
   Critical: "bg-red-500",
   High:     "bg-amber-500",
   Medium:   "bg-blue-500",
   Low:      "bg-gray-400",
 };
-
 const STATUS_COLORS: Record<TicketStatus, string> = {
   Open:               "bg-blue-500/15 text-blue-600 border-blue-500/20",
   Assigned:           "bg-purple-500/15 text-purple-600 border-purple-500/20",
@@ -50,18 +49,22 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
 };
 
 export default function Tickets() {
-  const { tickets, updateTicket, deleteTicket } = useTickets();
+  const { tickets, updateTicket, deleteTicket, deleteTickets } = useTickets();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
-  const [search, setSearch]           = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch]               = useState("");
+  const [statusFilter, setStatusFilter]   = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget]   = useState<string | null>(null);
 
-  const isEndUser  = currentUser?.role === "end_user";
-  const isAdmin    = currentUser?.role === "super_admin";
-  const isAgent    = currentUser?.role === "agent";
+  // Bulk selection
+  const [selected, setSelected]           = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  const isEndUser = currentUser?.role === "end_user";
+  const isAdmin   = currentUser?.role === "super_admin";
+  const isAgent   = currentUser?.role === "agent";
 
   const base = isEndUser
     ? tickets.filter((t) => t.raisedBy === currentUser?.name)
@@ -88,20 +91,48 @@ export default function Tickets() {
     closed:     base.filter((t) => t.status === "Closed").length,
   };
 
+  // Selection helpers
+  const allFilteredIds  = filtered.map((t) => t.ticketId);
+  const allSelected     = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
+  const someSelected    = allFilteredIds.some((id) => selected.has(id)) && !allSelected;
+  const selectedCount   = [...selected].filter((id) => allFilteredIds.includes(id)).length;
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected((prev) => { const n = new Set(prev); allFilteredIds.forEach((id) => n.delete(id)); return n; });
+    } else {
+      setSelected((prev) => new Set([...prev, ...allFilteredIds]));
+    }
+  };
+  const toggleRow = (id: string) => {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  // Actions
   const handleAssignToSelf = (ticketId: string) => {
     if (!currentUser) return;
     updateTicket(ticketId, { assignedAgent: currentUser.name, status: "Assigned" });
     toast({ title: "Ticket assigned to you", description: ticketId });
   };
 
-  const handleDelete = (ticketId: string) => {
+  const handleDeleteSingle = (ticketId: string) => {
     deleteTicket(ticketId);
     setDeleteTarget(null);
     toast({ title: "Ticket deleted", description: ticketId });
   };
 
+  const handleBulkDelete = () => {
+    const ids = [...selected].filter((id) => allFilteredIds.includes(id));
+    deleteTickets(ids);
+    setSelected(new Set());
+    setBulkDeleteOpen(false);
+    toast({ title: `${ids.length} ticket${ids.length !== 1 ? "s" : ""} deleted` });
+  };
+
+  const colSpan = isAdmin ? 10 : 9;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-20">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -176,8 +207,7 @@ export default function Tickets() {
                 {(["Critical","High","Medium","Low"] as TicketPriority[]).map((p) => (
                   <SelectItem key={p} value={p}>
                     <span className="flex items-center gap-2">
-                      <span className={cn("h-2 w-2 rounded-full", PRIORITY_DOT[p])} />
-                      {p}
+                      <span className={cn("h-2 w-2 rounded-full", PRIORITY_DOT[p])} /> {p}
                     </span>
                   </SelectItem>
                 ))}
@@ -191,10 +221,21 @@ export default function Tickets() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[960px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {["Ticket ID","Raised By","Asset ID","Category","Priority","Status","Assigned Agent","Created Date","Actions"].map((h) => (
+                  {isAdmin && (
+                    <th className="w-10 px-3 py-3">
+                      <Checkbox
+                        checked={allSelected}
+                        onCheckedChange={toggleAll}
+                        aria-label="Select all"
+                        data-testid="checkbox-select-all-tickets"
+                        className={someSelected ? "data-[state=unchecked]:bg-primary/20" : ""}
+                      />
+                    </th>
+                  )}
+                  {["Ticket ID","Raised By","Asset ID","Category","Priority","Status","Assigned Agent","Created","Actions"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">
                       {h}
                     </th>
@@ -204,141 +245,187 @@ export default function Tickets() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={colSpan} className="px-4 py-14 text-center text-muted-foreground text-sm">
                       No tickets match your filters.
                     </td>
                   </tr>
                 )}
-                {filtered.map((ticket) => (
-                  <tr
-                    key={ticket.ticketId}
-                    className="border-b border-border last:border-0 hover:bg-muted/25 transition-colors"
-                    data-testid={`row-ticket-${ticket.ticketId}`}
-                  >
-                    {/* Ticket ID */}
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/tickets/${ticket.ticketId}`}
-                        className="font-semibold text-primary hover:underline"
-                      >
-                        {ticket.ticketId}
-                      </Link>
-                    </td>
-                    {/* Raised By */}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-6 w-6 flex-shrink-0">
-                          <AvatarFallback className="text-[10px] bg-muted text-muted-foreground font-semibold">
-                            {ticket.raisedBy.split(" ").map((n) => n[0]).join("")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="text-sm text-foreground">{ticket.raisedBy}</span>
-                      </div>
-                    </td>
-                    {/* Asset ID */}
-                    <td className="px-4 py-3">
-                      {ticket.assetId !== "N/A" ? (
-                        <Link
-                          href={`/assets/${ticket.assetId}`}
-                          className="text-primary hover:underline text-xs font-medium"
-                        >
-                          {ticket.assetId}
+                {filtered.map((ticket) => {
+                  const isSelected = selected.has(ticket.ticketId);
+                  return (
+                    <tr
+                      key={ticket.ticketId}
+                      className={cn(
+                        "border-b border-border last:border-0 transition-colors",
+                        isSelected ? "bg-primary/5 hover:bg-primary/8" : "hover:bg-muted/25"
+                      )}
+                      data-testid={`row-ticket-${ticket.ticketId}`}
+                    >
+                      {/* Row checkbox */}
+                      {isAdmin && (
+                        <td className="w-10 px-3 py-3">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleRow(ticket.ticketId)}
+                            aria-label={`Select ${ticket.ticketId}`}
+                          />
+                        </td>
+                      )}
+                      {/* Ticket ID */}
+                      <td className="px-4 py-3">
+                        <Link href={`/tickets/${ticket.ticketId}`} className="font-semibold text-primary hover:underline">
+                          {ticket.ticketId}
                         </Link>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">N/A</span>
-                      )}
-                    </td>
-                    {/* Category */}
-                    <td className="px-4 py-3">
-                      <div className="text-foreground text-sm leading-tight">{ticket.category}</div>
-                      <div className="text-xs text-muted-foreground">{ticket.subcategory}</div>
-                    </td>
-                    {/* Priority */}
-                    <td className="px-4 py-3">
-                      <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[ticket.priority])}>
-                        <span className={cn("h-1.5 w-1.5 rounded-full", PRIORITY_DOT[ticket.priority])} />
-                        {ticket.priority}
-                      </span>
-                    </td>
-                    {/* Status */}
-                    <td className="px-4 py-3">
-                      <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[ticket.status])}>
-                        {ticket.status}
-                      </span>
-                    </td>
-                    {/* Assigned Agent */}
-                    <td className="px-4 py-3 text-sm">
-                      {ticket.assignedAgent ? (
-                        <span className="text-foreground">{ticket.assignedAgent}</span>
-                      ) : (
-                        <span className="text-muted-foreground/60 text-xs">Unassigned</span>
-                      )}
-                    </td>
-                    {/* Created */}
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.createdDate}</td>
-                    {/* Actions */}
-                    <td className="px-4 py-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" data-testid={`button-actions-${ticket.ticketId}`}>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem asChild>
-                            <Link href={`/tickets/${ticket.ticketId}`} className="flex items-center gap-2 cursor-pointer">
-                              <Eye className="h-3.5 w-3.5 text-muted-foreground" /> View Details
-                            </Link>
-                          </DropdownMenuItem>
-                          {isAgent && !ticket.assignedAgent && (
-                            <DropdownMenuItem
-                              onClick={() => handleAssignToSelf(ticket.ticketId)}
-                              className="flex items-center gap-2 cursor-pointer"
-                            >
-                              <UserCheck className="h-3.5 w-3.5 text-blue-500" /> Assign to Me
+                      </td>
+                      {/* Raised By */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-6 w-6 flex-shrink-0">
+                            <AvatarFallback className="text-[10px] bg-muted text-muted-foreground font-semibold">
+                              {ticket.raisedBy.split(" ").map((n) => n[0]).join("")}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-sm text-foreground">{ticket.raisedBy}</span>
+                        </div>
+                      </td>
+                      {/* Asset ID */}
+                      <td className="px-4 py-3">
+                        {ticket.assetId !== "N/A" ? (
+                          <Link href={`/assets/${ticket.assetId}`} className="text-primary hover:underline text-xs font-medium">
+                            {ticket.assetId}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">N/A</span>
+                        )}
+                      </td>
+                      {/* Category */}
+                      <td className="px-4 py-3">
+                        <div className="text-foreground text-sm leading-tight">{ticket.category}</div>
+                        <div className="text-xs text-muted-foreground">{ticket.subcategory}</div>
+                      </td>
+                      {/* Priority */}
+                      <td className="px-4 py-3">
+                        <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[ticket.priority])}>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", PRIORITY_DOT[ticket.priority])} />
+                          {ticket.priority}
+                        </span>
+                      </td>
+                      {/* Status */}
+                      <td className="px-4 py-3">
+                        <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[ticket.status])}>
+                          {ticket.status}
+                        </span>
+                      </td>
+                      {/* Agent */}
+                      <td className="px-4 py-3 text-sm">
+                        {ticket.assignedAgent
+                          ? <span className="text-foreground">{ticket.assignedAgent}</span>
+                          : <span className="text-muted-foreground/60 text-xs">Unassigned</span>}
+                      </td>
+                      {/* Created */}
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.createdDate}</td>
+                      {/* Actions */}
+                      <td className="px-4 py-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" data-testid={`button-actions-${ticket.ticketId}`}>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem asChild>
+                              <Link href={`/tickets/${ticket.ticketId}`} className="flex items-center gap-2 cursor-pointer">
+                                <Eye className="h-3.5 w-3.5 text-muted-foreground" /> View Details
+                              </Link>
                             </DropdownMenuItem>
-                          )}
-                          {isAdmin && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => setDeleteTarget(ticket.ticketId)}
-                                className="flex items-center gap-2 cursor-pointer text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> Delete
+                            {isAgent && !ticket.assignedAgent && (
+                              <DropdownMenuItem onClick={() => handleAssignToSelf(ticket.ticketId)} className="flex items-center gap-2 cursor-pointer">
+                                <UserCheck className="h-3.5 w-3.5 text-blue-500" /> Assign to Me
                               </DropdownMenuItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                ))}
+                            )}
+                            {isAdmin && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => setDeleteTarget(ticket.ticketId)}
+                                  className="flex items-center gap-2 cursor-pointer text-destructive focus:text-destructive"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
           {filtered.length > 0 && (
             <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
               Showing {filtered.length} of {base.length} tickets
+              {selectedCount > 0 && (
+                <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Delete confirm */}
+      {/* Floating bulk action bar */}
+      {isAdmin && selectedCount > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-popover shadow-xl px-5 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Checkbox checked readOnly className="pointer-events-none" />
+            <span>{selectedCount} ticket{selectedCount !== 1 ? "s" : ""} selected</span>
+          </div>
+          <div className="h-4 w-px bg-border" />
+          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+          <Button size="sm" variant="destructive" className="gap-2" onClick={() => setBulkDeleteOpen(true)}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete {selectedCount}
+          </Button>
+        </div>
+      )}
+
+      {/* Single delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Ticket</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{deleteTarget}</strong>? This action cannot be undone.
+              Are you sure you want to delete <strong>{deleteTarget}</strong>? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteTarget && handleDelete(deleteTarget)}
+              onClick={() => deleteTarget && handleDeleteSingle(deleteTarget)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete confirm */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedCount} Ticket{selectedCount !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the selected ticket{selectedCount !== 1 ? "s" : ""} from the system. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleBulkDelete}
             >
               Delete
             </AlertDialogAction>
