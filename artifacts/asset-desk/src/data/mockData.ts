@@ -7,8 +7,8 @@ export type UserStatus = "Active" | "Inactive";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
-  agent: "IT Agent",
-  end_user: "End User",
+  agent:       "IT Agent",
+  end_user:    "End User",
 };
 
 export interface Asset {
@@ -72,20 +72,18 @@ export const TICKET_CATEGORIES: Record<string, string[]> = {
 };
 
 export const mockUsers: User[] = [
-  { userId: "USR-001", name: "Sarah Mitchell", email: "admin@demo.com",   role: "super_admin", department: "IT",          assignedAssets: 1, status: "Active" },
-  { userId: "USR-002", name: "James Thornton", email: "agent1@demo.com",  role: "agent",       department: "IT",          assignedAssets: 0, status: "Active" },
-  { userId: "USR-003", name: "Raj Patel",       email: "agent2@demo.com",  role: "agent",       department: "IT",          assignedAssets: 1, status: "Active" },
-  { userId: "USR-004", name: "Alex Kim",         email: "agent3@demo.com",  role: "agent",       department: "IT",          assignedAssets: 0, status: "Active" },
-  { userId: "USR-005", name: "Emily Clarke",     email: "user@demo.com",    role: "end_user",    department: "Marketing",   assignedAssets: 1, status: "Active" },
-  { userId: "USR-006", name: "Laura Bennett",    email: "laura.b@demo.com", role: "end_user",    department: "Finance",     assignedAssets: 0, status: "Active" },
-  { userId: "USR-007", name: "Marcus Johnson",   email: "marcus@demo.com",  role: "end_user",    department: "Engineering", assignedAssets: 1, status: "Active" },
-  { userId: "USR-008", name: "Sofia Rossi",      email: "sofia@demo.com",   role: "end_user",    department: "HR",          assignedAssets: 0, status: "Inactive" },
-  { userId: "USR-009", name: "Daniel Park",      email: "daniel@demo.com",  role: "end_user",    department: "Sales",       assignedAssets: 1, status: "Active" },
+  {
+    userId:         "USR-001",
+    name:           "Help Desk",
+    email:          "help.desk@mileseducation.com",
+    role:           "super_admin",
+    department:     "IT",
+    assignedAssets: 0,
+    status:         "Active",
+  },
 ];
 
-// 5 Laptops + 5 Mobiles
 export const mockAssets: Asset[] = [
-  // ─── LAPTOPS ────────────────────────────────────────────────────────
   {
     assetId:        "AST-001",
     assetType:      "Laptop",
@@ -108,8 +106,8 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2024-03-10",
     warrantyEndDate:"2027-03-10",
     status:         "Assigned",
-    assignedTo:     "Emily Clarke",
-    department:     "Marketing",
+    assignedTo:     "Arjun Sharma",
+    department:     "Operations",
     location:       "HQ – Floor 3",
     accessories:    "Charger, USB-C Hub",
     remarks:        "Minor scratch on bottom cover",
@@ -123,8 +121,8 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2023-08-22",
     warrantyEndDate:"2026-08-22",
     status:         "Assigned",
-    assignedTo:     "Marcus Johnson",
-    department:     "Engineering",
+    assignedTo:     "Priya Nair",
+    department:     "Finance",
     location:       "HQ – Floor 2",
     accessories:    "Charger, Docking Station",
     remarks:        "",
@@ -138,7 +136,7 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2023-05-18",
     warrantyEndDate:"2026-05-18",
     status:         "Under Repair",
-    department:     "Finance",
+    department:     "Academics",
     location:       "IT Repair Center",
     accessories:    "Charger",
     remarks:        "Battery replacement in progress — ETA 3 days",
@@ -152,13 +150,12 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2023-11-30",
     warrantyEndDate:"2026-11-30",
     status:         "Assigned",
-    assignedTo:     "Sarah Mitchell",
-    department:     "IT",
+    assignedTo:     "Rohit Menon",
+    department:     "Marketing",
     location:       "HQ – Floor 1",
     accessories:    "Charger, External Mouse",
     remarks:        "",
   },
-  // ─── MOBILES ────────────────────────────────────────────────────────
   {
     assetId:        "AST-006",
     assetType:      "Mobile",
@@ -183,7 +180,7 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2024-01-28",
     warrantyEndDate:"2026-01-28",
     status:         "Assigned",
-    assignedTo:     "Daniel Park",
+    assignedTo:     "Kavya Reddy",
     department:     "Sales",
     location:       "HQ – Floor 4",
     accessories:    "Charger, S-Pen",
@@ -199,7 +196,7 @@ export const mockAssets: Asset[] = [
     purchaseDate:   "2023-10-12",
     warrantyEndDate:"2025-10-12",
     status:         "Assigned",
-    assignedTo:     "Raj Patel",
+    assignedTo:     "Suresh Kumar",
     department:     "IT",
     location:       "HQ – Floor 1",
     accessories:    "Charger, Case",
@@ -237,56 +234,62 @@ export const mockAssets: Asset[] = [
 
 export const mockTickets: Ticket[] = [
   {
-    ticketId: "TKT-001", raisedBy: "Marcus Johnson", assetId: "AST-003", category: "Laptop Issue", subcategory: "Slow Performance", priority: "High", status: "In Progress", assignedAgent: "James Thornton",
+    ticketId: "TKT-001", raisedBy: "Arjun Sharma", assetId: "AST-003",
+    category: "Laptop Issue", subcategory: "Slow Performance", priority: "High", status: "In Progress", assignedAgent: "Help Desk",
     description: "My laptop has been extremely slow for the past week. Applications take forever to open and the fan is constantly running at full speed.",
     createdDate: "2024-11-15", updatedDate: "2024-11-16", resolutionNote: "",
-    comments: [{ id: "c1", author: "James Thornton", role: "agent", text: "Ran diagnostics — found malware and excessive startup items. Starting cleanup.", date: "2024-11-16" }],
+    comments: [{ id: "c1", author: "Help Desk", role: "super_admin", text: "Ran diagnostics — found excessive startup items. Starting cleanup.", date: "2024-11-16" }],
   },
   {
-    ticketId: "TKT-002", raisedBy: "Emily Clarke", assetId: "AST-002", category: "Laptop Issue", subcategory: "Display Issue", priority: "Medium", status: "Assigned", assignedAgent: "Raj Patel",
+    ticketId: "TKT-002", raisedBy: "Priya Nair", assetId: "AST-002",
+    category: "Laptop Issue", subcategory: "Display Issue", priority: "Medium", status: "Assigned", assignedAgent: "Help Desk",
     description: "The screen flickers occasionally, especially when on battery power. It goes away when plugged in.",
     createdDate: "2024-11-14", updatedDate: "2024-11-15", resolutionNote: "",
     comments: [],
   },
   {
-    ticketId: "TKT-003", raisedBy: "Emily Clarke", assetId: "AST-002", category: "Laptop Issue", subcategory: "Battery Issue", priority: "Critical", status: "In Progress", assignedAgent: "James Thornton",
+    ticketId: "TKT-003", raisedBy: "Rohit Menon", assetId: "AST-005",
+    category: "Laptop Issue", subcategory: "Battery Issue", priority: "Critical", status: "In Progress", assignedAgent: "Help Desk",
     description: "Laptop battery drains from 100% to 0% in under 30 minutes. Requires immediate replacement.",
     createdDate: "2024-11-10", updatedDate: "2024-11-18", resolutionNote: "",
     comments: [
-      { id: "c2", author: "James Thornton", role: "agent", text: "New battery has been ordered. ETA 3 business days.", date: "2024-11-11" },
-      { id: "c3", author: "Emily Clarke", role: "end_user", text: "I have a presentation on Nov 20th — please prioritize.", date: "2024-11-12" },
-      { id: "c4", author: "James Thornton", role: "agent", text: "Battery received, currently being installed.", date: "2024-11-18" },
+      { id: "c2", author: "Help Desk", role: "super_admin", text: "New battery has been ordered. ETA 3 business days.", date: "2024-11-11" },
+      { id: "c3", author: "Rohit Menon", role: "end_user", text: "I have a presentation on Nov 20th — please prioritize.", date: "2024-11-12" },
     ],
   },
   {
-    ticketId: "TKT-004", raisedBy: "Daniel Park", assetId: "AST-007", category: "Mobile Issue", subcategory: "Network Issue", priority: "Medium", status: "Open", assignedAgent: "",
+    ticketId: "TKT-004", raisedBy: "Kavya Reddy", assetId: "AST-007",
+    category: "Mobile Issue", subcategory: "Network Issue", priority: "Medium", status: "Open", assignedAgent: "",
     description: "Unable to connect to office Wi-Fi on my phone. Personal hotspot works fine but office network shows 'Authentication failed'.",
     createdDate: "2024-11-18", updatedDate: "2024-11-18", resolutionNote: "",
     comments: [],
   },
   {
-    ticketId: "TKT-005", raisedBy: "Marcus Johnson", assetId: "AST-003", category: "Laptop Issue", subcategory: "Software Issue", priority: "Low", status: "Resolved", assignedAgent: "Raj Patel",
+    ticketId: "TKT-005", raisedBy: "Arjun Sharma", assetId: "AST-003",
+    category: "Laptop Issue", subcategory: "Software Issue", priority: "Low", status: "Resolved", assignedAgent: "Help Desk",
     description: "Company email app keeps crashing. Happens every time I try to attach a file.",
     createdDate: "2024-11-01", updatedDate: "2024-11-05", resolutionNote: "Cleared app cache and reinstalled. Issue resolved after latest update.",
-    comments: [{ id: "c5", author: "Raj Patel", role: "agent", text: "Known issue with v3.2.0. Pushed v3.2.1 update to your device.", date: "2024-11-05" }],
+    comments: [{ id: "c5", author: "Help Desk", role: "super_admin", text: "Known issue with v3.2.0. Pushed v3.2.1 update to your device.", date: "2024-11-05" }],
   },
   {
-    ticketId: "TKT-006", raisedBy: "Raj Patel", assetId: "AST-008", category: "Accessory Request", subcategory: "Keyboard", priority: "Low", status: "Closed", assignedAgent: "James Thornton",
+    ticketId: "TKT-006", raisedBy: "Suresh Kumar", assetId: "AST-008",
+    category: "Accessory Request", subcategory: "Keyboard", priority: "Low", status: "Closed", assignedAgent: "Help Desk",
     description: "Request for a mechanical keyboard for daily use. Current keyboard has sticky keys.",
     createdDate: "2024-10-28", updatedDate: "2024-11-02", resolutionNote: "Logitech MX Keys keyboard issued from IT stock.",
     comments: [],
   },
   {
-    ticketId: "TKT-007", raisedBy: "Emily Clarke", assetId: "N/A", category: "Asset Request", subcategory: "New Laptop Request", priority: "Medium", status: "Waiting for User", assignedAgent: "Sarah Mitchell",
+    ticketId: "TKT-007", raisedBy: "Priya Nair", assetId: "N/A",
+    category: "Asset Request", subcategory: "New Laptop Request", priority: "Medium", status: "Waiting for User", assignedAgent: "Help Desk",
     description: "I need a second monitor and a more powerful laptop for video editing work.",
     createdDate: "2024-11-08", updatedDate: "2024-11-12", resolutionNote: "",
     comments: [
-      { id: "c6", author: "Sarah Mitchell", role: "super_admin", text: "Please fill out the asset request form and get approval from your department head.", date: "2024-11-09" },
-      { id: "c7", author: "Emily Clarke", role: "end_user", text: "Form submitted. Waiting for manager approval.", date: "2024-11-12" },
+      { id: "c6", author: "Help Desk", role: "super_admin", text: "Please fill out the asset request form and get approval from your department head.", date: "2024-11-09" },
     ],
   },
   {
-    ticketId: "TKT-008", raisedBy: "Marcus Johnson", assetId: "N/A", category: "Asset Request", subcategory: "Mobile Request", priority: "Medium", status: "Open", assignedAgent: "",
+    ticketId: "TKT-008", raisedBy: "Rohit Menon", assetId: "N/A",
+    category: "Asset Request", subcategory: "Mobile Request", priority: "Medium", status: "Open", assignedAgent: "",
     description: "Need a company phone for client calls as I am taking on a client-facing role starting next month.",
     createdDate: "2024-11-17", updatedDate: "2024-11-17", resolutionNote: "",
     comments: [],

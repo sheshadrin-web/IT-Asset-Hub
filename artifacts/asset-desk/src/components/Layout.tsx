@@ -1,22 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard,
-  Monitor,
-  Ticket,
-  Users,
-  BarChart2,
-  Settings,
-  LogOut,
-  Menu,
-  X,
-  ChevronRight,
-  Bell,
-  Shield,
-  UserCheck,
-  User,
-  Plus,
-  Package,
+  LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
+  LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package, GraduationCap,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
@@ -32,15 +18,15 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard",    icon: LayoutDashboard, href: "/",           roles: ["super_admin", "agent", "end_user"] },
-  { label: "Assets",       icon: Monitor,         href: "/assets",     roles: ["super_admin", "agent"] },
-  { label: "Tickets",      icon: Ticket,          href: "/tickets",    roles: ["super_admin", "agent"] },
-  { label: "My Tickets",   icon: Ticket,          href: "/tickets",    roles: ["end_user"] },
-  { label: "Raise Ticket", icon: Plus,            href: "/tickets/new",roles: ["end_user"] },
-  { label: "My Assets",    icon: Package,         href: "/my-assets",  roles: ["end_user"] },
-  { label: "Users",        icon: Users,           href: "/users",      roles: ["super_admin"] },
-  { label: "Reports",      icon: BarChart2,       href: "/reports",    roles: ["super_admin", "agent"] },
-  { label: "Settings",     icon: Settings,        href: "/settings",   roles: ["super_admin"] },
+  { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "agent", "end_user"] },
+  { label: "Assets",       icon: Monitor,         href: "/assets",      roles: ["super_admin", "agent"] },
+  { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "agent"] },
+  { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
+  { label: "Raise Ticket", icon: Plus,            href: "/tickets/new", roles: ["end_user"] },
+  { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
+  { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin"] },
+  { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "agent"] },
+  { label: "Settings",     icon: Settings,        href: "/settings",    roles: ["super_admin"] },
 ];
 
 const roleColors: Record<UserRole, string> = {
@@ -48,36 +34,23 @@ const roleColors: Record<UserRole, string> = {
   agent:       "bg-blue-500/20 text-blue-300 border-blue-500/30",
   end_user:    "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
 };
-
 const roleIcons: Record<UserRole, React.ElementType> = {
   super_admin: Shield,
   agent:       UserCheck,
   end_user:    User,
 };
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
-
-export default function Layout({ children }: LayoutProps) {
+export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [location] = useLocation();
   const { currentUser, logout } = useAuth();
 
   if (!currentUser) return null;
 
-  const visibleItems = navItems.filter((item) =>
-    item.roles.includes(currentUser.role)
-  );
-
-  const initials = currentUser.name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase();
-
-  const RoleIcon = roleIcons[currentUser.role];
-  const roleLabel = ROLE_LABELS[currentUser.role];
+  const visibleItems = navItems.filter((item) => item.roles.includes(currentUser.role));
+  const initials     = currentUser.name.split(" ").map((n) => n[0]).join("").toUpperCase();
+  const RoleIcon     = roleIcons[currentUser.role];
+  const roleLabel    = ROLE_LABELS[currentUser.role];
 
   const activeLabel = visibleItems.find((item) => {
     if (item.href === "/") return location === "/";
@@ -88,10 +61,7 @@ export default function Layout({ children }: LayoutProps) {
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-20 bg-black/50 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Sidebar */}
@@ -102,16 +72,16 @@ export default function Layout({ children }: LayoutProps) {
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <Monitor className="h-4 w-4 text-white" />
+        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary flex-shrink-0">
+            <GraduationCap className="h-4 w-4 text-white" />
           </div>
-          <div>
-            <div className="text-sm font-bold text-white leading-none">Asset Desk</div>
-            <div className="text-xs text-sidebar-foreground/60 mt-0.5">Demo</div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-white leading-tight truncate">Miles Education Pvt Ltd</div>
+            <div className="text-[10px] text-sidebar-foreground/60 mt-0.5 truncate">IT Helpdesk Portal</div>
           </div>
           <button
-            className="ml-auto lg:hidden text-sidebar-foreground hover:text-white"
+            className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="h-4 w-4" />
@@ -121,7 +91,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* User profile */}
         <div className="border-b border-sidebar-border px-4 py-3">
           <div className="flex items-center gap-3">
-            <Avatar className="h-9 w-9">
+            <Avatar className="h-9 w-9 flex-shrink-0">
               <AvatarFallback className="bg-primary/30 text-primary-foreground text-xs font-semibold">
                 {initials}
               </AvatarFallback>
@@ -132,12 +102,7 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           </div>
           <div className="mt-2">
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium",
-                roleColors[currentUser.role]
-              )}
-            >
+            <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium", roleColors[currentUser.role])}>
               <RoleIcon className="h-3 w-3" />
               {roleLabel}
             </span>
@@ -174,15 +139,6 @@ export default function Layout({ children }: LayoutProps) {
               );
             })}
           </ul>
-
-          {/* Role-based section label */}
-          {currentUser.role === "end_user" && (
-            <div className="mt-4 px-3">
-              <p className="text-xs font-medium text-sidebar-foreground/40 uppercase tracking-wider">
-                End User Portal
-              </p>
-            </div>
-          )}
         </nav>
 
         {/* Logout */}
@@ -204,19 +160,15 @@ export default function Layout({ children }: LayoutProps) {
         {/* Top header */}
         <header className="flex h-16 items-center border-b border-border bg-card px-4 gap-4">
           <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
+            variant="ghost" size="icon" className="lg:hidden"
             onClick={() => setSidebarOpen(true)}
             data-testid="button-menu"
           >
             <Menu className="h-5 w-5" />
           </Button>
-
           <div className="flex-1">
             <p className="text-sm font-medium text-foreground">{activeLabel}</p>
           </div>
-
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
               <Bell className="h-4 w-4" />
