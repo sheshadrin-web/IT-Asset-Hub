@@ -92,6 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── On mount: restore session ────────────────────────────────────────────────
+  // Single source of truth: onAuthStateChange with INITIAL_SESSION.
+  // We never call getSession() separately — that races with onAuthStateChange
+  // and can set `session` before the profile is fetched, leaving a window where
+  // `loading = false` but `isAuthenticated = false` flickers the login redirect.
   useEffect(() => {
     if (!supabaseConfigured) {
       console.warn("[AuthContext] Supabase not configured — env vars missing");
@@ -100,35 +104,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Restore existing session on page load
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      console.log("[AuthContext] getSession →", s ? "session found" : "no session");
-      if (s) {
-        setSession(s);
-        setSupabaseUser(s.user);
-        const { profile: p } = await fetchProfile(s.user.id);
-        if (p && p.status === "active") setProfile(p);
-      }
-      setLoading(false);
-    });
-
-    // Auth state changes (token refresh, sign-out from another tab, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
         console.log("[AuthContext] onAuthStateChange event:", event);
+
         if (s) {
           setSession(s);
           setSupabaseUser(s.user);
-          // Profile is managed explicitly by signIn/signOut; don't overwrite here
-          // unless it's a token refresh
-          if (event === "TOKEN_REFRESHED") {
+
+          // Always re-fetch profile on INITIAL_SESSION and TOKEN_REFRESHED so
+          // we confirm the account is active before marking as authenticated.
+          if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
             const { profile: p } = await fetchProfile(s.user.id);
-            if (p) setProfile(p);
+            if (p && p.status === "active") {
+              setProfile(p);
+            } else {
+              // Profile missing or inactive — force sign-out so the user must
+              // re-authenticate rather than seeing a blank/broken dashboard.
+              setProfile(null);
+              if (event === "INITIAL_SESSION" && !p) {
+                // No profile in DB — clear the dangling session
+                await supabase.auth.signOut();
+              }
+            }
           }
         } else {
           setSession(null);
           setSupabaseUser(null);
           setProfile(null);
+        }
+
+        // Release the loading gate only once the very first auth check is done.
+        if (event === "INITIAL_SESSION") {
+          setLoading(false);
         }
       }
     );
