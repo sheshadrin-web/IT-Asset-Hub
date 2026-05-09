@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
-  X, UserX, RefreshCw, AlertTriangle, ShieldAlert, Eye, EyeOff,
+  X, UserX, RefreshCw, AlertTriangle, Copy, Check, ExternalLink,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,6 @@ import { useUsers } from "@/context/UsersContext";
 import { useAuth } from "@/context/AuthContext";
 import { Profile, UserRole, UserStatus, ROLE_LABELS } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
-import { adminUsersApi } from "@/lib/adminUsersApi";
 import { cn } from "@/lib/utils";
 
 // ─── Role / status colours ────────────────────────────────────────────────────
@@ -53,7 +52,6 @@ const addSchema = z.object({
   role:       z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
   department: z.string().min(1, "Department is required"),
   location:   z.string().min(1, "Location is required"),
-  password:   z.string().min(8, "Password must be at least 8 characters"),
 });
 type AddFormValues = z.infer<typeof addSchema>;
 
@@ -67,11 +65,6 @@ const editSchema = z.object({
 type EditFormValues = z.infer<typeof editSchema>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function generatePassword(): string {
-  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$";
-  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-}
-
 function downloadCsv(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -87,40 +80,75 @@ function exportUsers(users: Profile[]) {
   downloadCsv(csv, `users_export_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
+function buildSql(v: AddFormValues): string {
+  const esc = (s: string) => s.replace(/'/g, "''");
+  return `INSERT INTO public.profiles (id, email, full_name, role, department, location, status)
+SELECT
+  id,
+  '${esc(v.email.toLowerCase().trim())}',
+  '${esc(v.full_name.trim())}',
+  '${v.role}',
+  '${esc(v.department.trim())}',
+  '${esc(v.location.trim())}',
+  'Active'
+FROM auth.users
+WHERE email = '${esc(v.email.toLowerCase().trim())}'
+ON CONFLICT (id) DO UPDATE SET
+  full_name  = EXCLUDED.full_name,
+  role       = EXCLUDED.role,
+  department = EXCLUDED.department,
+  location   = EXCLUDED.location,
+  status     = 'Active';`;
+}
+
+// ─── Copy button ──────────────────────────────────────────────────────────────
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+  return (
+    <button
+      onClick={copy}
+      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? "Copied!" : "Copy SQL"}
+    </button>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
-  const { users, loading, refresh, updateUser, removeUser } = useUsers();
+  const { users, loading, refresh, updateUser, deleteUser } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
-  const [search,         setSearch]         = useState("");
-  const [roleFilter,     setRoleFilter]     = useState("all");
-  const [statusFilter,   setStatusFilter]   = useState("all");
+  const [search,       setSearch]       = useState("");
+  const [roleFilter,   setRoleFilter]   = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   // Dialogs
-  const [addOpen,        setAddOpen]        = useState(false);
-  const [editingUser,    setEditingUser]     = useState<Profile | null>(null);
-  const [editOpen,       setEditOpen]        = useState(false);
+  const [guideOpen,        setGuideOpen]        = useState(false);
+  const [guideStep,        setGuideStep]        = useState<1 | 2>(1);
+  const [editingUser,      setEditingUser]       = useState<Profile | null>(null);
+  const [editOpen,         setEditOpen]          = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Profile | null>(null);
-  const [deleteTarget,   setDeleteTarget]   = useState<Profile | null>(null);
+  const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
   // Loading states
-  const [addSaving,      setAddSaving]      = useState(false);
-  const [editSaving,     setEditSaving]     = useState(false);
-  const [actionSaving,   setActionSaving]   = useState<string | null>(null); // userId being actioned
-
-  // Edge Function banner
-  const [edgeFnMissing,  setEdgeFnMissing]  = useState(false);
-
-  // Password visibility in Add form
-  const [showPw,         setShowPw]         = useState(false);
+  const [editSaving,   setEditSaving]   = useState(false);
+  const [actionSaving, setActionSaving] = useState<string | null>(null);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
 
   // ── Forms ──────────────────────────────────────────────────────────────────
   const addForm = useForm<AddFormValues>({
     resolver: zodResolver(addSchema),
-    defaultValues: { full_name: "", email: "", role: "end_user", department: "", location: "", password: "" },
+    defaultValues: { full_name: "", email: "", role: "end_user", department: "", location: "" },
   });
 
   const editForm = useForm<EditFormValues>({
@@ -146,33 +174,16 @@ export default function Users() {
     inactive:    users.filter(u => u.status === "Inactive").length,
   };
 
-  // ── Add user ───────────────────────────────────────────────────────────────
-  const openAdd = () => {
-    addForm.reset({ full_name: "", email: "", role: "end_user", department: "", location: "", password: "" });
-    setShowPw(false);
-    setAddOpen(true);
+  // ── Open Add Guide ─────────────────────────────────────────────────────────
+  const openGuide = () => {
+    addForm.reset({ full_name: "", email: "", role: "end_user", department: "", location: "" });
+    setGuideStep(1);
+    setGuideOpen(true);
   };
 
-  const onAddSubmit = async (values: AddFormValues) => {
-    setAddSaving(true);
-    const result = await adminUsersApi.createUser(values);
-    setAddSaving(false);
-
-    if (result.notDeployed) {
-      setEdgeFnMissing(true);
-      setAddOpen(false);
-      return;
-    }
-
-    if (!result.success) {
-      toast({ title: "Failed to create user", description: result.error ?? "Unknown error", variant: "destructive" });
-      return;
-    }
-
-    toast({ title: "User created", description: `${values.email} has been added and can log in now.` });
-    setAddOpen(false);
-    await refresh();
-  };
+  const onAddNext = addForm.handleSubmit(() => {
+    setGuideStep(2);
+  });
 
   // ── Edit user ──────────────────────────────────────────────────────────────
   const openEdit = (user: Profile) => {
@@ -189,20 +200,14 @@ export default function Users() {
 
   const onEditSubmit = async (values: EditFormValues) => {
     if (!editingUser) return;
-
-    // Warn if super_admin is removing their own role
     const removingOwnAdmin =
       editingUser.id === currentUser?.userId &&
       editingUser.role === "super_admin" &&
       values.role !== "super_admin";
-
     if (removingOwnAdmin) {
-      const confirmed = window.confirm(
-        "Warning: You are about to remove your own Super Admin access. You will lose admin privileges immediately. Continue?"
-      );
-      if (!confirmed) return;
+      const ok = window.confirm("Warning: You are about to remove your own Super Admin access. Continue?");
+      if (!ok) return;
     }
-
     setEditSaving(true);
     try {
       await updateUser(editingUser.id, values);
@@ -219,7 +224,7 @@ export default function Users() {
     }
   };
 
-  // ── Deactivate user ────────────────────────────────────────────────────────
+  // ── Deactivate ─────────────────────────────────────────────────────────────
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;
     setActionSaving(deactivateTarget.id);
@@ -240,30 +245,7 @@ export default function Users() {
     }
   };
 
-  // ── Delete user (hard delete via Edge Function) ────────────────────────────
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setActionSaving(deleteTarget.id);
-
-    const result = await adminUsersApi.deleteUser(deleteTarget.id);
-    setActionSaving(null);
-    setDeleteTarget(null);
-
-    if (result.notDeployed) {
-      setEdgeFnMissing(true);
-      return;
-    }
-
-    if (!result.success) {
-      toast({ title: "Failed to delete user", description: result.error ?? "Unknown error", variant: "destructive" });
-      return;
-    }
-
-    removeUser(deleteTarget.id);
-    toast({ title: "User deleted", description: `${deleteTarget.full_name} has been permanently removed.` });
-  };
-
-  // ── Reactivate ────────────────────────────────────────────────────────────
+  // ── Reactivate ─────────────────────────────────────────────────────────────
   const handleReactivate = async (user: Profile) => {
     setActionSaving(user.id);
     try {
@@ -276,28 +258,28 @@ export default function Users() {
     }
   };
 
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setActionSaving(deleteTarget.id);
+    try {
+      await deleteUser(deleteTarget.id);
+      toast({ title: "User removed", description: `${deleteTarget.full_name} has been removed from the app. Delete their Supabase Auth account from the Supabase Dashboard if needed.` });
+    } catch (err) {
+      toast({ title: "Failed to remove user", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionSaving(null);
+      setDeleteTarget(null);
+    }
+  };
+
+  // ── SQL generated from form ────────────────────────────────────────────────
+  const addValues = addForm.watch();
+  const sqlReady  = guideStep === 2;
+  const generatedSql = sqlReady ? buildSql(addValues) : "";
+
   return (
     <div className="space-y-5">
-      {/* Edge Function not deployed banner */}
-      {edgeFnMissing && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <ShieldAlert className="h-5 w-5 flex-shrink-0 text-amber-500 mt-0.5" />
-          <div className="flex-1 text-sm">
-            <p className="font-semibold text-amber-800">Admin user management backend is not configured yet.</p>
-            <p className="text-amber-700 mt-0.5">
-              Creating and deleting users requires the <code className="bg-amber-100 px-1 rounded">admin-users</code> Supabase Edge Function to be deployed.
-              See <strong>SUPABASE_SETUP.md — Section 10</strong> for deployment instructions.
-            </p>
-            <p className="text-amber-600 text-xs mt-1">
-              Editing, deactivating, and viewing users still works without the Edge Function.
-            </p>
-          </div>
-          <button onClick={() => setEdgeFnMissing(false)} className="text-amber-400 hover:text-amber-600 flex-shrink-0">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -314,7 +296,7 @@ export default function Users() {
             <Download className="h-4 w-4" /> Export
           </Button>
           {isSuperAdmin && (
-            <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
+            <Button size="sm" className="gap-2" onClick={openGuide} data-testid="button-add-user">
               <Plus className="h-4 w-4" /> Add User
             </Button>
           )}
@@ -474,7 +456,7 @@ export default function Users() {
                                     onClick={() => setDeleteTarget(user)}
                                     className="gap-2 cursor-pointer text-destructive focus:text-destructive"
                                   >
-                                    <Trash2 className="h-3.5 w-3.5" /> Delete User
+                                    <Trash2 className="h-3.5 w-3.5" /> Remove User
                                   </DropdownMenuItem>
                                 </>
                               )}
@@ -500,117 +482,118 @@ export default function Users() {
         </CardContent>
       </Card>
 
-      {/* ── Add User Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={addOpen} onOpenChange={v => !addSaving && setAddOpen(v)}>
-        <DialogContent className="max-w-md">
+      {/* ── Add User Guide Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Add New User</DialogTitle>
             <DialogDescription>
-              Creates a Supabase Auth account and profile in one step.
-              The user can log in immediately with the password you set.
+              {guideStep === 1
+                ? "Fill in the user's details. We'll generate the SQL to sync them into the app."
+                : "Follow the two steps below to create the account and sync it to the app."}
             </DialogDescription>
           </DialogHeader>
-          <Form {...addForm}>
-            <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="space-y-4">
-              <FormField control={addForm.control} name="full_name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Full Name</FormLabel>
-                  <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={addForm.control} name="email" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email Address</FormLabel>
-                  <FormControl><Input type="email" placeholder="rahul.s@mileseducation.com" {...field} data-testid="input-add-email" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={addForm.control} name="role" render={({ field }) => (
+
+          {guideStep === 1 ? (
+            <Form {...addForm}>
+              <form onSubmit={onAddNext} className="space-y-4">
+                <FormField control={addForm.control} name="full_name" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Role</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger data-testid="select-add-role"><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="super_admin">Super Admin</SelectItem>
-                        <SelectItem value="it_admin">IT Admin</SelectItem>
-                        <SelectItem value="it_agent">IT Agent</SelectItem>
-                        <SelectItem value="end_user">End User</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Full Name</FormLabel>
+                    <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={addForm.control} name="department" render={({ field }) => (
+                <FormField control={addForm.control} name="email" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department</FormLabel>
-                    <FormControl><Input placeholder="IT, Finance…" {...field} data-testid="input-add-dept" /></FormControl>
+                    <FormLabel>Email Address</FormLabel>
+                    <FormControl><Input type="email" placeholder="rahul.s@mileseducation.com" {...field} data-testid="input-add-email" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={addForm.control} name="role" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Role</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger data-testid="select-add-role"><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="super_admin">Super Admin</SelectItem>
+                          <SelectItem value="it_admin">IT Admin</SelectItem>
+                          <SelectItem value="it_agent">IT Agent</SelectItem>
+                          <SelectItem value="end_user">End User</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={addForm.control} name="department" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Department</FormLabel>
+                      <FormControl><Input placeholder="IT, Finance…" {...field} data-testid="input-add-dept" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+                <FormField control={addForm.control} name="location" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setGuideOpen(false)}>Cancel</Button>
+                  <Button type="submit">Next — Generate SQL →</Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          ) : (
+            <div className="space-y-4">
+              {/* Step 1 */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">1</span>
+                  Create the Supabase Auth account
+                </p>
+                <ol className="text-sm text-muted-foreground space-y-1 pl-7 list-decimal">
+                  <li>Open <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-0.5">Supabase Dashboard <ExternalLink className="h-3 w-3" /></a> → your project → <strong>Authentication → Users</strong></li>
+                  <li>Click <strong>"Add user"</strong> → <strong>"Create new user"</strong></li>
+                  <li>Enter email: <code className="bg-muted px-1 rounded text-xs">{addValues.email}</code> and set a temporary password</li>
+                  <li>Click <strong>"Create user"</strong></li>
+                </ol>
               </div>
-              <FormField control={addForm.control} name="location" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Location</FormLabel>
-                  <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={addForm.control} name="password" render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between">
-                    <FormLabel>Temporary Password</FormLabel>
-                    <button
-                      type="button"
-                      className="text-xs text-blue-600 hover:underline"
-                      onClick={() => {
-                        const pw = generatePassword();
-                        addForm.setValue("password", pw, { shouldValidate: true });
-                        setShowPw(true);
-                      }}
-                    >
-                      Generate random
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <FormControl>
-                      <Input
-                        type={showPw ? "text" : "password"}
-                        placeholder="Min. 8 characters"
-                        className="pr-10"
-                        {...field}
-                        data-testid="input-add-password"
-                      />
-                    </FormControl>
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      onClick={() => setShowPw(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )} />
+
+              {/* Step 2 */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">2</span>
+                    Run this SQL in Supabase SQL Editor
+                  </p>
+                  <CopyButton text={generatedSql} />
+                </div>
+                <p className="text-xs text-muted-foreground pl-7">
+                  Go to <strong>SQL Editor → New query</strong>, paste and run:
+                </p>
+                <pre className="text-xs bg-slate-900 text-slate-100 rounded-md p-3 overflow-x-auto leading-relaxed">
+                  {generatedSql}
+                </pre>
+              </div>
+
               <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded px-3 py-2">
-                Share the temporary password with the user securely. They should change it after first login.
+                After running the SQL, click <strong>Refresh</strong> to see the new user appear in the list.
               </p>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
-                <Button type="submit" disabled={addSaving} data-testid="button-submit-add-user">
-                  {addSaving ? (
-                    <span className="flex items-center gap-2">
-                      <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                      Creating…
-                    </span>
-                  ) : "Create User"}
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setGuideStep(1)}>← Back</Button>
+                <Button variant="outline" onClick={() => setGuideOpen(false)}>Close</Button>
+                <Button onClick={async () => { setGuideOpen(false); await refresh(); }}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Done — Refresh List
                 </Button>
               </DialogFooter>
-            </form>
-          </Form>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -619,9 +602,7 @@ export default function Users() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit User Profile</DialogTitle>
-            {editingUser && (
-              <DialogDescription>{editingUser.email}</DialogDescription>
-            )}
+            {editingUser && <DialogDescription>{editingUser.email}</DialogDescription>}
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
@@ -647,11 +628,7 @@ export default function Users() {
                 <FormField control={editForm.control} name="status" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      disabled={editingUser?.id === currentUser?.userId}
-                    >
+                    <Select value={field.value} onValueChange={field.onChange} disabled={editingUser?.id === currentUser?.userId}>
                       <FormControl><SelectTrigger data-testid="select-user-status"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="Active">Active</SelectItem>
@@ -697,10 +674,7 @@ export default function Users() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={handleDeactivate}
-            >
+            <AlertDialogAction className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleDeactivate}>
               Deactivate
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -713,11 +687,12 @@ export default function Users() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Permanently Delete User
+              Remove User
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete <strong>{deleteTarget?.full_name}</strong> ({deleteTarget?.email}) from
-              Supabase Auth and remove their profile. This action cannot be undone.
+              This removes <strong>{deleteTarget?.full_name}</strong> ({deleteTarget?.email}) from the app — they will not be able to log in.
+              <br /><br />
+              To fully delete their account, also go to <strong>Supabase Dashboard → Authentication → Users</strong> and delete them there.
               <br /><br />
               If you only want to block access temporarily, use <strong>Deactivate</strong> instead.
             </AlertDialogDescription>
@@ -728,7 +703,7 @@ export default function Users() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleDelete}
             >
-              Delete Permanently
+              Remove User
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

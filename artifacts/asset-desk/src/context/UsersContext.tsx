@@ -11,11 +11,11 @@ interface UpdateProfileInput {
 }
 
 interface UsersContextType {
-  users:       Profile[];
-  loading:     boolean;
-  refresh:     () => Promise<void>;
-  updateUser:  (id: string, data: UpdateProfileInput) => Promise<void>;
-  removeUser:  (id: string) => void;  // optimistic removal after edge fn deletes auth user
+  users:      Profile[];
+  loading:    boolean;
+  refresh:    () => Promise<void>;
+  updateUser: (id: string, data: UpdateProfileInput) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
 }
 
 const UsersContext = createContext<UsersContextType | null>(null);
@@ -37,7 +37,6 @@ export function UsersProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  // Direct RLS update — safe because our policy allows authenticated users to update profiles.
   const updateUser = async (id: string, data: UpdateProfileInput): Promise<void> => {
     const { error } = await supabase
       .from("profiles")
@@ -49,13 +48,20 @@ export function UsersProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  // Called after Edge Function successfully deletes the auth user (which cascades to profile).
-  const removeUser = (id: string) => {
+  // Deletes the profile row. The auth user stays in Supabase Auth but can no
+  // longer log in (no profile = access denied). To fully purge the auth account
+  // as well, go to Supabase Dashboard → Authentication → Users and delete there.
+  const deleteUser = async (id: string): Promise<void> => {
+    const { error } = await supabase
+      .from("profiles")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
     setUsers(prev => prev.filter(u => u.id !== id));
   };
 
   return (
-    <UsersContext.Provider value={{ users, loading, refresh: fetchUsers, updateUser, removeUser }}>
+    <UsersContext.Provider value={{ users, loading, refresh: fetchUsers, updateUser, deleteUser }}>
       {children}
     </UsersContext.Provider>
   );
