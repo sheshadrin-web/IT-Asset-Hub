@@ -53,7 +53,9 @@ export default function Login() {
           {/* Header stripe */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-8 py-7">
             <div className="flex items-center gap-3">
-              <img src={milesLogo} alt="Miles Education" className="h-10 w-auto object-contain flex-shrink-0" />
+              <div className="h-14 w-14 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-white/30 shadow-lg">
+                <img src={milesLogo} alt="Miles Education" className="h-full w-full object-cover" />
+              </div>
               <div>
                 <p className="text-blue-200 text-xs mt-0.5">IT Asset &amp; Helpdesk Portal</p>
               </div>
