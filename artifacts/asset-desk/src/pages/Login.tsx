@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { GraduationCap, Eye, EyeOff } from "lucide-react";
+import { GraduationCap, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,13 +23,18 @@ export default function Login() {
     if (!email.trim()) { setError("Please enter your email address."); return; }
     if (!password)     { setError("Please enter your password.");      return; }
 
+    console.log("[Login] Sign in attempt → email:", email.trim());
+    console.log("[Login] Calling signIn...");
+
     setLoading(true);
     const { error: signInError } = await signIn(email.trim(), password);
     setLoading(false);
 
     if (signInError) {
+      console.error("[Login] signIn returned error:", signInError);
       setError(signInError);
     } else {
+      console.log("[Login] signIn success → navigating to /");
       setLocation("/");
     }
   };
@@ -46,7 +51,7 @@ export default function Login() {
 
           {/* Header stripe */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-8 py-7">
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm flex-shrink-0">
                 <GraduationCap className="h-6 w-6 text-white" />
               </div>
@@ -64,18 +69,24 @@ export default function Login() {
               <p className="text-sm text-slate-500 mt-0.5">Sign in with your helpdesk credentials</p>
             </div>
 
+            {/* Config error banner */}
             {configError && (
-              <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-                <strong>Configuration error:</strong> Supabase URL or anon key is missing.
-                Add <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_URL</code> and{" "}
-                <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to Replit Secrets,
-                then restart the app. See <strong>SUPABASE_SETUP.md</strong> for full instructions.
+              <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-amber-500" />
+                <span>
+                  <strong>Configuration error:</strong> Supabase URL or anon key is missing.
+                  Add <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_URL</code> and{" "}
+                  <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to
+                  Replit Secrets, then restart. See <strong>SUPABASE_SETUP.md</strong>.
+                </span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-sm font-medium text-slate-700">Email address</Label>
+                <Label htmlFor="email" className="text-sm font-medium text-slate-700">
+                  Email address
+                </Label>
                 <Input
                   id="email"
                   type="email"
@@ -86,13 +97,15 @@ export default function Login() {
                   data-testid="input-email"
                   autoComplete="email"
                   autoFocus
-                  disabled={loading}
+                  disabled={loading || configError}
                 />
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-sm font-medium text-slate-700">Password</Label>
+                  <Label htmlFor="password" className="text-sm font-medium text-slate-700">
+                    Password
+                  </Label>
                   <button
                     type="button"
                     className="text-xs text-blue-600 hover:text-blue-700 font-medium hover:underline"
@@ -112,23 +125,26 @@ export default function Login() {
                     className="h-10 border-slate-300 bg-slate-50 pr-10 focus:border-blue-500"
                     data-testid="input-password"
                     autoComplete="current-password"
-                    disabled={loading}
+                    disabled={loading || configError}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                     data-testid="button-toggle-password"
+                    tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
+              {/* Error message */}
               {error && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                  {error}
-                </p>
+                <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-red-500" />
+                  <p className="text-xs text-red-700 leading-relaxed">{error}</p>
+                </div>
               )}
 
               <Button
@@ -145,6 +161,14 @@ export default function Login() {
                 ) : "Sign In"}
               </Button>
             </form>
+
+            {/* Debug hint for admin */}
+            <p className="mt-4 text-center text-xs text-slate-400">
+              Having trouble?{" "}
+              <a href="/supabase-check" className="text-blue-500 hover:underline">
+                Run diagnostics
+              </a>
+            </p>
           </div>
 
           <div className="bg-slate-50 border-t border-slate-100 px-8 py-3">

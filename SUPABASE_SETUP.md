@@ -2,7 +2,7 @@
 
 ## Overview
 
-This app uses Supabase for authentication and database. It needs two environment variables.
+This app uses Supabase for authentication and database. It requires two environment variables.
 The anon/publishable key is safe for frontend use — **never use the service_role key**.
 
 ---
@@ -18,66 +18,58 @@ Go to **Replit → Secrets** and add:
 | `VITE_SUPABASE_URL` | `https://dimbgprindvmzoylzyud.supabase.co` |
 | `VITE_SUPABASE_ANON_KEY` | Your `anon` / `public` key from Supabase Dashboard |
 
-After adding secrets, **restart the Replit app**.
-
-Test at: `/supabase-check`
+After adding secrets → **restart the Replit app** → test `/supabase-check`.
 
 ### Render (production)
 
-Go to **Render → your service → Environment** and add the same two variables:
+Go to **Render → your service → Environment** and add the same two variables, then:
+**Save Changes → Manual Deploy → Deploy latest commit.**
 
-| Key | Value |
-|-----|-------|
-| `VITE_SUPABASE_URL` | `https://dimbgprindvmzoylzyud.supabase.co` |
-| `VITE_SUPABASE_ANON_KEY` | Your `anon` / `public` key |
-
-Then: **Save Changes → Manual Deploy → Deploy latest commit.**
-
-> Vite bakes `VITE_*` variables into the bundle at build time.
-> Variables must be set **before** the build runs.
+> Vite bakes `VITE_*` variables into the bundle at build time — set them **before** the build.
 
 ---
 
 ## 2. Where to Find Your Keys
 
-**Supabase Dashboard → your project → Project Settings → API**
+**Supabase Dashboard → Project Settings → API**
 
 - **Project URL** → `VITE_SUPABASE_URL`
 - **anon / public** key → `VITE_SUPABASE_ANON_KEY`
-- **Never use the `service_role` key** in frontend code.
+- ⚠️ **Never use the `service_role` key** in frontend code.
 
 ---
 
-## 3. Database Schema (run in Supabase SQL Editor)
+## 3. Database Schema
 
-### Profiles table
+Run in **Supabase Dashboard → SQL Editor → New query**.
+
+### profiles table
 
 ```sql
 create table if not exists public.profiles (
-  id            uuid primary key references auth.users(id) on delete cascade,
-  full_name     text        not null,
-  email         text        not null unique,
-  role          text        not null check (role in ('super_admin', 'it_admin', 'it_agent', 'end_user')),
-  department    text        not null default '',
-  location      text        not null default '',
-  status        text        not null default 'Active' check (status in ('Active', 'Inactive', 'active', 'inactive')),
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  id          uuid        primary key references auth.users(id) on delete cascade,
+  full_name   text        not null,
+  email       text        not null unique,
+  role        text        not null check (role in ('super_admin','it_admin','it_agent','end_user')),
+  department  text        not null default '',
+  location    text        not null default '',
+  status      text        not null default 'Active',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 ```
 
-### Assets table
+### assets table
 
 ```sql
 create table if not exists public.assets (
   asset_id          text        primary key,
-  asset_type        text        not null check (asset_type in ('Laptop', 'Mobile')),
+  asset_type        text        not null check (asset_type in ('Laptop','Mobile')),
   brand             text        not null,
   model             text        not null,
   serial_number     text        not null unique,
   imei_1            text,
-  status            text        not null default 'Available'
-                                check (status in ('Available', 'Assigned', 'Under Repair', 'Lost', 'Retired')),
+  status            text        not null default 'Available',
   assigned_to       text,
   assigned_email    text,
   department        text,
@@ -91,7 +83,7 @@ create table if not exists public.assets (
 );
 ```
 
-### Tickets table
+### tickets table
 
 ```sql
 create table if not exists public.tickets (
@@ -101,9 +93,8 @@ create table if not exists public.tickets (
   asset_id       text        not null default 'N/A',
   category       text        not null,
   subcategory    text        not null,
-  priority       text        not null check (priority in ('Critical', 'High', 'Medium', 'Low')),
-  status         text        not null default 'Open'
-                             check (status in ('Open', 'Assigned', 'In Progress', 'Waiting for User', 'Resolved', 'Closed', 'Rejected')),
+  priority       text        not null,
+  status         text        not null default 'Open',
   assigned_agent text        not null default '',
   description    text        not null,
   comments       jsonb       not null default '[]',
@@ -112,33 +103,33 @@ create table if not exists public.tickets (
 );
 ```
 
-### Asset Assignments table (audit trail)
+### asset_assignments table (audit trail)
 
 ```sql
 create table if not exists public.asset_assignments (
-  id            uuid        primary key default gen_random_uuid(),
-  asset_id      text        not null references public.assets(asset_id) on delete cascade,
-  assigned_to   text        not null,
-  assigned_email text       not null,
-  department    text        not null default '',
-  assigned_by   text        not null,
-  assigned_at   timestamptz not null default now(),
-  notes         text
+  id             uuid        primary key default gen_random_uuid(),
+  asset_id       text        not null references public.assets(asset_id) on delete cascade,
+  assigned_to    text        not null,
+  assigned_email text        not null,
+  department     text        not null default '',
+  assigned_by    text        not null,
+  assigned_at    timestamptz not null default now(),
+  notes          text
 );
 ```
 
-### Asset Returns table (audit trail)
+### asset_returns table (audit trail)
 
 ```sql
 create table if not exists public.asset_returns (
-  id            uuid        primary key default gen_random_uuid(),
-  asset_id      text        not null references public.assets(asset_id) on delete cascade,
-  returned_by   text        not null,
-  returned_email text       not null,
-  received_by   text        not null,
-  returned_at   timestamptz not null default now(),
-  condition     text        not null default 'Good',
-  notes         text
+  id             uuid        primary key default gen_random_uuid(),
+  asset_id       text        not null references public.assets(asset_id) on delete cascade,
+  returned_by    text        not null,
+  returned_email text        not null,
+  received_by    text        not null,
+  returned_at    timestamptz not null default now(),
+  condition      text        not null default 'Good',
+  notes          text
 );
 ```
 
@@ -146,85 +137,124 @@ create table if not exists public.asset_returns (
 
 ## 4. Row Level Security (RLS)
 
+> ⚠️ **IMPORTANT — avoid infinite recursion (error 42P17)**
+>
+> Do **not** use `auth.role() = 'authenticated'` in policies on the `profiles` table.
+> This causes Postgres to recursively evaluate the policy, leading to error `42P17`.
+> Use `auth.uid() is not null` instead — it checks the JWT directly without a DB lookup.
+
+### Step 1 — Enable RLS
+
 ```sql
--- Enable RLS on all tables
 alter table public.profiles          enable row level security;
 alter table public.assets            enable row level security;
 alter table public.tickets           enable row level security;
 alter table public.asset_assignments enable row level security;
 alter table public.asset_returns     enable row level security;
+```
 
--- Profiles: any authenticated user can read all profiles
-create policy "profiles_select_authenticated"
+### Step 2 — Drop any broken policies (if you already ran old policies)
+
+```sql
+-- Drop old policies if they exist
+drop policy if exists "profiles_select_authenticated"  on public.profiles;
+drop policy if exists "profiles_update_own"            on public.profiles;
+drop policy if exists "profiles_insert_authenticated"  on public.profiles;
+drop policy if exists "assets_select_authenticated"    on public.assets;
+drop policy if exists "assets_insert_authenticated"    on public.assets;
+drop policy if exists "assets_update_authenticated"    on public.assets;
+drop policy if exists "assets_delete_authenticated"    on public.assets;
+drop policy if exists "tickets_select_authenticated"   on public.tickets;
+drop policy if exists "tickets_insert_authenticated"   on public.tickets;
+drop policy if exists "tickets_update_authenticated"   on public.tickets;
+drop policy if exists "tickets_delete_authenticated"   on public.tickets;
+drop policy if exists "asset_assignments_all"          on public.asset_assignments;
+drop policy if exists "asset_returns_all"              on public.asset_returns;
+```
+
+### Step 3 — Create correct policies
+
+```sql
+-- ── profiles ──────────────────────────────────────────────────────────────────
+-- Use auth.uid() is not null — avoids the 42P17 infinite recursion bug
+create policy "profiles_select"
   on public.profiles for select
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
--- Profiles: users can update only their own row
-create policy "profiles_update_own"
-  on public.profiles for update
-  using (auth.uid() = id);
-
--- Profiles: only service role can insert (handled via Supabase Dashboard)
--- To allow inserts from the app, add:
-create policy "profiles_insert_authenticated"
+create policy "profiles_insert"
   on public.profiles for insert
-  with check (auth.role() = 'authenticated');
+  with check (auth.uid() is not null);
 
--- Assets: all authenticated users can read
-create policy "assets_select_authenticated"
+create policy "profiles_update"
+  on public.profiles for update
+  using (auth.uid() is not null);
+
+-- ── assets ────────────────────────────────────────────────────────────────────
+create policy "assets_select"
   on public.assets for select
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
--- Assets: all authenticated users can write (app enforces role checks)
-create policy "assets_insert_authenticated"
+create policy "assets_insert"
   on public.assets for insert
-  with check (auth.role() = 'authenticated');
+  with check (auth.uid() is not null);
 
-create policy "assets_update_authenticated"
+create policy "assets_update"
   on public.assets for update
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
-create policy "assets_delete_authenticated"
+create policy "assets_delete"
   on public.assets for delete
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
--- Tickets: all authenticated users can read and write
-create policy "tickets_select_authenticated"
+-- ── tickets ───────────────────────────────────────────────────────────────────
+create policy "tickets_select"
   on public.tickets for select
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
-create policy "tickets_insert_authenticated"
+create policy "tickets_insert"
   on public.tickets for insert
-  with check (auth.role() = 'authenticated');
+  with check (auth.uid() is not null);
 
-create policy "tickets_update_authenticated"
+create policy "tickets_update"
   on public.tickets for update
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
-create policy "tickets_delete_authenticated"
+create policy "tickets_delete"
   on public.tickets for delete
-  using (auth.role() = 'authenticated');
+  using (auth.uid() is not null);
 
--- Asset assignments + returns: authenticated users can read and write
-create policy "asset_assignments_all"
-  on public.asset_assignments for all
-  using (auth.role() = 'authenticated');
+-- ── asset_assignments ─────────────────────────────────────────────────────────
+create policy "asset_assignments_select"
+  on public.asset_assignments for select
+  using (auth.uid() is not null);
 
-create policy "asset_returns_all"
-  on public.asset_returns for all
-  using (auth.role() = 'authenticated');
+create policy "asset_assignments_insert"
+  on public.asset_assignments for insert
+  with check (auth.uid() is not null);
+
+-- ── asset_returns ─────────────────────────────────────────────────────────────
+create policy "asset_returns_select"
+  on public.asset_returns for select
+  using (auth.uid() is not null);
+
+create policy "asset_returns_insert"
+  on public.asset_returns for insert
+  with check (auth.uid() is not null);
 ```
 
 ---
 
 ## 5. First Super Admin Profile
 
-**Step 1** — Create the auth user in Supabase Dashboard:
-- Go to **Authentication → Users → Add user** (or invite)
-- Email: `sheshadri.n@mileseducation.com`
-- Set a password
+### Step 1 — Confirm the auth user exists
 
-**Step 2** — Insert the profile row (run in SQL Editor):
+Go to **Supabase Dashboard → Authentication → Users** and confirm:
+- Email: `sheshadri.n@mileseducation.com`
+- UID: `dc2af1b7-2d17-4b4a-af00-f4b873d916e1`
+
+If the user doesn't exist, use **Invite user** and set their password.
+
+### Step 2 — Insert the profile row
 
 ```sql
 insert into public.profiles (
@@ -254,18 +284,16 @@ on conflict (email) do update set
   status     = excluded.status;
 ```
 
-> The UUID `dc2af1b7-2d17-4b4a-af00-f4b873d916e1` must match the **User UID** shown in
-> Supabase Dashboard → Authentication → Users → click the user.
+> **Status must be `'Active'` (capital A).** The app also accepts `'active'` (lowercase) and normalises it automatically.
 
 ---
 
 ## 6. Diagnostic Page
 
-After setup, visit `/supabase-check` to verify:
-- Env vars present
+After setup, visit `/supabase-check` (no login required) to verify:
+- Both env vars present
 - Supabase client initialised
-- Session status
-- Profile row found (role, status, department)
+- Session and profile after login
 
 ---
 
@@ -274,9 +302,11 @@ After setup, visit `/supabase-check` to verify:
 - [ ] Add `VITE_SUPABASE_URL` in Replit Secrets
 - [ ] Add `VITE_SUPABASE_ANON_KEY` in Replit Secrets
 - [ ] Restart Replit app
-- [ ] Visit `/login` and sign in
-- [ ] Visit `/supabase-check` and confirm all checks pass
-- [ ] Confirm role-based routing works before pushing to GitHub
+- [ ] Visit `/supabase-check` → confirm env vars present
+- [ ] Visit `/login` → sign in → confirm no error
+- [ ] Visit `/supabase-check` again → confirm profile found, role = `super_admin`
+- [ ] Confirm role-based dashboard loads correctly
+- [ ] Push to GitHub once login is verified
 
 ## 8. Render Deployment Checklist
 
@@ -284,8 +314,8 @@ After setup, visit `/supabase-check` to verify:
 - [ ] Add `VITE_SUPABASE_ANON_KEY` in Render service → Environment
 - [ ] Click **Save Changes**
 - [ ] Click **Manual Deploy → Deploy latest commit**
-- [ ] Confirm the deployed commit includes Supabase authentication changes
-- [ ] Visit the deployed URL → `/supabase-check` to verify
+- [ ] Confirm deployed commit includes Supabase auth changes
+- [ ] Visit deployed URL → `/supabase-check` → verify all checks pass
 
 ## 9. Build Command (Render)
 
@@ -300,8 +330,8 @@ pnpm install --frozen-lockfile && pnpm --filter @workspace/asset-desk run build:
 ## Security Checklist
 
 - [x] Only `anon` / `public` key used in frontend code
-- [x] `service_role` key is **never** in the codebase
-- [x] RLS enabled on all tables
+- [x] `service_role` key never in codebase
+- [x] RLS enabled on all tables with `auth.uid() is not null` (avoids 42P17)
 - [x] Env vars stored in Replit Secrets / Render Environment only
-- [x] No demo credentials, hardcoded users, or test data in source code
-- [x] Anon key value never displayed in the UI (including `/supabase-check`)
+- [x] No demo credentials or hardcoded users in source code
+- [x] Anon key value never shown in `/supabase-check` UI

@@ -1,0 +1,93 @@
+Login is not working properly. After entering email and password, the login page blinks and stays on the same page. Please debug and fix the Supabase login flow.
+
+Current behavior:
+- Login page loads.
+- User enters Supabase Auth email and password.
+- After clicking Sign In, page blinks.
+- It stays on /login.
+- No clear error is shown.
+
+Please do the following:
+
+1. Add detailed login debugging
+- In the login submit function, console.log each step:
+  - login button clicked
+  - email used
+  - supabase.auth.signInWithPassword started
+  - signIn response user/session
+  - signIn error if any
+  - profile fetch started
+  - profile fetch result
+  - profile fetch error if any
+  - final redirect path
+
+2. Show actual errors on the login page
+- If signInWithPassword fails, show Supabase error.message.
+- If profile fetch fails, show the profile error message.
+- If profile is missing, show:
+  “Login successful, but profile is missing in public.profiles.”
+- If role is missing or invalid, show:
+  “Login successful, but user role is not configured correctly.”
+- If status is inactive or mismatched, show:
+  “Login successful, but user status is not Active.”
+
+3. Fix profile status compatibility
+The database may have status as:
+- active
+- Active
+
+The app should accept both for now:
+- active
+- Active
+
+Normalize status by converting to lowercase before checking:
+profile.status?.toLowerCase() === "active"
+
+4. Fix role compatibility
+The database role is:
+super_admin
+
+Make sure the app accepts:
+super_admin
+
+Do not expect:
+Super Admin
+
+Normalize role checks if needed.
+
+5. Fix redirect after login
+After successful login and active profile:
+- super_admin should redirect to /dashboard
+- it_admin should redirect to /dashboard
+- it_agent should redirect to /dashboard
+- end_user should redirect to /dashboard or /my-assets if available
+
+Do not redirect back to /login after successful login.
+
+6. Fix route guard
+The protected route should wait until auth loading is complete before redirecting.
+If loading is true, show loading screen.
+Only redirect to /login when:
+- loading is false
+- no session exists
+
+7. Add /supabase-check improvements
+The /supabase-check page should show:
+- Supabase URL present: yes/no
+- Supabase anon key present: yes/no
+- Current session: yes/no
+- Current user email
+- Profile exists: yes/no
+- Profile role
+- Profile status
+- Any profile fetch error
+
+8. Do not hardcode credentials.
+9. Do not add demo users.
+10. Do not remove existing pages.
+11. Do not break Render deployment.
+
+After fixing, test login in Replit preview and tell me exactly:
+- Whether signIn succeeds
+- Whether profile is found
+- Which route it redirects to
