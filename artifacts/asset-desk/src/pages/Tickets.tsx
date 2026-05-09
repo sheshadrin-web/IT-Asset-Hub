@@ -58,13 +58,12 @@ export default function Tickets() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [deleteTarget, setDeleteTarget]   = useState<string | null>(null);
 
-  // Bulk selection
   const [selected, setSelected]           = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const isEndUser = currentUser?.role === "end_user";
-  const isAdmin   = currentUser?.role === "super_admin";
-  const isAgent   = currentUser?.role === "agent";
+  const isAdmin   = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+  const isAgent   = currentUser?.role === "it_agent";
 
   const base = isEndUser
     ? tickets.filter((t) => t.raisedBy === currentUser?.name)
@@ -91,7 +90,6 @@ export default function Tickets() {
     closed:     base.filter((t) => t.status === "Closed").length,
   };
 
-  // Selection helpers
   const allFilteredIds  = filtered.map((t) => t.ticketId);
   const allSelected     = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
   const someSelected    = allFilteredIds.some((id) => selected.has(id)) && !allSelected;
@@ -108,32 +106,42 @@ export default function Tickets() {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
-  // Actions
-  const handleAssignToSelf = (ticketId: string) => {
+  const handleAssignToSelf = async (ticketId: string) => {
     if (!currentUser) return;
-    updateTicket(ticketId, { assignedAgent: currentUser.name, status: "Assigned" });
-    toast({ title: "Ticket assigned to you", description: ticketId });
+    try {
+      await updateTicket(ticketId, { assignedAgent: currentUser.name, status: "Assigned" });
+      toast({ title: "Ticket assigned to you", description: ticketId });
+    } catch {
+      toast({ title: "Failed to assign", variant: "destructive" });
+    }
   };
 
-  const handleDeleteSingle = (ticketId: string) => {
-    deleteTicket(ticketId);
-    setDeleteTarget(null);
-    toast({ title: "Ticket deleted", description: ticketId });
+  const handleDeleteSingle = async (ticketId: string) => {
+    try {
+      await deleteTicket(ticketId);
+      setDeleteTarget(null);
+      toast({ title: "Ticket deleted", description: ticketId });
+    } catch {
+      toast({ title: "Failed to delete", variant: "destructive" });
+    }
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     const ids = [...selected].filter((id) => allFilteredIds.includes(id));
-    deleteTickets(ids);
-    setSelected(new Set());
-    setBulkDeleteOpen(false);
-    toast({ title: `${ids.length} ticket${ids.length !== 1 ? "s" : ""} deleted` });
+    try {
+      await deleteTickets(ids);
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+      toast({ title: `${ids.length} ticket${ids.length !== 1 ? "s" : ""} deleted` });
+    } catch {
+      toast({ title: "Failed to delete tickets", variant: "destructive" });
+    }
   };
 
   const colSpan = isAdmin ? 10 : 9;
 
   return (
     <div className="space-y-5 pb-20">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground">
@@ -150,7 +158,6 @@ export default function Tickets() {
         </Link>
       </div>
 
-      {/* Status chips */}
       <div className="flex flex-wrap gap-2">
         {[
           { label: "Open",        val: counts.open,       color: "bg-blue-50 text-blue-700 border-blue-200" },
@@ -168,7 +175,6 @@ export default function Tickets() {
         ))}
       </div>
 
-      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -217,7 +223,6 @@ export default function Tickets() {
         </CardContent>
       </Card>
 
-      {/* Table */}
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -261,7 +266,6 @@ export default function Tickets() {
                       )}
                       data-testid={`row-ticket-${ticket.ticketId}`}
                     >
-                      {/* Row checkbox */}
                       {isAdmin && (
                         <td className="w-10 px-3 py-3">
                           <Checkbox
@@ -271,13 +275,11 @@ export default function Tickets() {
                           />
                         </td>
                       )}
-                      {/* Ticket ID */}
                       <td className="px-4 py-3">
                         <Link href={`/tickets/${ticket.ticketId}`} className="font-semibold text-primary hover:underline">
                           {ticket.ticketId}
                         </Link>
                       </td>
-                      {/* Raised By */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Avatar className="h-6 w-6 flex-shrink-0">
@@ -288,7 +290,6 @@ export default function Tickets() {
                           <span className="text-sm text-foreground">{ticket.raisedBy}</span>
                         </div>
                       </td>
-                      {/* Asset ID */}
                       <td className="px-4 py-3">
                         {ticket.assetId !== "N/A" ? (
                           <Link href={`/assets/${ticket.assetId}`} className="text-primary hover:underline text-xs font-medium">
@@ -298,33 +299,27 @@ export default function Tickets() {
                           <span className="text-muted-foreground text-xs">N/A</span>
                         )}
                       </td>
-                      {/* Category */}
                       <td className="px-4 py-3">
                         <div className="text-foreground text-sm leading-tight">{ticket.category}</div>
                         <div className="text-xs text-muted-foreground">{ticket.subcategory}</div>
                       </td>
-                      {/* Priority */}
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[ticket.priority])}>
                           <span className={cn("h-1.5 w-1.5 rounded-full", PRIORITY_DOT[ticket.priority])} />
                           {ticket.priority}
                         </span>
                       </td>
-                      {/* Status */}
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[ticket.status])}>
                           {ticket.status}
                         </span>
                       </td>
-                      {/* Agent */}
                       <td className="px-4 py-3 text-sm">
                         {ticket.assignedAgent
                           ? <span className="text-foreground">{ticket.assignedAgent}</span>
                           : <span className="text-muted-foreground/60 text-xs">Unassigned</span>}
                       </td>
-                      {/* Created */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.createdDate}</td>
-                      {/* Actions */}
                       <td className="px-4 py-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -338,7 +333,7 @@ export default function Tickets() {
                                 <Eye className="h-3.5 w-3.5 text-muted-foreground" /> View Details
                               </Link>
                             </DropdownMenuItem>
-                            {isAgent && !ticket.assignedAgent && (
+                            {(isAgent || isAdmin) && !ticket.assignedAgent && (
                               <DropdownMenuItem onClick={() => handleAssignToSelf(ticket.ticketId)} className="flex items-center gap-2 cursor-pointer">
                                 <UserCheck className="h-3.5 w-3.5 text-blue-500" /> Assign to Me
                               </DropdownMenuItem>
@@ -374,11 +369,10 @@ export default function Tickets() {
         </CardContent>
       </Card>
 
-      {/* Floating bulk action bar */}
       {isAdmin && selectedCount > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-popover shadow-xl px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <Checkbox checked readOnly className="pointer-events-none" />
+            <Checkbox checked className="pointer-events-none" />
             <span>{selectedCount} ticket{selectedCount !== 1 ? "s" : ""} selected</span>
           </div>
           <div className="h-4 w-px bg-border" />
@@ -391,7 +385,6 @@ export default function Tickets() {
         </div>
       )}
 
-      {/* Single delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -412,7 +405,6 @@ export default function Tickets() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Bulk delete confirm */}
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -1,58 +1,155 @@
-import { createContext, useContext, useState, ReactNode } from "react";
-import { User, UserRole, mockUsers } from "@/data/mockData";
+import {
+  createContext, useContext, useState, useEffect, useCallback, ReactNode,
+} from "react";
+import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import {
+  Profile, CurrentUser, UserRole, profileToCurrentUser,
+} from "@/data/mockData";
 
-// Credentials are validated here — not stored in mockData
-const CREDENTIALS: Record<string, string> = {
-  "help.desk@mileseducation.com": "Miles@123#",
-};
-
+// ─── Context shape ────────────────────────────────────────────────────────────
 interface AuthContextType {
-  currentUser: User | null;
-  login: (role: UserRole) => void;
-  loginWithCredentials: (email: string, password: string) => boolean;
-  loginByEmail: (email: string) => boolean;
-  logout: () => void;
+  session:         Session | null;
+  supabaseUser:    SupabaseUser | null;
+  profile:         Profile | null;
+  currentUser:     CurrentUser | null;   // backward-compat derived from profile
+  role:            UserRole | null;
+  loading:         boolean;
+  configError:     boolean;             // true if env vars are missing
+  signIn:          (email: string, password: string) => Promise<{ error: string | null }>;
+  signOut:         () => Promise<void>;
+  refreshProfile:  () => Promise<void>;
   isAuthenticated: boolean;
-  hasRole: (...roles: UserRole[]) => boolean;
+  hasRole:         (...roles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [session,      setSession]      = useState<Session | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
+  const [profile,      setProfile]      = useState<Profile | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [configError,  setConfigError]  = useState(false);
 
-  const login = (role: UserRole) => {
-    const user = mockUsers.find((u) => u.role === role);
-    if (user) setCurrentUser(user);
+  // ── Fetch profile by auth user id ──────────────────────────────────────────
+  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .single();
+    if (error || !data) return null;
+    return data as Profile;
+  }, []);
+
+  // ── On mount: check env vars + restore session ────────────────────────────
+  useEffect(() => {
+    if (!supabaseConfigured) {
+      setConfigError(true);
+      setLoading(false);
+      return;
+    }
+
+    // Restore existing session
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      if (s) {
+        setSession(s);
+        setSupabaseUser(s.user);
+        const p = await fetchProfile(s.user.id);
+        if (p && p.status === "Active") setProfile(p);
+      }
+      setLoading(false);
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, s) => {
+        if (s) {
+          setSession(s);
+          setSupabaseUser(s.user);
+          // Profile is already set by signIn; only refresh on token refresh
+        } else {
+          setSession(null);
+          setSupabaseUser(null);
+          setProfile(null);
+        }
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
+
+  // ── Sign in ────────────────────────────────────────────────────────────────
+  const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
+    if (!supabaseConfigured) {
+      return { error: "Supabase is not configured. Please contact your IT Admin." };
+    }
+    setLoading(true);
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (authError || !authData.user) {
+      setLoading(false);
+      return { error: "Invalid email or password. Please try again." };
+    }
+
+    // Fetch profile
+    const p = await fetchProfile(authData.user.id);
+
+    if (!p) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      return { error: "Your account profile is not configured. Please contact IT Admin." };
+    }
+
+    if (p.status === "Inactive") {
+      await supabase.auth.signOut();
+      setLoading(false);
+      return { error: "Your account is inactive. Please contact IT Admin." };
+    }
+
+    setSession(authData.session);
+    setSupabaseUser(authData.user);
+    setProfile(p);
+    setLoading(false);
+    return { error: null };
   };
 
-  const loginWithCredentials = (email: string, password: string): boolean => {
-    const normalised = email.trim().toLowerCase();
-    const expectedPw = CREDENTIALS[normalised];
-    if (!expectedPw || password !== expectedPw) return false;
-    const user = mockUsers.find((u) => u.email.toLowerCase() === normalised);
-    if (user) { setCurrentUser(user); return true; }
-    return false;
+  // ── Sign out ───────────────────────────────────────────────────────────────
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setSupabaseUser(null);
+    setProfile(null);
   };
 
-  // Kept for any internal use but no longer exposed on the login page
-  const loginByEmail = (email: string): boolean => {
-    const user = mockUsers.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (user) { setCurrentUser(user); return true; }
-    return false;
+  // ── Refresh profile ────────────────────────────────────────────────────────
+  const refreshProfile = async () => {
+    if (!supabaseUser) return;
+    const p = await fetchProfile(supabaseUser.id);
+    if (p) setProfile(p);
   };
 
-  const logout = () => setCurrentUser(null);
+  // ── Derived values ─────────────────────────────────────────────────────────
+  const currentUser: CurrentUser | null = profile ? profileToCurrentUser(profile) : null;
+  const role = profile?.role ?? null;
+  const isAuthenticated = !!session && !!profile;
 
   const hasRole = (...roles: UserRole[]): boolean => {
-    if (!currentUser) return false;
-    return roles.includes(currentUser.role);
+    if (!role) return false;
+    return roles.includes(role);
   };
 
   return (
-    <AuthContext.Provider
-      value={{ currentUser, login, loginWithCredentials, loginByEmail, logout, isAuthenticated: currentUser !== null, hasRole }}
-    >
+    <AuthContext.Provider value={{
+      session, supabaseUser, profile, currentUser, role, loading, configError,
+      signIn, signOut, refreshProfile,
+      isAuthenticated, hasRole,
+    }}>
       {children}
     </AuthContext.Provider>
   );

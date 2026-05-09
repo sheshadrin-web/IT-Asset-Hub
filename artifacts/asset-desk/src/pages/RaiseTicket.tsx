@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { ArrowLeft, Paperclip, Upload, AlertCircle, AlertTriangle, Info, Zap } from "lucide-react";
+import { ArrowLeft, AlertCircle, AlertTriangle, Info, Zap } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,76 +28,35 @@ const schema = z.object({
   priority:    z.enum(["Low", "Medium", "High", "Critical"]),
   description: z.string().min(15, "Please provide at least 15 characters describing the issue"),
 });
-
 type FormValues = z.infer<typeof schema>;
 
 const PRIORITY_OPTIONS: {
-  value: TicketPriority;
-  label: string;
-  desc: string;
-  icon: React.ReactNode;
-  color: string;
-  active: string;
+  value: TicketPriority; label: string; desc: string;
+  icon: React.ReactNode; color: string; active: string;
 }[] = [
-  {
-    value:  "Low",
-    label:  "Low",
-    desc:   "Non-urgent, can wait a few days",
-    icon:   <Info className="h-4 w-4" />,
-    color:  "border-gray-200 text-gray-500 hover:border-gray-300",
-    active: "border-gray-400 bg-gray-50 text-gray-700 ring-1 ring-gray-400",
-  },
-  {
-    value:  "Medium",
-    label:  "Medium",
-    desc:   "Affects work but has a workaround",
-    icon:   <AlertCircle className="h-4 w-4" />,
-    color:  "border-blue-200 text-blue-500 hover:border-blue-300",
-    active: "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500",
-  },
-  {
-    value:  "High",
-    label:  "High",
-    desc:   "Blocking work — urgent attention needed",
-    icon:   <AlertTriangle className="h-4 w-4" />,
-    color:  "border-amber-200 text-amber-500 hover:border-amber-300",
-    active: "border-amber-500 bg-amber-50 text-amber-700 ring-1 ring-amber-500",
-  },
-  {
-    value:  "Critical",
-    label:  "Critical",
-    desc:   "Complete outage — immediate action required",
-    icon:   <Zap className="h-4 w-4" />,
-    color:  "border-red-200 text-red-400 hover:border-red-300",
-    active: "border-red-500 bg-red-50 text-red-700 ring-1 ring-red-500",
-  },
+  { value: "Low",      label: "Low",      desc: "Non-urgent, can wait a few days",              icon: <Info className="h-4 w-4" />,          color: "border-gray-200 text-gray-500 hover:border-gray-300",  active: "border-gray-400 bg-gray-50 text-gray-700 ring-1 ring-gray-400" },
+  { value: "Medium",   label: "Medium",   desc: "Affects work but has a workaround",             icon: <AlertCircle className="h-4 w-4" />,    color: "border-blue-200 text-blue-500 hover:border-blue-300",   active: "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500" },
+  { value: "High",     label: "High",     desc: "Blocking work — urgent attention needed",       icon: <AlertTriangle className="h-4 w-4" />,  color: "border-amber-200 text-amber-500 hover:border-amber-300",active: "border-amber-500 bg-amber-50 text-amber-700 ring-1 ring-amber-500" },
+  { value: "Critical", label: "Critical", desc: "Complete outage — immediate action required",   icon: <Zap className="h-4 w-4" />,            color: "border-red-200 text-red-400 hover:border-red-300",      active: "border-red-500 bg-red-50 text-red-700 ring-1 ring-red-500" },
 ];
 
 export default function RaiseTicket() {
-  const { currentUser } = useAuth();
-  const { assets } = useAssets();
-  const { addTicket } = useTickets();
-  const [, setLocation] = useLocation();
-  const { toast } = useToast();
+  const { currentUser }  = useAuth();
+  const { assets }       = useAssets();
+  const { addTicket }    = useTickets();
+  const [, setLocation]  = useLocation();
+  const { toast }        = useToast();
   const [subcategories, setSubcategories] = useState<string[]>([]);
-  const [attachmentName, setAttachmentName] = useState<string | null>(null);
+  const [submitting, setSubmitting]       = useState(false);
 
-  const isEndUser = currentUser?.role === "end_user";
-
-  // End users only see their assigned assets; admins/agents see all
+  const isEndUser      = currentUser?.role === "end_user";
   const availableAssets = isEndUser
-    ? assets.filter((a) => a.assignedTo === currentUser?.name)
+    ? assets.filter(a => a.assignedTo === currentUser?.name)
     : assets;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      assetId:     "",
-      category:    "",
-      subcategory: "",
-      priority:    "Medium",
-      description: "",
-    },
+    defaultValues: { assetId: "", category: "", subcategory: "", priority: "Medium", description: "" },
   });
 
   const handleCategoryChange = (cat: string) => {
@@ -106,33 +65,41 @@ export default function RaiseTicket() {
     setSubcategories(TICKET_CATEGORIES[cat] ?? []);
   };
 
-  const onSubmit = (values: FormValues) => {
+  const onSubmit = async (values: FormValues) => {
     if (!currentUser) return;
-    const ticket = addTicket({
-      raisedBy:    currentUser.name,
-      assetId:     values.assetId,
-      category:    values.category,
-      subcategory: values.subcategory,
-      priority:    values.priority,
-      description: values.description,
-    });
-    toast({
-      title: "Ticket submitted",
-      description: `${ticket.ticketId} has been raised. An agent will be assigned shortly.`,
-    });
-    setLocation(`/tickets/${ticket.ticketId}`);
+    setSubmitting(true);
+    try {
+      const ticket = await addTicket({
+        raisedBy:      currentUser.name,
+        employeeEmail: currentUser.email,
+        assetId:       values.assetId,
+        category:      values.category,
+        subcategory:   values.subcategory,
+        priority:      values.priority,
+        description:   values.description,
+      });
+      toast({
+        title:       "Ticket submitted",
+        description: `${ticket.ticketId} has been raised. IT team will review it shortly.`,
+      });
+      setLocation(`/tickets/${ticket.ticketId}`);
+    } catch (err) {
+      toast({
+        title:       "Failed to submit ticket",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant:     "destructive",
+      });
+      setSubmitting(false);
+    }
   };
 
   const watchedPriority = form.watch("priority");
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/tickets">
-          <Button variant="ghost" size="icon" data-testid="button-back">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          <Button variant="ghost" size="icon" data-testid="button-back"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
         <div>
           <h1 className="text-xl font-bold text-foreground">Raise a Ticket</h1>
@@ -148,23 +115,19 @@ export default function RaiseTicket() {
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
 
-              {/* Raised By (read-only) */}
               <div>
                 <label className="text-sm font-medium text-foreground block mb-1.5">Raised By</label>
                 <Input value={currentUser?.name ?? ""} disabled data-testid="input-raised-by" />
               </div>
 
-              {/* Section: Asset & Category */}
               <div className="space-y-4">
                 <div className="border-b border-border pb-2">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Asset & Category</span>
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Asset &amp; Category</span>
                 </div>
 
                 <FormField control={form.control} name="assetId" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      Asset {isEndUser && <span className="text-xs text-muted-foreground font-normal">(your assigned assets)</span>}
-                    </FormLabel>
+                    <FormLabel>Asset {isEndUser && <span className="text-xs text-muted-foreground font-normal">(your assigned assets)</span>}</FormLabel>
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger data-testid="select-asset-id">
@@ -173,7 +136,7 @@ export default function RaiseTicket() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="N/A">N/A — New request (no asset)</SelectItem>
-                        {availableAssets.map((a) => (
+                        {availableAssets.map(a => (
                           <SelectItem key={a.assetId} value={a.assetId}>
                             <span className="flex items-center gap-2">
                               <span className="font-mono text-xs text-muted-foreground">{a.assetId}</span>
@@ -196,12 +159,10 @@ export default function RaiseTicket() {
                       <FormLabel>Category</FormLabel>
                       <Select value={field.value} onValueChange={handleCategoryChange}>
                         <FormControl>
-                          <SelectTrigger data-testid="select-category">
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
+                          <SelectTrigger data-testid="select-category"><SelectValue placeholder="Select category" /></SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {Object.keys(TICKET_CATEGORIES).map((cat) => (
+                          {Object.keys(TICKET_CATEGORIES).map(cat => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                           ))}
                         </SelectContent>
@@ -213,20 +174,14 @@ export default function RaiseTicket() {
                   <FormField control={form.control} name="subcategory" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Subcategory</FormLabel>
-                      <Select
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        disabled={subcategories.length === 0}
-                      >
+                      <Select value={field.value} onValueChange={field.onChange} disabled={subcategories.length === 0}>
                         <FormControl>
                           <SelectTrigger data-testid="select-subcategory">
                             <SelectValue placeholder={subcategories.length === 0 ? "Select category first" : "Select subcategory"} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {subcategories.map((sub) => (
-                            <SelectItem key={sub} value={sub}>{sub}</SelectItem>
-                          ))}
+                          {subcategories.map(sub => <SelectItem key={sub} value={sub}>{sub}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -235,7 +190,6 @@ export default function RaiseTicket() {
                 </div>
               </div>
 
-              {/* Section: Priority */}
               <div className="space-y-3">
                 <div className="border-b border-border pb-2">
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Priority</span>
@@ -243,7 +197,7 @@ export default function RaiseTicket() {
                 <FormField control={form.control} name="priority" render={({ field }) => (
                   <FormItem>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {PRIORITY_OPTIONS.map((opt) => (
+                      {PRIORITY_OPTIONS.map(opt => (
                         <button
                           key={opt.value}
                           type="button"
@@ -265,7 +219,6 @@ export default function RaiseTicket() {
                 )} />
               </div>
 
-              {/* Section: Description */}
               <div className="space-y-3">
                 <div className="border-b border-border pb-2">
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Description</span>
@@ -275,8 +228,7 @@ export default function RaiseTicket() {
                     <FormLabel>Describe the issue <span className="text-destructive">*</span></FormLabel>
                     <FormControl>
                       <Textarea
-                        {...field}
-                        rows={5}
+                        {...field} rows={5}
                         placeholder="Describe the problem in as much detail as possible. Include when it started, what you've already tried, and the impact on your work."
                         data-testid="input-description"
                       />
@@ -286,51 +238,19 @@ export default function RaiseTicket() {
                 )} />
               </div>
 
-              {/* Section: Attachment */}
-              <div className="space-y-3">
-                <div className="border-b border-border pb-2">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Attachment (optional)</span>
-                </div>
-                <div
-                  className="border-2 border-dashed border-border rounded-xl p-6 text-center cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-all"
-                  data-testid="attachment-placeholder"
-                  onClick={() => {
-                    setAttachmentName("screenshot_2024.png");
-                    toast({ title: "File selected", description: "screenshot_2024.png (demo)" });
-                  }}
-                >
-                  {attachmentName ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <Paperclip className="h-6 w-6 text-primary" />
-                      <p className="text-sm font-medium text-foreground">{attachmentName}</p>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setAttachmentName(null); }}
-                        className="text-xs text-muted-foreground hover:text-destructive"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <Upload className="h-6 w-6 text-muted-foreground" />
-                      <p className="text-sm font-medium text-foreground">Click to attach a file</p>
-                      <p className="text-xs text-muted-foreground">PNG, JPG, PDF up to 10 MB</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-border">
-                <Button type="button" variant="outline" onClick={() => setLocation("/tickets")}>
+                <Button type="button" variant="outline" onClick={() => setLocation("/tickets")} disabled={submitting}>
                   Cancel
                 </Button>
-                <Button type="submit" data-testid="button-submit-ticket">
-                  Submit Ticket
+                <Button type="submit" disabled={submitting} data-testid="button-submit-ticket">
+                  {submitting ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      Submitting…
+                    </span>
+                  ) : "Submit Ticket"}
                 </Button>
               </div>
-
             </form>
           </Form>
         </CardContent>

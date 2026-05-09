@@ -1,0 +1,320 @@
+Connect this IT Asset Hub app to Supabase Auth and Supabase Database.
+
+Important:
+This is an internal IT Asset Management app for Miles Education Pvt Ltd.
+Do not add demo users.
+Do not add demo credentials.
+Do not add demo assets.
+Do not add demo tickets.
+Do not hardcode login credentials.
+Do not use local mock login for production.
+Do not expose Supabase service role key.
+Keep existing UI, pages, routing, and layout stable.
+
+Use Supabase for:
+1. Email/password login
+2. User session management
+3. Logout
+4. Role-based access
+5. Profiles table
+6. Assets table
+7. Tickets table
+8. Asset assignments
+9. Asset returns
+
+Environment variables:
+Use Vite environment variables:
+
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+
+Create a Supabase client file:
+
+src/lib/supabaseClient.ts
+
+Install package if missing:
+
+@supabase/supabase-js
+
+Login requirements:
+1. Replace current frontend-only login with Supabase email/password login.
+2. Use supabase.auth.signInWithPassword().
+3. Email field should accept real user email.
+4. Password field should accept real password.
+5. Show loading state while login is processing.
+6. Show clear error message if login fails.
+7. After login, fetch user profile from public.profiles table.
+8. Use the profile role to redirect the user.
+9. If profile does not exist, show:
+   “Your account profile is not configured. Please contact IT Admin.”
+10. If profile status is inactive, show:
+   “Your account is inactive. Please contact IT Admin.”
+11. Do not allow inactive users to access the app.
+
+Roles:
+- super_admin
+- it_admin
+- it_agent
+- end_user
+
+Role access:
+1. super_admin can access everything.
+2. it_admin can manage assets, assignments, returns, tickets, reports, and users except Super Admin deletion.
+3. it_agent can access assigned tickets, open unassigned tickets, and asset handover/return tasks.
+4. end_user can only access their own assets, raise tickets, and view their own tickets.
+
+Protected routes:
+Protect all private pages:
+- Dashboard
+- Assets
+- Asset Detail
+- Add/Edit Asset
+- Assignments
+- Returns
+- Tickets
+- Ticket Detail
+- Raise Ticket
+- Users
+- Agents
+- Reports
+- Warranty Tracking
+- Settings
+- Audit Logs
+- Profile
+
+If user is not logged in:
+Redirect to /login.
+
+If user does not have permission:
+Show:
+“You do not have permission to access this page.”
+
+Auth state:
+1. On app load, check Supabase session.
+2. Keep user logged in if session exists.
+3. Listen to auth state changes.
+4. Store current user and profile in AuthContext.
+5. Add logout using supabase.auth.signOut().
+6. After logout, redirect to /login.
+
+Create or update AuthContext:
+The app should have a central auth context that provides:
+- session
+- user
+- profile
+- role
+- loading
+- signIn
+- signOut
+- refreshProfile
+- isAuthenticated
+- hasRole
+- hasPermission
+
+Database tables to use:
+- profiles
+- assets
+- tickets
+- asset_assignments
+- asset_returns
+
+Profiles table fields expected:
+- id
+- full_name
+- email
+- role
+- department
+- location
+- status
+- created_at
+- updated_at
+
+Assets table fields expected:
+- id
+- asset_id
+- asset_type
+- brand
+- model
+- serial_number
+- imei_1
+- imei_2
+- purchase_date
+- warranty_end_date
+- status
+- assigned_to
+- assigned_email
+- department
+- location
+- remarks
+- created_at
+- updated_at
+
+Tickets table fields expected:
+- id
+- ticket_id
+- raised_by
+- employee_email
+- asset_id
+- category
+- subcategory
+- priority
+- status
+- assigned_agent
+- description
+- resolution_note
+- created_at
+- updated_at
+
+Asset assignments table fields expected:
+- id
+- asset_id
+- employee_id
+- employee_email
+- assigned_by
+- assigned_date
+- expected_return_date
+- accessories_given
+- condition_while_issuing
+- handover_notes
+- created_at
+
+Asset returns table fields expected:
+- id
+- asset_id
+- returned_by
+- received_by
+- returned_date
+- condition_while_returning
+- accessories_returned
+- missing_accessories
+- damage_notes
+- final_status
+- created_at
+
+Dashboard:
+1. Remove mock dashboard data completely.
+2. Fetch counts from Supabase tables.
+3. Total assets = count from assets table.
+4. Assigned assets = assets where status is assigned.
+5. Available assets = assets where status is available.
+6. Under repair = assets where status is under_repair or Under Repair.
+7. Open tickets = tickets where status is open.
+8. Critical tickets = tickets where priority is critical.
+9. If there is no data, show 0 counts and proper empty states.
+
+Assets page:
+1. Fetch assets from Supabase assets table.
+2. Super Admin and IT Admin can create, update, and manage assets.
+3. IT Agent can view assets if allowed.
+4. End User can view only assets assigned to them.
+5. Keep search and filters.
+6. Show empty state:
+   “No assets added yet.”
+
+Add/Edit Asset:
+1. Insert and update data in Supabase assets table.
+2. Validate required fields.
+3. Show success toast after save.
+4. Show error toast if Supabase insert/update fails.
+
+Tickets page:
+1. Fetch tickets from Supabase tickets table.
+2. Super Admin and IT Admin can view all tickets.
+3. IT Agent can view assigned tickets and unassigned open tickets.
+4. End User can view only tickets raised by them.
+5. Show empty state:
+   “No tickets raised yet.”
+
+Raise Ticket:
+1. Insert ticket into Supabase tickets table.
+2. raised_by should be current authenticated user id.
+3. employee_email should be current user email.
+4. ticket_id should be generated automatically in frontend if database function does not exist.
+   Example format: TKT-0001, TKT-0002, etc.
+5. Default status should be open.
+6. Show success message:
+   “Your ticket has been raised successfully. IT team will review it.”
+
+User Management:
+1. Use profiles table.
+2. Super Admin can view and manage users.
+3. IT Admin can view users but should not delete or modify Super Admin.
+4. Do not create auth users directly from frontend unless using a safe approved flow.
+5. For now, user creation can add profile records only if corresponding auth user exists.
+6. Show clear message if auth user creation requires Supabase Admin/API backend later.
+
+Agent Management:
+1. Use profiles table where role = it_agent.
+2. Super Admin can view agents.
+3. Super Admin can activate/deactivate agents.
+4. Do not allow End User or IT Agent to access Agent Management.
+
+Assignments:
+1. Insert assignment records into asset_assignments table.
+2. Update selected asset status to assigned.
+3. Update assigned_to and assigned_email.
+4. Show assignment history from Supabase.
+
+Returns:
+1. Insert return records into asset_returns table.
+2. Update asset status based on final_status.
+3. Show return history from Supabase.
+
+Reports:
+1. Calculate reports from Supabase data.
+2. Do not use hardcoded fake chart data.
+3. Show empty states if no data exists.
+
+Settings:
+1. Keep existing UI.
+2. Only Super Admin can access Settings.
+3. Do not hardcode admin email.
+
+Security:
+1. Do not expose service role key.
+2. Only use VITE_SUPABASE_ANON_KEY in frontend.
+3. Keep .env out of GitHub.
+4. Add .env to .gitignore if missing.
+5. Use Supabase Row Level Security.
+6. Add comments in code explaining where RLS policies must be configured.
+
+Also create a file named:
+
+SUPABASE_SETUP.md
+
+Include beginner-friendly setup instructions:
+1. Create Supabase account.
+2. Create new project.
+3. Enable Email provider.
+4. Get Project URL and anon key.
+5. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Replit Secrets.
+6. Add the same environment variables in Render.
+7. Create database tables.
+8. Enable Row Level Security.
+9. Create first user in Supabase Auth.
+10. Insert first user profile as super_admin.
+11. Test login.
+12. Deploy to Render.
+
+Add SQL schema in SUPABASE_SETUP.md for these tables:
+- profiles
+- assets
+- tickets
+- asset_assignments
+- asset_returns
+
+Add basic RLS policies in SUPABASE_SETUP.md:
+- Users can view own profile.
+- Super Admin can manage all profiles.
+- Admins can manage assets.
+- End Users can view assigned assets only.
+- Users can create own tickets.
+- Users can view own tickets.
+- Agents can view assigned tickets.
+- Admins can view all tickets.
+
+Do not remove existing working features.
+Do not break Render deployment.
+Do not break routing.
+Do not remove existing pages.
+Keep app beginner-friendly and production-ready for internal pilot use.

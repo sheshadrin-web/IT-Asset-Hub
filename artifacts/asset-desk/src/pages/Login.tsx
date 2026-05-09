@@ -5,20 +5,18 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 
 export default function Login() {
-  const { loginWithCredentials } = useAuth();
+  const { signIn, configError } = useAuth();
   const [, setLocation] = useLocation();
 
-  const [email, setEmail]             = useState("");
-  const [password, setPassword]       = useState("");
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe]   = useState(false);
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState("");
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -26,20 +24,18 @@ export default function Login() {
     if (!password)     { setError("Please enter your password.");      return; }
 
     setLoading(true);
-    setTimeout(() => {
-      const ok = loginWithCredentials(email.trim(), password);
-      setLoading(false);
-      if (ok) {
-        setLocation("/");
-      } else {
-        setError("Invalid email or password. Please try again.");
-      }
-    }, 350);
+    const { error: signInError } = await signIn(email.trim(), password);
+    setLoading(false);
+
+    if (signInError) {
+      setError(signInError);
+    } else {
+      setLocation("/");
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      {/* Background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-blue-200/40 blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-indigo-200/40 blur-3xl" />
@@ -68,12 +64,16 @@ export default function Login() {
               <p className="text-sm text-slate-500 mt-0.5">Sign in with your helpdesk credentials</p>
             </div>
 
+            {configError && (
+              <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                <strong>Setup required:</strong> Supabase environment variables are not configured.
+                See <strong>SUPABASE_SETUP.md</strong> for setup instructions.
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email */}
               <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-sm font-medium text-slate-700">
-                  Email address
-                </Label>
+                <Label htmlFor="email" className="text-sm font-medium text-slate-700">Email address</Label>
                 <Input
                   id="email"
                   type="email"
@@ -84,19 +84,18 @@ export default function Login() {
                   data-testid="input-email"
                   autoComplete="email"
                   autoFocus
+                  disabled={loading}
                 />
               </div>
 
-              {/* Password */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-sm font-medium text-slate-700">
-                    Password
-                  </Label>
+                  <Label htmlFor="password" className="text-sm font-medium text-slate-700">Password</Label>
                   <button
                     type="button"
                     className="text-xs text-blue-600 hover:text-blue-700 font-medium hover:underline"
                     data-testid="link-forgot-password"
+                    onClick={() => setError("Please contact your IT Admin to reset your password.")}
                   >
                     Forgot password?
                   </button>
@@ -111,10 +110,11 @@ export default function Login() {
                     className="h-10 border-slate-300 bg-slate-50 pr-10 focus:border-blue-500"
                     data-testid="input-password"
                     autoComplete="current-password"
+                    disabled={loading}
                   />
                   <button
                     type="button"
-                    onClick={() => setShowPassword((v) => !v)}
+                    onClick={() => setShowPassword(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                     data-testid="button-toggle-password"
                   >
@@ -123,21 +123,6 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* Remember me */}
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="remember"
-                  checked={rememberMe}
-                  onCheckedChange={(v) => setRememberMe(!!v)}
-                  data-testid="checkbox-remember"
-                  className="border-slate-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-                />
-                <Label htmlFor="remember" className="text-sm text-slate-600 cursor-pointer font-normal">
-                  Remember me for 30 days
-                </Label>
-              </div>
-
-              {/* Error */}
               {error && (
                 <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {error}
@@ -147,7 +132,7 @@ export default function Login() {
               <Button
                 type="submit"
                 className="w-full h-10 bg-blue-700 hover:bg-blue-800 text-white font-semibold shadow-sm"
-                disabled={loading}
+                disabled={loading || configError}
                 data-testid="button-login-submit"
               >
                 {loading ? (
@@ -160,7 +145,6 @@ export default function Login() {
             </form>
           </div>
 
-          {/* Footer */}
           <div className="bg-slate-50 border-t border-slate-100 px-8 py-3">
             <p className="text-xs text-slate-400 text-center">
               © {new Date().getFullYear()} Miles Education Pvt Ltd — IT Helpdesk System

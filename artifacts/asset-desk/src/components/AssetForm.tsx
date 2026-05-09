@@ -45,6 +45,7 @@ interface AssetFormProps {
   onSubmit: (values: AssetFormValues) => void;
   onCancel: () => void;
   isSubmitting?: boolean;
+  disabled?: boolean;
   submitLabel?: string;
 }
 
@@ -53,6 +54,7 @@ export default function AssetForm({
   onSubmit,
   onCancel,
   isSubmitting,
+  disabled,
   submitLabel = "Save Asset",
 }: AssetFormProps) {
   const form = useForm<AssetFormValues>({
@@ -253,7 +255,7 @@ export default function AssetForm({
           <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-asset">
             Cancel
           </Button>
-          <Button type="submit" disabled={isSubmitting} data-testid="button-save-asset">
+          <Button type="submit" disabled={isSubmitting || disabled} data-testid="button-save-asset">
             {isSubmitting ? "Saving…" : submitLabel}
           </Button>
         </div>

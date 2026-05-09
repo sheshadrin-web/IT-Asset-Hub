@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
-import { mockUsers, ROLE_LABELS, Asset, Ticket as TicketType, User } from "@/data/mockData";
+import { useUsers } from "@/context/UsersContext";
+import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 
 const tooltipStyle = {
@@ -34,7 +35,6 @@ function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; mes
   );
 }
 
-// ─── CSV export helpers ──────────────────────────────────────────────────────
 function downloadCsv(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -44,10 +44,10 @@ function downloadCsv(content: string, filename: string) {
 }
 
 function exportAssetsCsv(assets: Asset[]) {
-  const header = ["Asset ID","Type","Brand","Model","Serial Number","IMEI","Status","Assigned To","Department","Location","Purchase Date","Warranty End","Accessories","Remarks"];
+  const header = ["Asset ID","Type","Brand","Model","Serial Number","IMEI","Status","Assigned To","Assigned Email","Department","Location","Purchase Date","Warranty End","Accessories","Remarks"];
   const rows = assets.map((a) => [
     a.assetId, a.assetType, a.brand, a.model, a.serialNumber,
-    a.imeiNumber ?? "", a.status, a.assignedTo ?? "", a.department ?? "",
+    a.imeiNumber ?? "", a.status, a.assignedTo ?? "", a.assignedEmail ?? "", a.department ?? "",
     a.location, a.purchaseDate, a.warrantyEndDate, a.accessories ?? "", a.remarks ?? "",
   ]);
   const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
@@ -55,27 +55,27 @@ function exportAssetsCsv(assets: Asset[]) {
 }
 
 function exportTicketsCsv(tickets: TicketType[]) {
-  const header = ["Ticket ID","Raised By","Asset ID","Category","Subcategory","Priority","Status","Assigned Agent","Created Date","Updated Date","Description"];
+  const header = ["Ticket ID","Raised By","Employee Email","Asset ID","Category","Subcategory","Priority","Status","Assigned Agent","Created Date","Updated Date","Description"];
   const rows = tickets.map((t) => [
-    t.ticketId, t.raisedBy, t.assetId, t.category, t.subcategory,
+    t.ticketId, t.raisedBy, t.employeeEmail ?? "", t.assetId, t.category, t.subcategory,
     t.priority, t.status, t.assignedAgent, t.createdDate, t.updatedDate, t.description,
   ]);
   const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
   downloadCsv(csv, `tickets_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
-function exportUsersCsv(users: User[]) {
-  const header = ["User ID","Name","Email","Role","Department","Status","Assigned Assets"];
+function exportUsersCsv(users: Profile[]) {
+  const header = ["User ID","Name","Email","Role","Department","Location","Status"];
   const rows = users.map((u) => [
-    u.userId, u.name, u.email, ROLE_LABELS[u.role], u.department, u.status, String(u.assignedAssets ?? 0),
+    u.id, u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, u.status,
   ]);
   const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
   downloadCsv(csv, `users_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
-function exportSummaryCsv(assets: Asset[], tickets: TicketType[], users: User[]) {
-  const resolved  = tickets.filter((t) => t.status === "Resolved").length;
-  const resRate   = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "N/A";
+function exportSummaryCsv(assets: Asset[], tickets: TicketType[], users: Profile[]) {
+  const resolved = tickets.filter((t) => t.status === "Resolved").length;
+  const resRate  = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "N/A";
   const lines: string[] = [
     `"Miles Education — IT Helpdesk Full Report — ${new Date().toLocaleDateString()}"`,
     "",
@@ -93,7 +93,8 @@ function exportSummaryCsv(assets: Asset[], tickets: TicketType[], users: User[])
     "",
     '"=== USERS BY ROLE ==="',
     `"Super Admin","${users.filter((u) => u.role === "super_admin").length}"`,
-    `"IT Agent","${users.filter((u) => u.role === "agent").length}"`,
+    `"IT Admin","${users.filter((u) => u.role === "it_admin").length}"`,
+    `"IT Agent","${users.filter((u) => u.role === "it_agent").length}"`,
     `"End User","${users.filter((u) => u.role === "end_user").length}"`,
   ];
   downloadCsv(lines.join("\n"), `full_report_${new Date().toISOString().split("T")[0]}.csv`);
@@ -111,19 +112,17 @@ function ExportCardButton({ onClick, label }: { onClick: () => void; label: stri
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function Reports() {
-  const { toast }    = useToast();
-  const { assets }   = useAssets();
-  const { tickets }  = useTickets();
-  const users        = mockUsers;
+  const { toast }     = useToast();
+  const { assets }    = useAssets();
+  const { tickets }   = useTickets();
+  const { users }     = useUsers();
 
   const handleExport = (fn: () => void, label: string) => {
     fn();
     toast({ title: `${label} exported`, description: "CSV file downloaded to your device" });
   };
 
-  // ── Chart data ─────────────────────────────────────────────────────────────
   const assetsByType = [
     { name: "Laptop", count: assets.filter((a) => a.assetType === "Laptop").length },
     { name: "Mobile", count: assets.filter((a) => a.assetType === "Mobile").length },
@@ -157,23 +156,23 @@ export default function Reports() {
 
   const usersByRole = [
     { name: "Super Admin", count: users.filter((u) => u.role === "super_admin").length },
-    { name: "IT Agent",    count: users.filter((u) => u.role === "agent").length },
+    { name: "IT Admin",    count: users.filter((u) => u.role === "it_admin").length },
+    { name: "IT Agent",    count: users.filter((u) => u.role === "it_agent").length },
     { name: "End User",    count: users.filter((u) => u.role === "end_user").length },
   ];
 
-  const resolved  = tickets.filter((t) => t.status === "Resolved").length;
-  const resRate   = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "—";
+  const resolved = tickets.filter((t) => t.status === "Resolved").length;
+  const resRate  = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "—";
 
   const summaryCards = [
-    { label: "Total Assets",    value: assets.length,  icon: Monitor,     color: "text-blue-500",   bg: "bg-blue-500/10" },
-    { label: "Total Tickets",   value: tickets.length, icon: Ticket,      color: "text-purple-500", bg: "bg-purple-500/10" },
-    { label: "Total Users",     value: users.length,   icon: Users,       color: "text-emerald-500",bg: "bg-emerald-500/10" },
-    { label: "Resolution Rate", value: resRate,        icon: TrendingUp,  color: "text-amber-500",  bg: "bg-amber-500/10" },
+    { label: "Total Assets",    value: assets.length,  icon: Monitor,    color: "text-blue-500",    bg: "bg-blue-500/10" },
+    { label: "Total Tickets",   value: tickets.length, icon: Ticket,     color: "text-purple-500",  bg: "bg-purple-500/10" },
+    { label: "Total Users",     value: users.length,   icon: Users,      color: "text-emerald-500", bg: "bg-emerald-500/10" },
+    { label: "Resolution Rate", value: resRate,        icon: TrendingUp, color: "text-amber-500",   bg: "bg-amber-500/10" },
   ];
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground">Reports</h1>
@@ -203,7 +202,6 @@ export default function Reports() {
         </DropdownMenu>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {summaryCards.map((card) => {
           const Icon = card.icon;
@@ -222,7 +220,6 @@ export default function Reports() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Asset Status Breakdown */}
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">Asset Status Breakdown</CardTitle>
@@ -245,7 +242,6 @@ export default function Reports() {
           </CardContent>
         </Card>
 
-        {/* Tickets by Status */}
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">Tickets by Status</CardTitle>
@@ -267,7 +263,6 @@ export default function Reports() {
           </CardContent>
         </Card>
 
-        {/* Tickets by Category */}
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">Tickets by Category</CardTitle>
@@ -289,7 +284,6 @@ export default function Reports() {
           </CardContent>
         </Card>
 
-        {/* Tickets by Priority */}
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">Tickets by Priority</CardTitle>
@@ -314,7 +308,6 @@ export default function Reports() {
         </Card>
       </div>
 
-      {/* Asset & User breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">

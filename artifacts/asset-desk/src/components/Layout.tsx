@@ -12,54 +12,57 @@ import { cn } from "@/lib/utils";
 
 interface NavItem {
   label: string;
-  icon: React.ElementType;
-  href: string;
+  icon:  React.ElementType;
+  href:  string;
   roles: UserRole[];
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "agent", "end_user"] },
-  { label: "Assets",       icon: Monitor,         href: "/assets",      roles: ["super_admin", "agent"] },
-  { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "agent"] },
+  { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "it_admin", "it_agent", "end_user"] },
+  { label: "Assets",       icon: Monitor,         href: "/assets",      roles: ["super_admin", "it_admin", "it_agent"] },
+  { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
   { label: "Raise Ticket", icon: Plus,            href: "/tickets/new", roles: ["end_user"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
-  { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin"] },
-  { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "agent"] },
+  { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin"] },
+  { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "Settings",     icon: Settings,        href: "/settings",    roles: ["super_admin"] },
 ];
 
 const roleColors: Record<UserRole, string> = {
   super_admin: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  agent:       "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  it_admin:    "bg-blue-500/20   text-blue-300   border-blue-500/30",
+  it_agent:    "bg-cyan-500/20   text-cyan-300   border-cyan-500/30",
   end_user:    "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
 };
 const roleIcons: Record<UserRole, React.ElementType> = {
   super_admin: Shield,
-  agent:       UserCheck,
+  it_admin:    Shield,
+  it_agent:    UserCheck,
   end_user:    User,
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [location] = useLocation();
-  const { currentUser, logout } = useAuth();
+  const [location]                    = useLocation();
+  const { currentUser, signOut }      = useAuth();
 
   if (!currentUser) return null;
 
-  const visibleItems = navItems.filter((item) => item.roles.includes(currentUser.role));
-  const initials     = currentUser.name.split(" ").map((n) => n[0]).join("").toUpperCase();
+  const visibleItems = navItems.filter(item => item.roles.includes(currentUser.role));
+  const initials     = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase();
   const RoleIcon     = roleIcons[currentUser.role];
   const roleLabel    = ROLE_LABELS[currentUser.role];
 
-  const activeLabel = visibleItems.find((item) => {
+  const activeLabel = visibleItems.find(item => {
     if (item.href === "/") return location === "/";
     return location.startsWith(item.href) && item.href !== "/";
   })?.label ?? "Page";
 
+  const handleLogout = () => { signOut(); };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
@@ -80,10 +83,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="text-xs font-bold text-white leading-tight truncate">Miles Education Pvt Ltd</div>
             <div className="text-[10px] text-sidebar-foreground/60 mt-0.5 truncate">IT Helpdesk Portal</div>
           </div>
-          <button
-            className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0"
-            onClick={() => setSidebarOpen(false)}
-          >
+          <button className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0" onClick={() => setSidebarOpen(false)}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -92,9 +92,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="border-b border-sidebar-border px-4 py-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9 flex-shrink-0">
-              <AvatarFallback className="bg-primary/30 text-primary-foreground text-xs font-semibold">
-                {initials}
-              </AvatarFallback>
+              <AvatarFallback className="bg-primary/30 text-primary-foreground text-xs font-semibold">{initials}</AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-white truncate">{currentUser.name}</p>
@@ -103,8 +101,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="mt-2">
             <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium", roleColors[currentUser.role])}>
-              <RoleIcon className="h-3 w-3" />
-              {roleLabel}
+              <RoleIcon className="h-3 w-3" />{roleLabel}
             </span>
           </div>
         </div>
@@ -146,24 +143,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
-            onClick={logout}
+            onClick={handleLogout}
             data-testid="button-logout"
           >
-            <LogOut className="h-4 w-4" />
-            Sign Out
+            <LogOut className="h-4 w-4" />Sign Out
           </Button>
         </div>
       </aside>
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top header */}
         <header className="flex h-16 items-center border-b border-border bg-card px-4 gap-4">
-          <Button
-            variant="ghost" size="icon" className="lg:hidden"
-            onClick={() => setSidebarOpen(true)}
-            data-testid="button-menu"
-          >
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)} data-testid="button-menu">
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex-1">
@@ -172,17 +163,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
               <Bell className="h-4 w-4" />
-              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-destructive" />
             </Button>
             <Avatar className="h-8 w-8 cursor-pointer">
-              <AvatarFallback className="bg-primary text-white text-xs font-semibold">
-                {initials}
-              </AvatarFallback>
+              <AvatarFallback className="bg-primary text-white text-xs font-semibold">{initials}</AvatarFallback>
             </Avatar>
           </div>
         </header>
-
-        {/* Page content */}
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

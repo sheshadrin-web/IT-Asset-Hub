@@ -25,8 +25,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAssets } from "@/context/AssetContext";
+import { useUsers } from "@/context/UsersContext";
 import { useAuth } from "@/context/AuthContext";
-import { mockUsers, AssetStatus, Asset } from "@/data/mockData";
+import { AssetStatus, Asset } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -117,6 +118,7 @@ function downloadTemplate() {
 // ─── Component ──────────────────────────────────────────────────────────────
 export default function Assets() {
   const { assets, addAssets, assignAsset, updateStatus, unassignAsset, deleteAssets } = useAssets();
+  const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
@@ -141,8 +143,8 @@ export default function Assets() {
   const [dragOver, setDragOver]         = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = currentUser?.role === "super_admin";
-  const canEdit = currentUser?.role === "super_admin" || currentUser?.role === "agent";
+  const isAdmin = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+  const canEdit = isAdmin || currentUser?.role === "it_agent";
 
   const filtered = assets.filter((a) => {
     const q = search.toLowerCase();
@@ -189,29 +191,43 @@ export default function Assets() {
     });
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     const ids = [...selected].filter((id) => allFilteredIds.includes(id));
-    deleteAssets(ids);
-    setSelected(new Set());
-    setDeleteConfirmOpen(false);
-    toast({ title: `${ids.length} asset${ids.length !== 1 ? "s" : ""} deleted` });
+    try {
+      await deleteAssets(ids);
+      setSelected(new Set());
+      setDeleteConfirmOpen(false);
+      toast({ title: `${ids.length} asset${ids.length !== 1 ? "s" : ""} deleted` });
+    } catch {
+      toast({ title: "Failed to delete assets", variant: "destructive" });
+    }
   };
 
   // Assign
-  const activeUsers  = mockUsers.filter((u) => u.status === "Active");
-  const selectedUser = mockUsers.find((u) => u.userId === assignUser);
+  const activeUsers  = users.filter((u) => u.status === "Active");
+  const selectedUser = users.find((u) => u.id === assignUser);
 
-  const handleAssignConfirm = () => {
+  const handleAssignConfirm = async () => {
     if (!assignTarget || !selectedUser) return;
-    assignAsset(assignTarget, selectedUser.name, selectedUser.department);
-    toast({ title: "Asset assigned", description: `${assignTarget} → ${selectedUser.name}` });
+    try {
+      await assignAsset(assignTarget, selectedUser.full_name, selectedUser.email, selectedUser.department);
+      toast({ title: "Asset assigned", description: `${assignTarget} → ${selectedUser.full_name}` });
+    } catch {
+      toast({ title: "Failed to assign asset", variant: "destructive" });
+    }
     setAssignTarget(null);
     setAssignUser("");
   };
 
   // Status actions
-  const handleMarkRepair = (id: string) => { updateStatus(id, "Under Repair"); toast({ title: "Marked as Under Repair", description: id }); };
-  const handleRetire     = (id: string) => { updateStatus(id, "Retired");      toast({ title: "Asset retired", description: id }); };
+  const handleMarkRepair = async (id: string) => {
+    try { await updateStatus(id, "Under Repair"); toast({ title: "Marked as Under Repair", description: id }); }
+    catch { toast({ title: "Failed to update status", variant: "destructive" }); }
+  };
+  const handleRetire = async (id: string) => {
+    try { await updateStatus(id, "Retired"); toast({ title: "Asset retired", description: id }); }
+    catch { toast({ title: "Failed to retire asset", variant: "destructive" }); }
+  };
 
   // ─── CSV Upload ───────────────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
@@ -244,10 +260,14 @@ export default function Assets() {
   const validRows   = parsedRows.filter((r) => r.errors.length === 0);
   const invalidRows = parsedRows.filter((r) => r.errors.length > 0);
 
-  const handleImport = () => {
+  const handleImport = async () => {
     const toImport = validRows.map((r) => r.data as Omit<Asset, "assetId">);
-    const created  = addAssets(toImport);
-    toast({ title: `${created.length} asset${created.length !== 1 ? "s" : ""} imported successfully` });
+    try {
+      const created = await addAssets(toImport);
+      toast({ title: `${created.length} asset${created.length !== 1 ? "s" : ""} imported successfully` });
+    } catch {
+      toast({ title: "Import failed", variant: "destructive" });
+    }
     setUploadOpen(false);
     setParsedRows([]);
     setUploadFileName("");
@@ -527,7 +547,7 @@ export default function Assets() {
       {isAdmin && selectedCount > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-popover shadow-xl px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <Checkbox checked readOnly className="pointer-events-none" />
+            <Checkbox checked className="pointer-events-none" />
             <span>{selectedCount} asset{selectedCount !== 1 ? "s" : ""} selected</span>
           </div>
           <div className="h-4 w-px bg-border" />
@@ -571,8 +591,8 @@ export default function Assets() {
                 </SelectTrigger>
                 <SelectContent>
                   {activeUsers.map((u) => (
-                    <SelectItem key={u.userId} value={u.userId}>
-                      <span className="font-medium">{u.name}</span>
+                    <SelectItem key={u.id} value={u.id}>
+                      <span className="font-medium">{u.full_name}</span>
                       <span className="text-xs text-muted-foreground ml-1">· {u.department}</span>
                     </SelectItem>
                   ))}
@@ -582,7 +602,7 @@ export default function Assets() {
             {selectedUser && (
               <div className="rounded-lg bg-muted/50 border border-border px-4 py-3 text-sm space-y-1">
                 {[
-                  { label: "User",       val: selectedUser.name },
+                  { label: "User",       val: selectedUser.full_name },
                   { label: "Department", val: selectedUser.department },
                   { label: "Email",      val: selectedUser.email },
                 ].map((r) => (

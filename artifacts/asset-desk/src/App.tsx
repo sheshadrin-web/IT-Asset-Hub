@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AssetProvider } from "@/context/AssetContext";
 import { TicketProvider } from "@/context/TicketContext";
+import { UsersProvider } from "@/context/UsersContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
 import Forbidden from "@/pages/Forbidden";
@@ -25,6 +26,36 @@ import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
 
+function LoadingScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    </div>
+  );
+}
+
+function ConfigError() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background p-6">
+      <div className="max-w-md text-center space-y-4">
+        <div className="text-4xl">⚠️</div>
+        <h1 className="text-xl font-bold text-foreground">Supabase Not Configured</h1>
+        <p className="text-sm text-muted-foreground">
+          The environment variables <code className="bg-muted px-1 rounded">VITE_SUPABASE_URL</code> and{" "}
+          <code className="bg-muted px-1 rounded">VITE_SUPABASE_ANON_KEY</code> are missing.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Add them in Replit Secrets (for development) and in your Render environment variables (for production).
+          See <strong>SUPABASE_SETUP.md</strong> for full instructions.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({
   component: Component,
   allowedRoles,
@@ -32,27 +63,24 @@ function ProtectedRoute({
   component: React.ComponentType;
   allowedRoles?: UserRole[];
 }) {
-  const { currentUser, isAuthenticated } = useAuth();
+  const { currentUser, isAuthenticated, loading, configError } = useAuth();
 
+  if (configError) return <ConfigError />;
+  if (loading) return <LoadingScreen />;
   if (!isAuthenticated) return <Redirect to="/login" />;
 
   if (allowedRoles && currentUser && !allowedRoles.includes(currentUser.role)) {
-    return (
-      <Layout>
-        <Forbidden />
-      </Layout>
-    );
+    return <Layout><Forbidden /></Layout>;
   }
 
-  return (
-    <Layout>
-      <Component />
-    </Layout>
-  );
+  return <Layout><Component /></Layout>;
 }
 
 function Router() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading, configError } = useAuth();
+
+  if (configError) return <ConfigError />;
+  if (loading) return <LoadingScreen />;
 
   return (
     <Switch>
@@ -61,26 +89,26 @@ function Router() {
         {isAuthenticated ? <Redirect to="/" /> : <Login />}
       </Route>
 
-      {/* Dashboard — all roles */}
+      {/* Dashboard — all authenticated roles */}
       <Route path="/">
         <ProtectedRoute component={Dashboard} />
       </Route>
 
-      {/* Assets — super_admin + agent */}
+      {/* Assets — admins and agents */}
       <Route path="/assets/new">
-        <ProtectedRoute component={AddAsset} allowedRoles={["super_admin"]} />
+        <ProtectedRoute component={AddAsset} allowedRoles={["super_admin", "it_admin"]} />
       </Route>
       <Route path="/assets/:id/edit">
-        <ProtectedRoute component={EditAsset} allowedRoles={["super_admin", "agent"]} />
+        <ProtectedRoute component={EditAsset} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
       </Route>
       <Route path="/assets/:id">
-        <ProtectedRoute component={AssetDetail} allowedRoles={["super_admin", "agent"]} />
+        <ProtectedRoute component={AssetDetail} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
       </Route>
       <Route path="/assets">
-        <ProtectedRoute component={Assets} allowedRoles={["super_admin", "agent"]} />
+        <ProtectedRoute component={Assets} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
       </Route>
 
-      {/* Tickets — all roles */}
+      {/* Tickets — all roles (filtering inside each page) */}
       <Route path="/tickets/new">
         <ProtectedRoute component={RaiseTicket} />
       </Route>
@@ -96,14 +124,14 @@ function Router() {
         <ProtectedRoute component={MyAssets} allowedRoles={["end_user"]} />
       </Route>
 
-      {/* Users — super_admin only */}
+      {/* Users — super_admin + it_admin */}
       <Route path="/users">
-        <ProtectedRoute component={Users} allowedRoles={["super_admin"]} />
+        <ProtectedRoute component={Users} allowedRoles={["super_admin", "it_admin"]} />
       </Route>
 
-      {/* Reports — super_admin + agent */}
+      {/* Reports — admins and agents */}
       <Route path="/reports">
-        <ProtectedRoute component={Reports} allowedRoles={["super_admin", "agent"]} />
+        <ProtectedRoute component={Reports} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
       </Route>
 
       {/* Settings — super_admin only */}
@@ -113,11 +141,9 @@ function Router() {
 
       {/* 404 */}
       <Route>
-        {isAuthenticated ? (
-          <Layout><NotFound /></Layout>
-        ) : (
-          <Redirect to="/login" />
-        )}
+        {isAuthenticated
+          ? <Layout><NotFound /></Layout>
+          : <Redirect to="/login" />}
       </Route>
     </Switch>
   );
@@ -130,10 +156,12 @@ function App() {
         <AuthProvider>
           <AssetProvider>
             <TicketProvider>
-              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-                <Router />
-              </WouterRouter>
-              <Toaster />
+              <UsersProvider>
+                <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                  <Router />
+                </WouterRouter>
+                <Toaster />
+              </UsersProvider>
             </TicketProvider>
           </AssetProvider>
         </AuthProvider>
