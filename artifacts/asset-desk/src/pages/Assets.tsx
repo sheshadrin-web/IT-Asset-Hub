@@ -204,7 +204,7 @@ export default function Assets() {
   };
 
   // Assign
-  const activeUsers  = users.filter((u) => u.status === "Active");
+  const activeUsers  = users.filter((u) => u.status === "active");
   const selectedUser = users.find((u) => u.id === assignUser);
 
   const handleAssignConfirm = async () => {

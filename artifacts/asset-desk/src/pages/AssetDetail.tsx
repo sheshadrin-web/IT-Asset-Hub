@@ -60,7 +60,7 @@ export default function AssetDetail() {
   const relatedTickets = tickets.filter(t => t.assetId === id);
   const isAdmin        = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
   const canEdit        = isAdmin || currentUser?.role === "it_agent";
-  const activeUsers    = users.filter(u => u.status === "Active");
+  const activeUsers    = users.filter(u => u.status === "active");
   const selectedUser   = users.find(u => u.id === assignUserId);
 
   const handleAssignConfirm = async () => {

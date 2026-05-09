@@ -27,9 +27,9 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function normaliseProfile(raw: Record<string, unknown>): Profile {
-  // Normalise status: accept 'active', 'Active', 'inactive', 'Inactive'
+  // Normalise status to lowercase to match DB constraint: 'active' | 'inactive'
   const statusRaw = String(raw.status ?? "").toLowerCase();
-  raw.status = statusRaw === "inactive" ? "Inactive" : "Active";
+  raw.status = statusRaw === "inactive" ? "inactive" : "active";
 
   // Normalise role: already stored as snake_case in DB, validate it
   const validRoles: UserRole[] = ["super_admin", "it_admin", "it_agent", "end_user"];
@@ -107,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(s);
         setSupabaseUser(s.user);
         const { profile: p } = await fetchProfile(s.user.id);
-        if (p && p.status === "Active") setProfile(p);
+        if (p && p.status === "active") setProfile(p);
       }
       setLoading(false);
     });
@@ -202,9 +202,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    // Check status (already normalised to "Active" / "Inactive")
-    if (p.status !== "Active") {
-      console.warn("[AuthContext] Profile status is not Active:", p.status);
+    // Check status (already normalised to "active" / "inactive")
+    if (p.status !== "active") {
+      console.warn("[AuthContext] Profile status is not active:", p.status);
       await supabase.auth.signOut();
       return {
         error: "Login successful, but your account status is not Active. Please contact IT Admin.",

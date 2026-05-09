@@ -1,6 +1,6 @@
 // ─── Roles ────────────────────────────────────────────────────────────────────
 export type UserRole = "super_admin" | "it_admin" | "it_agent" | "end_user";
-export type UserStatus = "Active" | "Inactive";
+export type UserStatus = "active" | "inactive";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",

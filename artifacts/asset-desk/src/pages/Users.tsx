@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
-  X, UserX, RefreshCw, AlertTriangle, Copy, Check, ExternalLink,
+  X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,10 @@ import { useUsers } from "@/context/UsersContext";
 import { useAuth } from "@/context/AuthContext";
 import { Profile, UserRole, UserStatus, ROLE_LABELS } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
+import { adminUsersApi } from "@/lib/adminUsersApi";
 import { cn } from "@/lib/utils";
 
-// ─── Role / status colours ────────────────────────────────────────────────────
+// ─── Colours ──────────────────────────────────────────────────────────────────
 const roleColors: Record<UserRole, string> = {
   super_admin: "bg-purple-500/15 text-purple-600 border-purple-500/20",
   it_admin:    "bg-blue-500/15 text-blue-600 border-blue-500/20",
@@ -41,8 +42,14 @@ const roleColors: Record<UserRole, string> = {
   end_user:    "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
 };
 const statusColors: Record<UserStatus, string> = {
-  Active:   "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
-  Inactive: "bg-gray-500/15 text-gray-500 border-gray-500/20",
+  active:   "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  inactive: "bg-gray-500/15 text-gray-500 border-gray-500/20",
+};
+
+// Display label for status (capitalise for UI)
+const statusLabel: Record<UserStatus, string> = {
+  active:   "Active",
+  inactive: "Inactive",
 };
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -52,6 +59,7 @@ const addSchema = z.object({
   role:       z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
   department: z.string().min(1, "Department is required"),
   location:   z.string().min(1, "Location is required"),
+  password:   z.string().min(8, "Password must be at least 8 characters"),
 });
 type AddFormValues = z.infer<typeof addSchema>;
 
@@ -60,11 +68,16 @@ const editSchema = z.object({
   role:       z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
   department: z.string().min(1, "Required"),
   location:   z.string().min(1, "Required"),
-  status:     z.enum(["Active", "Inactive"]),
+  status:     z.enum(["active", "inactive"]),
 });
 type EditFormValues = z.infer<typeof editSchema>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function generatePassword(): string {
+  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$";
+  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
 function downloadCsv(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -75,50 +88,9 @@ function downloadCsv(content: string, filename: string) {
 
 function exportUsers(users: Profile[]) {
   const header = ["User ID", "Name", "Email", "Role", "Department", "Location", "Status"];
-  const rows   = users.map(u => [u.id, u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, u.status]);
+  const rows   = users.map(u => [u.id, u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, statusLabel[u.status]]);
   const csv    = [header, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
   downloadCsv(csv, `users_export_${new Date().toISOString().split("T")[0]}.csv`);
-}
-
-function buildSql(v: AddFormValues): string {
-  const esc = (s: string) => s.replace(/'/g, "''");
-  return `INSERT INTO public.profiles (id, email, full_name, role, department, location, status)
-SELECT
-  id,
-  '${esc(v.email.toLowerCase().trim())}',
-  '${esc(v.full_name.trim())}',
-  '${v.role}',
-  '${esc(v.department.trim())}',
-  '${esc(v.location.trim())}',
-  'Active'
-FROM auth.users
-WHERE email = '${esc(v.email.toLowerCase().trim())}'
-ON CONFLICT (id) DO UPDATE SET
-  full_name  = EXCLUDED.full_name,
-  role       = EXCLUDED.role,
-  department = EXCLUDED.department,
-  location   = EXCLUDED.location,
-  status     = 'Active';`;
-}
-
-// ─── Copy button ──────────────────────────────────────────────────────────────
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [text]);
-  return (
-    <button
-      onClick={copy}
-      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
-    >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-      {copied ? "Copied!" : "Copy SQL"}
-    </button>
-  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -132,28 +104,31 @@ export default function Users() {
   const [statusFilter, setStatusFilter] = useState("all");
 
   // Dialogs
-  const [guideOpen,        setGuideOpen]        = useState(false);
-  const [guideStep,        setGuideStep]        = useState<1 | 2>(1);
+  const [addOpen,          setAddOpen]          = useState(false);
   const [editingUser,      setEditingUser]       = useState<Profile | null>(null);
   const [editOpen,         setEditOpen]          = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Profile | null>(null);
   const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
   // Loading states
+  const [addSaving,    setAddSaving]    = useState(false);
   const [editSaving,   setEditSaving]   = useState(false);
   const [actionSaving, setActionSaving] = useState<string | null>(null);
+
+  // Password visibility
+  const [showPw, setShowPw] = useState(false);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
 
   // ── Forms ──────────────────────────────────────────────────────────────────
   const addForm = useForm<AddFormValues>({
     resolver: zodResolver(addSchema),
-    defaultValues: { full_name: "", email: "", role: "end_user", department: "", location: "" },
+    defaultValues: { full_name: "", email: "", role: "end_user", department: "", location: "", password: "" },
   });
 
   const editForm = useForm<EditFormValues>({
     resolver: zodResolver(editSchema),
-    defaultValues: { full_name: "", role: "end_user", department: "", location: "", status: "Active" },
+    defaultValues: { full_name: "", role: "end_user", department: "", location: "", status: "active" },
   });
 
   // ── Filtered list ──────────────────────────────────────────────────────────
@@ -170,20 +145,31 @@ export default function Users() {
     itAdmins:    users.filter(u => u.role === "it_admin").length,
     itAgents:    users.filter(u => u.role === "it_agent").length,
     endUsers:    users.filter(u => u.role === "end_user").length,
-    active:      users.filter(u => u.status === "Active").length,
-    inactive:    users.filter(u => u.status === "Inactive").length,
+    active:      users.filter(u => u.status === "active").length,
+    inactive:    users.filter(u => u.status === "inactive").length,
   };
 
-  // ── Open Add Guide ─────────────────────────────────────────────────────────
-  const openGuide = () => {
-    addForm.reset({ full_name: "", email: "", role: "end_user", department: "", location: "" });
-    setGuideStep(1);
-    setGuideOpen(true);
+  // ── Add user ───────────────────────────────────────────────────────────────
+  const openAdd = () => {
+    addForm.reset({ full_name: "", email: "", role: "end_user", department: "", location: "", password: "" });
+    setShowPw(false);
+    setAddOpen(true);
   };
 
-  const onAddNext = addForm.handleSubmit(() => {
-    setGuideStep(2);
-  });
+  const onAddSubmit = async (values: AddFormValues) => {
+    setAddSaving(true);
+    const result = await adminUsersApi.createUser(values);
+    setAddSaving(false);
+
+    if (!result.success) {
+      toast({ title: "Failed to create user", description: result.error ?? "Unknown error", variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "User created", description: `${values.email} has been added and can log in immediately.` });
+    setAddOpen(false);
+    await refresh();
+  };
 
   // ── Edit user ──────────────────────────────────────────────────────────────
   const openEdit = (user: Profile) => {
@@ -214,11 +200,7 @@ export default function Users() {
       toast({ title: "User updated successfully" });
       setEditOpen(false);
     } catch (err) {
-      toast({
-        title: "Failed to update user",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: "Failed to update user", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setEditSaving(false);
     }
@@ -229,13 +211,7 @@ export default function Users() {
     if (!deactivateTarget) return;
     setActionSaving(deactivateTarget.id);
     try {
-      await updateUser(deactivateTarget.id, {
-        full_name:  deactivateTarget.full_name,
-        role:       deactivateTarget.role,
-        department: deactivateTarget.department,
-        location:   deactivateTarget.location,
-        status:     "Inactive",
-      });
+      await updateUser(deactivateTarget.id, { ...deactivateTarget, status: "inactive" });
       toast({ title: "User deactivated", description: `${deactivateTarget.full_name} can no longer log in.` });
     } catch (err) {
       toast({ title: "Failed to deactivate", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
@@ -249,7 +225,7 @@ export default function Users() {
   const handleReactivate = async (user: Profile) => {
     setActionSaving(user.id);
     try {
-      await updateUser(user.id, { ...user, status: "Active" });
+      await updateUser(user.id, { ...user, status: "active" });
       toast({ title: "User reactivated", description: `${user.full_name} can now log in.` });
     } catch (err) {
       toast({ title: "Failed to reactivate", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
@@ -262,24 +238,27 @@ export default function Users() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setActionSaving(deleteTarget.id);
-    try {
-      await deleteUser(deleteTarget.id);
-      toast({ title: "User removed", description: `${deleteTarget.full_name} has been removed from the app. Delete their Supabase Auth account from the Supabase Dashboard if needed.` });
-    } catch (err) {
-      toast({ title: "Failed to remove user", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
-    } finally {
-      setActionSaving(null);
-      setDeleteTarget(null);
-    }
-  };
+    const result = await adminUsersApi.deleteUser(deleteTarget.id);
+    setActionSaving(null);
+    setDeleteTarget(null);
 
-  // ── SQL generated from form ────────────────────────────────────────────────
-  const addValues = addForm.watch();
-  const sqlReady  = guideStep === 2;
-  const generatedSql = sqlReady ? buildSql(addValues) : "";
+    if (!result.success) {
+      // Fallback: delete profile only if Edge Function unavailable
+      try {
+        await deleteUser(deleteTarget.id);
+        toast({ title: "User removed from app", description: "Their Supabase Auth account may still exist — remove it from the Supabase Dashboard if needed." });
+      } catch {
+        toast({ title: "Failed to delete user", description: result.error ?? "Unknown error", variant: "destructive" });
+      }
+      return;
+    }
+    await deleteUser(deleteTarget.id);
+    toast({ title: "User deleted", description: `${deleteTarget.full_name} has been permanently removed.` });
+  };
 
   return (
     <div className="space-y-5">
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -289,14 +268,14 @@ export default function Users() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => refresh()} title="Refresh">
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => refresh()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" className="gap-2" onClick={() => exportUsers(filtered)} data-testid="button-export-users">
             <Download className="h-4 w-4" /> Export
           </Button>
           {isSuperAdmin && (
-            <Button size="sm" className="gap-2" onClick={openGuide} data-testid="button-add-user">
+            <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
               <Plus className="h-4 w-4" /> Add User
             </Button>
           )}
@@ -356,8 +335,8 @@ export default function Users() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="Inactive">Inactive</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -395,7 +374,7 @@ export default function Users() {
                       key={user.id}
                       className={cn(
                         "border-b border-border last:border-0 hover:bg-muted/30 transition-colors",
-                        user.status === "Inactive" && "opacity-60"
+                        user.status === "inactive" && "opacity-60"
                       )}
                       data-testid={`row-user-${user.id}`}
                     >
@@ -422,7 +401,7 @@ export default function Users() {
                       <td className="px-4 py-3 text-muted-foreground">{user.location || "—"}</td>
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", statusColors[user.status])}>
-                          {user.status}
+                          {statusLabel[user.status]}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -439,12 +418,12 @@ export default function Users() {
                               <DropdownMenuItem onClick={() => openEdit(user)} className="gap-2 cursor-pointer">
                                 <Edit className="h-3.5 w-3.5" /> Edit Profile
                               </DropdownMenuItem>
-                              {!isSelf && user.status === "Active" && (
+                              {!isSelf && user.status === "active" && (
                                 <DropdownMenuItem onClick={() => setDeactivateTarget(user)} className="gap-2 cursor-pointer text-amber-600 focus:text-amber-600">
                                   <UserX className="h-3.5 w-3.5" /> Deactivate
                                 </DropdownMenuItem>
                               )}
-                              {!isSelf && user.status === "Inactive" && (
+                              {!isSelf && user.status === "inactive" && (
                                 <DropdownMenuItem onClick={() => handleReactivate(user)} className="gap-2 cursor-pointer text-emerald-600 focus:text-emerald-600">
                                   <RefreshCw className="h-3.5 w-3.5" /> Reactivate
                                 </DropdownMenuItem>
@@ -456,7 +435,7 @@ export default function Users() {
                                     onClick={() => setDeleteTarget(user)}
                                     className="gap-2 cursor-pointer text-destructive focus:text-destructive"
                                   >
-                                    <Trash2 className="h-3.5 w-3.5" /> Remove User
+                                    <Trash2 className="h-3.5 w-3.5" /> Delete User
                                   </DropdownMenuItem>
                                 </>
                               )}
@@ -482,118 +461,113 @@ export default function Users() {
         </CardContent>
       </Card>
 
-      {/* ── Add User Guide Dialog ─────────────────────────────────────────────── */}
-      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
-        <DialogContent className="max-w-lg">
+      {/* ── Add User Dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={addOpen} onOpenChange={v => !addSaving && setAddOpen(v)}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Add New User</DialogTitle>
             <DialogDescription>
-              {guideStep === 1
-                ? "Fill in the user's details. We'll generate the SQL to sync them into the app."
-                : "Follow the two steps below to create the account and sync it to the app."}
+              Creates a Supabase Auth account and profile in one step.
+              The user can log in immediately with the password you set.
             </DialogDescription>
           </DialogHeader>
-
-          {guideStep === 1 ? (
-            <Form {...addForm}>
-              <form onSubmit={onAddNext} className="space-y-4">
-                <FormField control={addForm.control} name="full_name" render={({ field }) => (
+          <Form {...addForm}>
+            <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="space-y-4">
+              <FormField control={addForm.control} name="full_name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Full Name</FormLabel>
+                  <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={addForm.control} name="email" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email Address</FormLabel>
+                  <FormControl><Input type="email" placeholder="rahul.s@mileseducation.com" {...field} data-testid="input-add-email" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={addForm.control} name="role" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Full Name</FormLabel>
-                    <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
+                    <FormLabel>Role</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl><SelectTrigger data-testid="select-add-role"><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                        <SelectItem value="it_admin">IT Admin</SelectItem>
+                        <SelectItem value="it_agent">IT Agent</SelectItem>
+                        <SelectItem value="end_user">End User</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={addForm.control} name="email" render={({ field }) => (
+                <FormField control={addForm.control} name="department" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email Address</FormLabel>
-                    <FormControl><Input type="email" placeholder="rahul.s@mileseducation.com" {...field} data-testid="input-add-email" /></FormControl>
+                    <FormLabel>Department</FormLabel>
+                    <FormControl><Input placeholder="IT, Finance…" {...field} data-testid="input-add-dept" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField control={addForm.control} name="role" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl><SelectTrigger data-testid="select-add-role"><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          <SelectItem value="super_admin">Super Admin</SelectItem>
-                          <SelectItem value="it_admin">IT Admin</SelectItem>
-                          <SelectItem value="it_agent">IT Agent</SelectItem>
-                          <SelectItem value="end_user">End User</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={addForm.control} name="department" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Department</FormLabel>
-                      <FormControl><Input placeholder="IT, Finance…" {...field} data-testid="input-add-dept" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                </div>
-                <FormField control={addForm.control} name="location" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setGuideOpen(false)}>Cancel</Button>
-                  <Button type="submit">Next — Generate SQL →</Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          ) : (
-            <div className="space-y-4">
-              {/* Step 1 */}
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
-                <p className="text-sm font-semibold flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">1</span>
-                  Create the Supabase Auth account
-                </p>
-                <ol className="text-sm text-muted-foreground space-y-1 pl-7 list-decimal">
-                  <li>Open <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-0.5">Supabase Dashboard <ExternalLink className="h-3 w-3" /></a> → your project → <strong>Authentication → Users</strong></li>
-                  <li>Click <strong>"Add user"</strong> → <strong>"Create new user"</strong></li>
-                  <li>Enter email: <code className="bg-muted px-1 rounded text-xs">{addValues.email}</code> and set a temporary password</li>
-                  <li>Click <strong>"Create user"</strong></li>
-                </ol>
               </div>
-
-              {/* Step 2 */}
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">2</span>
-                    Run this SQL in Supabase SQL Editor
-                  </p>
-                  <CopyButton text={generatedSql} />
-                </div>
-                <p className="text-xs text-muted-foreground pl-7">
-                  Go to <strong>SQL Editor → New query</strong>, paste and run:
-                </p>
-                <pre className="text-xs bg-slate-900 text-slate-100 rounded-md p-3 overflow-x-auto leading-relaxed">
-                  {generatedSql}
-                </pre>
-              </div>
-
+              <FormField control={addForm.control} name="location" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Location</FormLabel>
+                  <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={addForm.control} name="password" render={({ field }) => (
+                <FormItem>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Temporary Password</FormLabel>
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600 hover:underline"
+                      onClick={() => { addForm.setValue("password", generatePassword(), { shouldValidate: true }); setShowPw(true); }}
+                    >
+                      Generate random
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <FormControl>
+                      <Input
+                        type={showPw ? "text" : "password"}
+                        placeholder="Min. 8 characters"
+                        className="pr-10"
+                        {...field}
+                        data-testid="input-add-password"
+                      />
+                    </FormControl>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPw(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )} />
               <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded px-3 py-2">
-                After running the SQL, click <strong>Refresh</strong> to see the new user appear in the list.
+                Share the temporary password with the user securely. They should change it after first login.
               </p>
-
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setGuideStep(1)}>← Back</Button>
-                <Button variant="outline" onClick={() => setGuideOpen(false)}>Close</Button>
-                <Button onClick={async () => { setGuideOpen(false); await refresh(); }}>
-                  <RefreshCw className="h-4 w-4 mr-2" /> Done — Refresh List
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
+                <Button type="submit" disabled={addSaving} data-testid="button-submit-add-user">
+                  {addSaving ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      Creating…
+                    </span>
+                  ) : "Create User"}
                 </Button>
               </DialogFooter>
-            </div>
-          )}
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 
@@ -631,8 +605,8 @@ export default function Users() {
                     <Select value={field.value} onValueChange={field.onChange} disabled={editingUser?.id === currentUser?.userId}>
                       <FormControl><SelectTrigger data-testid="select-user-status"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
-                        <SelectItem value="Active">Active</SelectItem>
-                        <SelectItem value="Inactive">Inactive</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -662,14 +636,14 @@ export default function Users() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Deactivate Confirm ────────────────────────────────────────────────── */}
+      {/* ── Deactivate Confirm ─────────────────────────────────────────────────── */}
       <AlertDialog open={!!deactivateTarget} onOpenChange={v => !v && setDeactivateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Deactivate User</AlertDialogTitle>
             <AlertDialogDescription>
               <strong>{deactivateTarget?.full_name}</strong> will be set to Inactive and will no longer be able to log in.
-              You can reactivate them at any time from the Edit menu.
+              You can reactivate them at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -687,12 +661,11 @@ export default function Users() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Remove User
+              Permanently Delete User
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This removes <strong>{deleteTarget?.full_name}</strong> ({deleteTarget?.email}) from the app — they will not be able to log in.
-              <br /><br />
-              To fully delete their account, also go to <strong>Supabase Dashboard → Authentication → Users</strong> and delete them there.
+              This will permanently delete <strong>{deleteTarget?.full_name}</strong> ({deleteTarget?.email}) from
+              Supabase Auth and remove their profile. This action cannot be undone.
               <br /><br />
               If you only want to block access temporarily, use <strong>Deactivate</strong> instead.
             </AlertDialogDescription>
@@ -703,7 +676,7 @@ export default function Users() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleDelete}
             >
-              Remove User
+              Delete Permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

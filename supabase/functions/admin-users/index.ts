@@ -113,7 +113,7 @@ Deno.serve(async (req: Request) => {
             role,
             department: department?.trim() ?? "",
             location:   location?.trim()   ?? "",
-            status:     "Active",
+            status:     "active",
           }),
         });
 
@@ -149,7 +149,7 @@ Deno.serve(async (req: Request) => {
 
         const { error: deactivateErr } = await adminClient
           .from("profiles")
-          .update({ status: "Inactive", updated_at: new Date().toISOString() })
+          .update({ status: "inactive", updated_at: new Date().toISOString() })
           .eq("id", userId);
 
         if (deactivateErr) return json({ error: deactivateErr.message }, 500);
