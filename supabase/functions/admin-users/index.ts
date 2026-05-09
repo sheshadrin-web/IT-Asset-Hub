@@ -7,41 +7,34 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
-
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: "Method not allowed" }, 405);
   }
 
   try {
-    // ── Read and verify caller's JWT ──────────────────────────────────────────
+    // ── Verify caller's JWT ───────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return json({ error: "Missing Authorization header" }, 401);
     }
     const callerToken = authHeader.replace("Bearer ", "").trim();
 
-    // Supabase env vars — injected automatically in Edge Function runtime
-    const supabaseUrl       = Deno.env.get("SUPABASE_URL") ?? "";
-    const anonKey           = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-    const serviceRoleKey    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabaseUrl    = Deno.env.get("SUPABASE_URL")             ?? "";
+    const anonKey        = Deno.env.get("SUPABASE_ANON_KEY")        ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     if (!serviceRoleKey) {
-      return json({ error: "SUPABASE_SERVICE_ROLE_KEY not set on Edge Function" }, 500);
+      return json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured on Edge Function. Run: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<key>" }, 500);
     }
 
-    // Client scoped to the caller's JWT — used to verify identity and role
+    // Caller-scoped client — only used to verify identity and role
     const callerClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: `Bearer ${callerToken}` } },
     });
 
-    // Verify caller is authenticated and is super_admin
     const { data: { user: callerUser }, error: userErr } = await callerClient.auth.getUser();
     if (userErr || !callerUser) {
       return json({ error: "Unauthorized — invalid or expired token" }, 401);
@@ -60,17 +53,16 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Forbidden — only super_admin can perform this action" }, 403);
     }
 
-    // ── Service-role client — elevated permissions ────────────────────────────
+    // ── Service-role admin client ─────────────────────────────────────────────
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ── Parse request body ────────────────────────────────────────────────────
     const body = await req.json();
     const { action, payload } = body as { action: string; payload: Record<string, unknown> };
 
-    // ── Route action ─────────────────────────────────────────────────────────
     switch (action) {
+
       case "createUser": {
         const { email, password, full_name, role, department, location } = payload as {
           email: string; password: string; full_name: string;
@@ -81,11 +73,19 @@ Deno.serve(async (req: Request) => {
           return json({ error: "email, password, full_name, and role are required" }, 400);
         }
 
-        // Create Supabase Auth user
+        // Create auth user — pass profile fields as user_metadata.
+        // A SECURITY DEFINER trigger on auth.users reads these and creates the
+        // public.profiles row automatically, bypassing RLS and permission checks.
         const { data: authData, error: createErr } = await adminClient.auth.admin.createUser({
-          email,
+          email: email.trim().toLowerCase(),
           password,
-          email_confirm: true, // skip email confirmation
+          email_confirm: true,
+          user_metadata: {
+            full_name: full_name.trim(),
+            role,
+            department: department?.trim() ?? "",
+            location:   location?.trim()   ?? "",
+          },
         });
 
         if (createErr || !authData.user) {
@@ -94,21 +94,42 @@ Deno.serve(async (req: Request) => {
 
         const newUserId = authData.user.id;
 
-        // Insert profile row
-        const { error: profileInsertErr } = await adminClient.from("profiles").insert({
-          id:         newUserId,
-          email:      email.toLowerCase().trim(),
-          full_name:  full_name.trim(),
-          role,
-          department: department?.trim() ?? "",
-          location:   location?.trim() ?? "",
-          status:     "Active",
-        });
+        // Belt-and-suspenders: if the trigger hasn't run yet (or isn't deployed),
+        // try a direct profile insert via the REST API using service-role headers.
+        // This uses fetch directly so it carries both apikey + Authorization headers
+        // at the service_role level, which has BYPASSRLS in Supabase.
+        const existing = await adminClient
+          .from("profiles")
+          .select("id")
+          .eq("id", newUserId)
+          .maybeSingle();
 
-        if (profileInsertErr) {
-          // Rollback — delete the auth user we just created
-          await adminClient.auth.admin.deleteUser(newUserId);
-          return json({ error: `Profile insert failed: ${profileInsertErr.message}` }, 500);
+        if (!existing.data) {
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+            method: "POST",
+            headers: {
+              "apikey":        serviceRoleKey,
+              "Authorization": `Bearer ${serviceRoleKey}`,
+              "Content-Type":  "application/json",
+              "Prefer":        "return=minimal",
+            },
+            body: JSON.stringify({
+              id:         newUserId,
+              email:      email.trim().toLowerCase(),
+              full_name:  full_name.trim(),
+              role,
+              department: department?.trim() ?? "",
+              location:   location?.trim()   ?? "",
+              status:     "Active",
+            }),
+          });
+
+          if (!insertRes.ok) {
+            const errText = await insertRes.text().catch(() => insertRes.statusText);
+            // Rollback auth user
+            await adminClient.auth.admin.deleteUser(newUserId);
+            return json({ error: `Profile insert failed: ${errText}` }, 500);
+          }
         }
 
         return json({ success: true, userId: newUserId, message: `User ${email} created successfully` });
@@ -119,7 +140,6 @@ Deno.serve(async (req: Request) => {
           userId: string; full_name: string; role: string;
           department: string; location: string; status: string;
         };
-
         if (!userId) return json({ error: "userId is required" }, 400);
 
         const { error: updateErr } = await adminClient
@@ -147,16 +167,12 @@ Deno.serve(async (req: Request) => {
       case "deleteUser": {
         const { userId } = payload as { userId: string };
         if (!userId) return json({ error: "userId is required" }, 400);
-
-        // Prevent self-deletion
         if (userId === callerUser.id) {
           return json({ error: "You cannot delete your own account" }, 400);
         }
 
-        // Delete from Supabase Auth — cascades to profiles via FK
         const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
         if (deleteErr) return json({ error: deleteErr.message }, 500);
-
         return json({ success: true, message: "User deleted from Auth and profiles" });
       }
 

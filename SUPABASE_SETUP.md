@@ -209,6 +209,72 @@ create policy "asset_returns_insert" on public.asset_returns for insert with che
 
 ---
 
+## 4b. Explicit Grants + Auto-Profile Trigger
+
+> ⚠️ **Run this if the Edge Function returns "permission denied for table profiles"**
+>
+> By default, `service_role` in Supabase bypasses RLS but still needs table-level
+> Postgres `GRANT` permissions. Run the block below once to fix it.
+
+### Step 1 — Explicit grants (required for Edge Function inserts)
+
+```sql
+-- Grant service_role full access to all public schema tables
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT ALL ON ALL TABLES    IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+
+-- Ensure future tables also get these grants
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON SEQUENCES TO service_role;
+```
+
+### Step 2 — Auto-profile trigger (recommended — makes profile creation bulletproof)
+
+This trigger runs as `SECURITY DEFINER` (with `postgres` privileges), so it
+bypasses both RLS and permission checks. Whenever a Supabase Auth user is created
+(via Edge Function, Supabase dashboard, or Supabase invite), the profile row is
+created automatically from `user_metadata`.
+
+```sql
+-- Function that creates a profile row from auth.user metadata
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, role, department, location, status)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'role', 'end_user'),
+    COALESCE(NEW.raw_user_meta_data->>'department', ''),
+    COALESCE(NEW.raw_user_meta_data->>'location', ''),
+    'Active'
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger: fires after every new auth user is inserted
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
+
+After running both SQL blocks, **redeploy the Edge Function** so it picks up the changes:
+
+```bash
+supabase functions deploy admin-users --no-verify-jwt
+```
+
+---
+
 ## 5. First Super Admin
 
 ### Step 1 — Confirm the auth user exists
