@@ -94,42 +94,34 @@ Deno.serve(async (req: Request) => {
 
         const newUserId = authData.user.id;
 
-        // Belt-and-suspenders: if the trigger hasn't run yet (or isn't deployed),
-        // try a direct profile insert via the REST API using service-role headers.
-        // This uses fetch directly so it carries both apikey + Authorization headers
-        // at the service_role level, which has BYPASSRLS in Supabase.
-        const existing = await adminClient
-          .from("profiles")
-          .select("id")
-          .eq("id", newUserId)
-          .maybeSingle();
+        // Always attempt profile insert via direct PostgREST REST call.
+        // Using service_role key in both apikey + Authorization headers gives
+        // full BYPASSRLS access. "resolution=ignore-duplicates" means if the
+        // DB trigger already created the profile, this is a no-op.
+        const insertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+          method: "POST",
+          headers: {
+            "apikey":        serviceRoleKey,
+            "Authorization": `Bearer ${serviceRoleKey}`,
+            "Content-Type":  "application/json",
+            "Prefer":        "return=minimal,resolution=ignore-duplicates",
+          },
+          body: JSON.stringify({
+            id:         newUserId,
+            email:      email.trim().toLowerCase(),
+            full_name:  full_name.trim(),
+            role,
+            department: department?.trim() ?? "",
+            location:   location?.trim()   ?? "",
+            status:     "Active",
+          }),
+        });
 
-        if (!existing.data) {
-          const insertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
-            method: "POST",
-            headers: {
-              "apikey":        serviceRoleKey,
-              "Authorization": `Bearer ${serviceRoleKey}`,
-              "Content-Type":  "application/json",
-              "Prefer":        "return=minimal",
-            },
-            body: JSON.stringify({
-              id:         newUserId,
-              email:      email.trim().toLowerCase(),
-              full_name:  full_name.trim(),
-              role,
-              department: department?.trim() ?? "",
-              location:   location?.trim()   ?? "",
-              status:     "Active",
-            }),
-          });
-
-          if (!insertRes.ok) {
-            const errText = await insertRes.text().catch(() => insertRes.statusText);
-            // Rollback auth user
-            await adminClient.auth.admin.deleteUser(newUserId);
-            return json({ error: `Profile insert failed: ${errText}` }, 500);
-          }
+        if (!insertRes.ok) {
+          const errText = await insertRes.text().catch(() => insertRes.statusText);
+          // Profile failed — roll back the auth user so nothing is left dangling
+          await adminClient.auth.admin.deleteUser(newUserId);
+          return json({ error: `Profile insert failed: ${errText}` }, 500);
         }
 
         return json({ success: true, userId: newUserId, message: `User ${email} created successfully` });
