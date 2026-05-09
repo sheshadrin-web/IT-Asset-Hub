@@ -97,8 +97,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       >
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-          <div className="h-10 w-10 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-white/20">
-            <img src={milesLogo} alt="Miles Education" className="h-full w-full object-cover" />
+          <div className="h-10 w-10 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-white/20 bg-[#1a1a1a] flex items-center justify-center">
+            <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain p-0.5" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[10px] text-sidebar-foreground/60 truncate">IT Helpdesk Portal</div>
