@@ -93,30 +93,6 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold flex items-center gap-2"><Database className="h-4 w-4" /> Data Management</CardTitle>
-          <CardDescription className="text-xs">Export options — use Reports page for full data exports</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {[
-            { label: "Export Assets (CSV)",  description: "Download all asset records" },
-            { label: "Export Tickets (CSV)", description: "Download all ticket records" },
-            { label: "Export Users (CSV)",   description: "Download all user records" },
-          ].map(item => (
-            <div key={item.label} className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => toast({ title: "Use the Reports page", description: "Go to Reports → Export Data for full CSV exports." })} data-testid={`button-export-${item.label.split(" ")[1].toLowerCase()}`}>
-                Export
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
       <div className="flex justify-end">
         <Button onClick={handleSave} data-testid="button-save-settings">Save Settings</Button>
       </div>

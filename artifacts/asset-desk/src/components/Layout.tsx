@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
   LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package, GraduationCap,
+  ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
@@ -35,23 +36,44 @@ const roleColors: Record<UserRole, string> = {
   it_agent:    "bg-cyan-500/20   text-cyan-300   border-cyan-500/30",
   end_user:    "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
 };
-const roleIcons: Record<UserRole, React.ElementType> = {
+const roleIconMap: Record<UserRole, React.ElementType> = {
   super_admin: Shield,
   it_admin:    Shield,
   it_agent:    UserCheck,
   end_user:    User,
 };
 
+// Badge colours for the header dropdown (light bg)
+const roleBadgeColors: Record<UserRole, string> = {
+  super_admin: "bg-purple-100 text-purple-700 border-purple-200",
+  it_admin:    "bg-blue-100 text-blue-700 border-blue-200",
+  it_agent:    "bg-cyan-100 text-cyan-700 border-cyan-200",
+  end_user:    "bg-emerald-100 text-emerald-700 border-emerald-200",
+};
+
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [location]                    = useLocation();
-  const { currentUser, signOut }      = useAuth();
+  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [profileOpen,  setProfileOpen]  = useState(false);
+  const [location]                      = useLocation();
+  const { currentUser, signOut }        = useAuth();
+  const profileRef                      = useRef<HTMLDivElement>(null);
+
+  // Close profile dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   if (!currentUser) return null;
 
   const visibleItems = navItems.filter(item => item.roles.includes(currentUser.role));
-  const initials     = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase();
-  const RoleIcon     = roleIcons[currentUser.role];
+  const initials     = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+  const RoleIcon     = roleIconMap[currentUser.role];
   const roleLabel    = ROLE_LABELS[currentUser.role];
 
   const activeLabel = visibleItems.find(item => {
@@ -59,15 +81,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return location.startsWith(item.href) && item.href !== "/";
   })?.label ?? "Page";
 
-  const handleLogout = () => { signOut(); };
-
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {sidebarOpen && (
         <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
+      {/* ── Sidebar ───────────────────────────────────────────────────────────── */}
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 flex w-64 flex-col bg-sidebar transition-transform duration-300 ease-in-out lg:static lg:translate-x-0",
@@ -83,27 +103,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="text-xs font-bold text-white leading-tight truncate">Miles Education Pvt Ltd</div>
             <div className="text-[10px] text-sidebar-foreground/60 mt-0.5 truncate">IT Helpdesk Portal</div>
           </div>
-          <button className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0" onClick={() => setSidebarOpen(false)}>
+          <button
+            className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0"
+            onClick={() => setSidebarOpen(false)}
+          >
             <X className="h-4 w-4" />
           </button>
-        </div>
-
-        {/* User profile */}
-        <div className="border-b border-sidebar-border px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-9 w-9 flex-shrink-0">
-              <AvatarFallback className="bg-primary/30 text-primary-foreground text-xs font-semibold">{initials}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-white truncate">{currentUser.name}</p>
-              <p className="text-xs text-sidebar-foreground/70 truncate">{currentUser.email}</p>
-            </div>
-          </div>
-          <div className="mt-2">
-            <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium", roleColors[currentUser.role])}>
-              <RoleIcon className="h-3 w-3" />{roleLabel}
-            </span>
-          </div>
         </div>
 
         {/* Navigation */}
@@ -143,7 +148,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
-            onClick={handleLogout}
+            onClick={() => signOut()}
             data-testid="button-logout"
           >
             <LogOut className="h-4 w-4" />Sign Out
@@ -151,24 +156,77 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* ── Main content ──────────────────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex h-16 items-center border-b border-border bg-card px-4 gap-4">
-          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)} data-testid="button-menu">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setSidebarOpen(true)}
+            data-testid="button-menu"
+          >
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex-1">
             <p className="text-sm font-medium text-foreground">{activeLabel}</p>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex items-center gap-2">
+            {/* Notification bell */}
             <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
               <Bell className="h-4 w-4" />
             </Button>
-            <Avatar className="h-8 w-8 cursor-pointer">
-              <AvatarFallback className="bg-primary text-white text-xs font-semibold">{initials}</AvatarFallback>
-            </Avatar>
+
+            {/* Profile dropdown */}
+            <div className="relative" ref={profileRef}>
+              <button
+                onClick={() => setProfileOpen(v => !v)}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent transition-colors focus:outline-none"
+                data-testid="button-profile"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary text-white text-xs font-semibold">{initials}</AvatarFallback>
+                </Avatar>
+                <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", profileOpen && "rotate-180")} />
+              </button>
+
+              {profileOpen && (
+                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden">
+                  {/* Profile card */}
+                  <div className="px-4 py-4 border-b border-border">
+                    <div className="flex items-center gap-3 mb-3">
+                      <Avatar className="h-10 w-10 flex-shrink-0">
+                        <AvatarFallback className="bg-primary text-white text-sm font-bold">{initials}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{currentUser.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{currentUser.email}</p>
+                      </div>
+                    </div>
+                    <span className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+                      roleBadgeColors[currentUser.role]
+                    )}>
+                      <RoleIcon className="h-3 w-3" />
+                      {roleLabel}
+                    </span>
+                  </div>
+                  {/* Sign out */}
+                  <button
+                    onClick={() => { setProfileOpen(false); signOut(); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-destructive hover:bg-destructive/5 transition-colors"
+                    data-testid="button-profile-signout"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
+
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

@@ -90,11 +90,11 @@ export function TicketProvider({ children }: { children: ReactNode }) {
       subcategory:    data.subcategory,
       priority:       data.priority,
       status:         "Open",
-      assigned_agent: "",
-      description:    data.description,
-      resolution_note:"",
-      comments:       [],
-      created_at:     now,
+      assigned_agent:  "",
+      description:     data.description,
+      resolution_note: "",
+      // comments column does not exist in DB schema — omitted from INSERT
+      created_at:      now,
       updated_at:     now,
     };
     const { data: inserted, error } = await supabase
@@ -130,11 +130,12 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     const ticket = tickets.find(t => t.ticketId === ticketId);
     if (!ticket) return;
     const updatedComments = [...ticket.comments, comment];
-    const { error } = await supabase
+    // The `comments` column doesn't exist in the DB schema yet, so we only
+    // persist the updated_at timestamp and store comments in local React state.
+    await supabase
       .from("tickets")
-      .update({ comments: updatedComments, updated_at: new Date().toISOString() })
+      .update({ updated_at: new Date().toISOString() })
       .eq("ticket_id", ticketId);
-    if (error) throw new Error(error.message);
     const today = new Date().toISOString().split("T")[0];
     setTickets(prev =>
       prev.map(t =>

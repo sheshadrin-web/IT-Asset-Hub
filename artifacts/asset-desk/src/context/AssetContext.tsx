@@ -27,21 +27,21 @@ function mapFromDB(row: Record<string, unknown>): Asset {
 
 function mapToDB(data: Omit<Asset, "assetId" | "id">, assetId: string): Record<string, unknown> {
   return {
-    asset_id:        assetId,
-    asset_type:      data.assetType,
-    brand:           data.brand,
-    model:           data.model,
-    serial_number:   data.serialNumber,
-    imei_1:          data.imeiNumber ?? null,
-    purchase_date:   data.purchaseDate,
+    asset_id:          assetId,
+    asset_type:        data.assetType,
+    brand:             data.brand,
+    model:             data.model,
+    serial_number:     data.serialNumber,
+    imei_1:            data.imeiNumber ?? null,
+    purchase_date:     data.purchaseDate,
     warranty_end_date: data.warrantyEndDate,
-    status:          data.status,
-    assigned_to:     data.assignedTo    ?? null,
-    assigned_email:  data.assignedEmail ?? null,
-    department:      data.department    ?? null,
-    location:        data.location,
-    accessories:     data.accessories,
-    remarks:         data.remarks,
+    status:            data.status,
+    assigned_to:       data.assignedTo    ?? null,
+    assigned_email:    data.assignedEmail ?? null,
+    department:        data.department    ?? null,
+    location:          data.location,
+    // accessories column does not exist in DB schema — omitted
+    remarks:           data.remarks,
   };
 }
 
