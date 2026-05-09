@@ -1,0 +1,48 @@
+I have created my Supabase project and now I want to connect the app using these environment variables.
+
+Use these exact environment variable names:
+
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+
+My Supabase Project URL is:
+
+https://dimbgprindvmzoylzyud.supabase.co
+
+I will add the publishable/anon key manually in Replit Secrets as:
+
+VITE_SUPABASE_ANON_KEY
+
+Please verify the app is correctly reading Supabase credentials from import.meta.env.
+
+Requirements:
+1. Use VITE_SUPABASE_URL from Replit Secrets.
+2. Use VITE_SUPABASE_ANON_KEY from Replit Secrets.
+3. Do not hardcode the anon key inside code.
+4. Do not use service_role key anywhere.
+5. Do not expose secret keys.
+6. Make sure src/lib/supabaseClient.ts is using these variables correctly.
+7. If either variable is missing, show a clear message: “Supabase Not Configured”.
+8. Once variables are present, remove the “Supabase Not Configured” screen and show the login page.
+9. Keep the existing login UI and styling.
+10. Connect login with Supabase email/password authentication using supabase.auth.signInWithPassword().
+11. On successful login, fetch user profile from the public.profiles table.
+12. If the user profile is missing, show: “Your account profile is not configured. Please contact IT Admin.”
+13. If the user profile status is inactive, show: “Your account is inactive. Please contact IT Admin.”
+14. If the user is active, redirect to dashboard based on role.
+15. Add logout using supabase.auth.signOut().
+16. Keep all routes protected.
+17. Do not add demo credentials.
+18. Do not add demo users.
+19. Do not add demo assets.
+20. Do not add demo tickets.
+21. Do not break current pages, layout, routing, or Render deployment.
+
+Also check whether SUPABASE_SETUP.md has correct setup instructions:
+- Add VITE_SUPABASE_URL in Replit Secrets
+- Add VITE_SUPABASE_ANON_KEY in Replit Secrets
+- Add the same variables in Render Environment
+- Use publishable/anon key only
+- Never use service_role key in frontend
+
+After changes, run the app and confirm there are no build errors.
