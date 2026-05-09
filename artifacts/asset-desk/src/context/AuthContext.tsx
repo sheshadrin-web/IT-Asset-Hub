@@ -40,8 +40,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select("*")
       .eq("id", userId)
       .single();
-    if (error || !data) return null;
-    return data as Profile;
+    if (error) {
+      console.error("[AuthContext] fetchProfile error:", error.message, error.code);
+      return null;
+    }
+    if (!data) return null;
+    // Normalise status to title-case so DB rows with 'active'/'inactive' work
+    const raw = data as Record<string, unknown>;
+    const statusRaw = String(raw.status ?? "").toLowerCase();
+    raw.status = statusRaw === "inactive" ? "Inactive" : "Active";
+    return raw as unknown as Profile;
   }, []);
 
   // ── On mount: check env vars + restore session ────────────────────────────
@@ -93,20 +101,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (authError || !authData.user) {
+      console.error("[AuthContext] signIn error:", authError?.message, authError?.code);
       setLoading(false);
-      return { error: "Invalid email or password. Please try again." };
+      const code = authError?.code ?? "";
+      if (code === "invalid_credentials" || code === "invalid_grant") {
+        return { error: "Invalid email or password. Please check your Supabase Auth user and password." };
+      }
+      return { error: "Invalid email or password. Please check your Supabase Auth user and password." };
     }
 
     // Fetch profile
     const p = await fetchProfile(authData.user.id);
 
     if (!p) {
+      console.warn("[AuthContext] No profile found for user:", authData.user.email);
       await supabase.auth.signOut();
       setLoading(false);
-      return { error: "Your account profile is not configured. Please contact IT Admin." };
+      return { error: "Login successful, but your profile is not configured in public.profiles. Please contact IT Admin." };
     }
 
     if (p.status === "Inactive") {
+      console.warn("[AuthContext] Inactive profile for user:", authData.user.email);
       await supabase.auth.signOut();
       setLoading(false);
       return { error: "Your account is inactive. Please contact IT Admin." };

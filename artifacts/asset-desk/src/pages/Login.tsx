@@ -66,8 +66,10 @@ export default function Login() {
 
             {configError && (
               <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-                <strong>Setup required:</strong> Supabase environment variables are not configured.
-                See <strong>SUPABASE_SETUP.md</strong> for setup instructions.
+                <strong>Configuration error:</strong> Supabase URL or anon key is missing.
+                Add <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_URL</code> and{" "}
+                <code className="bg-amber-100 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to Replit Secrets,
+                then restart the app. See <strong>SUPABASE_SETUP.md</strong> for full instructions.
               </div>
             )}
 

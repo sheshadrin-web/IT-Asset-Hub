@@ -22,6 +22,7 @@ import Users from "@/pages/Users";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import MyAssets from "@/pages/MyAssets";
+import SupabaseCheck from "@/pages/SupabaseCheck";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -84,6 +85,11 @@ function Router() {
 
   return (
     <Switch>
+      {/* Public — diagnostic page, no auth required */}
+      <Route path="/supabase-check">
+        <SupabaseCheck />
+      </Route>
+
       {/* Public */}
       <Route path="/login">
         {isAuthenticated ? <Redirect to="/" /> : <Login />}

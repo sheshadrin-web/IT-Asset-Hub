@@ -1,0 +1,146 @@
+Please auto-check and complete the Supabase Auth setup for this IT Asset Hub app.
+
+Current Supabase project:
+VITE_SUPABASE_URL=https://dimbgprindvmzoylzyud.supabase.co
+
+Important:
+- Do not hardcode the Supabase anon key in source code.
+- Do not use service_role key anywhere.
+- Do not add demo users, demo credentials, demo assets, or demo tickets.
+- Keep existing UI, routing, pages, and styling stable.
+- This app is for internal IT Asset Management.
+
+Please do the following:
+
+1. Verify Supabase client setup
+- Check src/lib/supabaseClient.ts.
+- Confirm it reads:
+  import.meta.env.VITE_SUPABASE_URL
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+- If either value is missing, show a clear “Supabase Not Configured” message.
+- If both values exist, show the login page normally.
+- Do not hardcode any key.
+
+2. Verify AuthContext
+- Check AuthContext.tsx or equivalent auth provider.
+- Confirm app checks Supabase session on load.
+- Confirm it listens to auth state changes.
+- Confirm signIn uses:
+  supabase.auth.signInWithPassword()
+- Confirm logout uses:
+  supabase.auth.signOut()
+- Confirm authenticated user profile is fetched from public.profiles.
+- Confirm profile role and status are stored in auth context.
+
+3. Improve login error debugging
+- Update the login page to show clearer errors:
+  - If Supabase returns invalid_credentials, show:
+    “Invalid email or password. Please check your Supabase Auth user and password.”
+  - If profile is missing, show:
+    “Login successful, but your profile is not configured in public.profiles. Please contact IT Admin.”
+  - If profile status is inactive, show:
+    “Your account is inactive. Please contact IT Admin.”
+  - If Supabase env variables are missing, show:
+    “Supabase URL or anon key is missing.”
+- Also log detailed Supabase errors to the browser console for debugging, but do not expose secrets.
+
+4. Add a temporary Supabase setup diagnostic page for admin debugging
+Create a route:
+  /supabase-check
+
+This page should:
+- Show whether VITE_SUPABASE_URL is present.
+- Show whether VITE_SUPABASE_ANON_KEY is present.
+- Show whether Supabase client initializes.
+- Show current session status.
+- Show current authenticated user email if logged in.
+- Show whether profile exists in public.profiles.
+- Show role and status if profile exists.
+- Do not show the actual anon key value.
+- Do not show secret values.
+
+5. Add setup helper SQL file
+Create or update:
+  SUPABASE_SETUP.md
+
+Include clear SQL for:
+- creating profiles table
+- creating assets table
+- creating tickets table
+- creating asset_assignments table
+- creating asset_returns table
+- enabling RLS
+- creating RLS policies
+- inserting first super_admin profile
+
+Use this first Super Admin profile template:
+
+Auth user UID:
+dc2af1b7-2d17-4b4a-af00-f4b873d916e1
+
+Email:
+sheshadri.n@mileseducation.com
+
+Profile row:
+insert into public.profiles (
+  id,
+  full_name,
+  email,
+  role,
+  department,
+  location,
+  status
+)
+values (
+  'dc2af1b7-2d17-4b4a-af00-f4b873d916e1',
+  'Sheshadri N',
+  'sheshadri.n@mileseducation.com',
+  'super_admin',
+  'IT',
+  'Bangalore',
+  'active'
+)
+on conflict (email) do update set
+  id = excluded.id,
+  full_name = excluded.full_name,
+  role = excluded.role,
+  department = excluded.department,
+  location = excluded.location,
+  status = excluded.status;
+
+6. Add Render deployment checklist to SUPABASE_SETUP.md
+Include:
+- Add VITE_SUPABASE_URL in Render Environment.
+- Add VITE_SUPABASE_ANON_KEY in Render Environment.
+- Save changes.
+- Manual Deploy → Deploy latest commit.
+- Ensure latest deployed commit includes Supabase authentication changes.
+
+7. Add Replit deployment checklist
+Include:
+- Add VITE_SUPABASE_URL in Replit Secrets.
+- Add VITE_SUPABASE_ANON_KEY in Replit Secrets.
+- Restart Replit app.
+- Test /login.
+- Test /supabase-check.
+- Confirm login works before pushing to GitHub.
+
+8. Check build
+Run typecheck/build if available.
+Fix any TypeScript/build errors.
+Do not break Render deployment.
+
+9. Tell me final next actions
+After completing changes, summarize:
+- Which files changed.
+- Whether Supabase env variables are detected.
+- Whether /supabase-check is available.
+- Exact commands I need to run:
+  git add -A
+  git commit -m "Improve Supabase auth setup and diagnostics"
+  git push origin main
+
+Do not remove existing working pages.
+Do not remove protected routes.
+Do not remove role-based access.
+Do not add any demo data.
