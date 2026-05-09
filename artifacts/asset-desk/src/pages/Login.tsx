@@ -57,6 +57,7 @@ export default function Login() {
                 <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain p-1" />
               </div>
               <div>
+                <h1 className="text-base font-bold text-white leading-tight">Miles Education Pvt Ltd</h1>
                 <p className="text-blue-200 text-xs mt-0.5">IT Asset &amp; Helpdesk Portal</p>
               </div>
             </div>

@@ -101,7 +101,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain p-0.5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] text-sidebar-foreground/60 truncate">IT Helpdesk Portal</div>
+            <div className="text-xs font-bold text-white leading-tight truncate">Miles Education Pvt Ltd</div>
+            <div className="text-[10px] text-sidebar-foreground/60 mt-0.5 truncate">IT Asset &amp; Helpdesk Portal</div>
           </div>
           <button
             className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0"
