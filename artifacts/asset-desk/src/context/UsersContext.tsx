@@ -2,8 +2,6 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Profile, UserRole, UserStatus } from "@/data/mockData";
 
-// RLS policies on the "profiles" table must allow admins to read all profiles.
-
 interface UpdateProfileInput {
   full_name:  string;
   role:       UserRole;
@@ -13,11 +11,11 @@ interface UpdateProfileInput {
 }
 
 interface UsersContextType {
-  users:        Profile[];
-  loading:      boolean;
-  refresh:      () => Promise<void>;
-  updateUser:   (id: string, data: UpdateProfileInput) => Promise<void>;
-  deleteUser:   (id: string) => Promise<void>;
+  users:       Profile[];
+  loading:     boolean;
+  refresh:     () => Promise<void>;
+  updateUser:  (id: string, data: UpdateProfileInput) => Promise<void>;
+  removeUser:  (id: string) => void;  // optimistic removal after edge fn deletes auth user
 }
 
 const UsersContext = createContext<UsersContextType | null>(null);
@@ -39,6 +37,7 @@ export function UsersProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
+  // Direct RLS update — safe because our policy allows authenticated users to update profiles.
   const updateUser = async (id: string, data: UpdateProfileInput): Promise<void> => {
     const { error } = await supabase
       .from("profiles")
@@ -46,27 +45,17 @@ export function UsersProvider({ children }: { children: ReactNode }) {
       .eq("id", id);
     if (error) throw new Error(error.message);
     setUsers(prev =>
-      prev.map(u =>
-        u.id === id
-          ? { ...u, ...data, updated_at: new Date().toISOString() }
-          : u
-      )
+      prev.map(u => u.id === id ? { ...u, ...data, updated_at: new Date().toISOString() } : u)
     );
   };
 
-  const deleteUser = async (id: string): Promise<void> => {
-    // This deletes the profile row only — the Supabase auth user is NOT deleted.
-    // To fully remove a user, an admin must also delete them from Supabase Auth dashboard.
-    const { error } = await supabase
-      .from("profiles")
-      .delete()
-      .eq("id", id);
-    if (error) throw new Error(error.message);
+  // Called after Edge Function successfully deletes the auth user (which cascades to profile).
+  const removeUser = (id: string) => {
     setUsers(prev => prev.filter(u => u.id !== id));
   };
 
   return (
-    <UsersContext.Provider value={{ users, loading, refresh: fetchUsers, updateUser, deleteUser }}>
+    <UsersContext.Provider value={{ users, loading, refresh: fetchUsers, updateUser, removeUser }}>
       {children}
     </UsersContext.Provider>
   );

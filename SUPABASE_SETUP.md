@@ -2,8 +2,8 @@
 
 ## Overview
 
-This app uses Supabase for authentication and database. It requires two environment variables.
-The anon/publishable key is safe for frontend use — **never use the service_role key**.
+This app uses Supabase for authentication and database. The frontend needs only the anon key.
+The `service_role` key is used exclusively inside the Supabase Edge Function — never in frontend code.
 
 ---
 
@@ -22,10 +22,13 @@ After adding secrets → **restart the Replit app** → test `/supabase-check`.
 
 ### Render (production)
 
-Go to **Render → your service → Environment** and add the same two variables, then:
+Go to **Render → your service → Environment** and add the **same two variables**, then:
 **Save Changes → Manual Deploy → Deploy latest commit.**
 
 > Vite bakes `VITE_*` variables into the bundle at build time — set them **before** the build.
+
+> ⚠️ **DO NOT** add `SUPABASE_SERVICE_ROLE_KEY` to Replit Secrets or Render environment.
+> It belongs only in the Supabase Edge Function environment (see Section 10).
 
 ---
 
@@ -35,7 +38,7 @@ Go to **Render → your service → Environment** and add the same two variables
 
 - **Project URL** → `VITE_SUPABASE_URL`
 - **anon / public** key → `VITE_SUPABASE_ANON_KEY`
-- ⚠️ **Never use the `service_role` key** in frontend code.
+- **service_role** key → used in Edge Function only (see Section 10)
 
 ---
 
@@ -103,7 +106,7 @@ create table if not exists public.tickets (
 );
 ```
 
-### asset_assignments table (audit trail)
+### asset_assignments table
 
 ```sql
 create table if not exists public.asset_assignments (
@@ -118,7 +121,7 @@ create table if not exists public.asset_assignments (
 );
 ```
 
-### asset_returns table (audit trail)
+### asset_returns table
 
 ```sql
 create table if not exists public.asset_returns (
@@ -139,9 +142,8 @@ create table if not exists public.asset_returns (
 
 > ⚠️ **IMPORTANT — avoid infinite recursion (error 42P17)**
 >
-> Do **not** use `auth.role() = 'authenticated'` in policies on the `profiles` table.
-> This causes Postgres to recursively evaluate the policy, leading to error `42P17`.
-> Use `auth.uid() is not null` instead — it checks the JWT directly without a DB lookup.
+> Use `auth.uid() is not null` — NOT `auth.role() = 'authenticated'` — in all policies on the `profiles`
+> table. `auth.role()` triggers a DB lookup that can recursively evaluate the policy.
 
 ### Step 1 — Enable RLS
 
@@ -153,98 +155,61 @@ alter table public.asset_assignments enable row level security;
 alter table public.asset_returns     enable row level security;
 ```
 
-### Step 2 — Drop any broken policies (if you already ran old policies)
+### Step 2 — Drop all existing policies (safe to run multiple times)
 
 ```sql
--- Drop old policies if they exist
 drop policy if exists "profiles_select_authenticated"  on public.profiles;
 drop policy if exists "profiles_update_own"            on public.profiles;
 drop policy if exists "profiles_insert_authenticated"  on public.profiles;
-drop policy if exists "assets_select_authenticated"    on public.assets;
-drop policy if exists "assets_insert_authenticated"    on public.assets;
-drop policy if exists "assets_update_authenticated"    on public.assets;
-drop policy if exists "assets_delete_authenticated"    on public.assets;
-drop policy if exists "tickets_select_authenticated"   on public.tickets;
-drop policy if exists "tickets_insert_authenticated"   on public.tickets;
-drop policy if exists "tickets_update_authenticated"   on public.tickets;
-drop policy if exists "tickets_delete_authenticated"   on public.tickets;
-drop policy if exists "asset_assignments_all"          on public.asset_assignments;
-drop policy if exists "asset_returns_all"              on public.asset_returns;
+drop policy if exists "profiles_select"                on public.profiles;
+drop policy if exists "profiles_insert"                on public.profiles;
+drop policy if exists "profiles_update"                on public.profiles;
+drop policy if exists "assets_select"                  on public.assets;
+drop policy if exists "assets_insert"                  on public.assets;
+drop policy if exists "assets_update"                  on public.assets;
+drop policy if exists "assets_delete"                  on public.assets;
+drop policy if exists "tickets_select"                 on public.tickets;
+drop policy if exists "tickets_insert"                 on public.tickets;
+drop policy if exists "tickets_update"                 on public.tickets;
+drop policy if exists "tickets_delete"                 on public.tickets;
+drop policy if exists "asset_assignments_select"       on public.asset_assignments;
+drop policy if exists "asset_assignments_insert"       on public.asset_assignments;
+drop policy if exists "asset_returns_select"           on public.asset_returns;
+drop policy if exists "asset_returns_insert"           on public.asset_returns;
 ```
 
 ### Step 3 — Create correct policies
 
 ```sql
--- ── profiles ──────────────────────────────────────────────────────────────────
--- Use auth.uid() is not null — avoids the 42P17 infinite recursion bug
-create policy "profiles_select"
-  on public.profiles for select
-  using (auth.uid() is not null);
+-- profiles
+create policy "profiles_select" on public.profiles for select using (auth.uid() is not null);
+create policy "profiles_insert" on public.profiles for insert with check (auth.uid() is not null);
+create policy "profiles_update" on public.profiles for update using (auth.uid() is not null);
 
-create policy "profiles_insert"
-  on public.profiles for insert
-  with check (auth.uid() is not null);
+-- assets
+create policy "assets_select" on public.assets for select using (auth.uid() is not null);
+create policy "assets_insert" on public.assets for insert with check (auth.uid() is not null);
+create policy "assets_update" on public.assets for update using (auth.uid() is not null);
+create policy "assets_delete" on public.assets for delete using (auth.uid() is not null);
 
-create policy "profiles_update"
-  on public.profiles for update
-  using (auth.uid() is not null);
+-- tickets
+create policy "tickets_select" on public.tickets for select using (auth.uid() is not null);
+create policy "tickets_insert" on public.tickets for insert with check (auth.uid() is not null);
+create policy "tickets_update" on public.tickets for update using (auth.uid() is not null);
+create policy "tickets_delete" on public.tickets for delete using (auth.uid() is not null);
 
--- ── assets ────────────────────────────────────────────────────────────────────
-create policy "assets_select"
-  on public.assets for select
-  using (auth.uid() is not null);
+-- asset_assignments
+create policy "asset_assignments_select" on public.asset_assignments for select using (auth.uid() is not null);
+create policy "asset_assignments_insert" on public.asset_assignments for insert with check (auth.uid() is not null);
 
-create policy "assets_insert"
-  on public.assets for insert
-  with check (auth.uid() is not null);
-
-create policy "assets_update"
-  on public.assets for update
-  using (auth.uid() is not null);
-
-create policy "assets_delete"
-  on public.assets for delete
-  using (auth.uid() is not null);
-
--- ── tickets ───────────────────────────────────────────────────────────────────
-create policy "tickets_select"
-  on public.tickets for select
-  using (auth.uid() is not null);
-
-create policy "tickets_insert"
-  on public.tickets for insert
-  with check (auth.uid() is not null);
-
-create policy "tickets_update"
-  on public.tickets for update
-  using (auth.uid() is not null);
-
-create policy "tickets_delete"
-  on public.tickets for delete
-  using (auth.uid() is not null);
-
--- ── asset_assignments ─────────────────────────────────────────────────────────
-create policy "asset_assignments_select"
-  on public.asset_assignments for select
-  using (auth.uid() is not null);
-
-create policy "asset_assignments_insert"
-  on public.asset_assignments for insert
-  with check (auth.uid() is not null);
-
--- ── asset_returns ─────────────────────────────────────────────────────────────
-create policy "asset_returns_select"
-  on public.asset_returns for select
-  using (auth.uid() is not null);
-
-create policy "asset_returns_insert"
-  on public.asset_returns for insert
-  with check (auth.uid() is not null);
+-- asset_returns
+create policy "asset_returns_select" on public.asset_returns for select using (auth.uid() is not null);
+create policy "asset_returns_insert" on public.asset_returns for insert with check (auth.uid() is not null);
 ```
 
 ---
 
-## 5. First Super Admin Profile
+## 5. First Super Admin
 
 ### Step 1 — Confirm the auth user exists
 
@@ -257,15 +222,7 @@ If the user doesn't exist, use **Invite user** and set their password.
 ### Step 2 — Insert the profile row
 
 ```sql
-insert into public.profiles (
-  id,
-  full_name,
-  email,
-  role,
-  department,
-  location,
-  status
-)
+insert into public.profiles (id, full_name, email, role, department, location, status)
 values (
   'dc2af1b7-2d17-4b4a-af00-f4b873d916e1',
   'Sheshadri N',
@@ -276,48 +233,22 @@ values (
   'Active'
 )
 on conflict (email) do update set
-  id         = excluded.id,
-  full_name  = excluded.full_name,
-  role       = excluded.role,
-  department = excluded.department,
-  location   = excluded.location,
-  status     = excluded.status;
+  id=excluded.id, full_name=excluded.full_name, role=excluded.role,
+  department=excluded.department, location=excluded.location, status=excluded.status;
 ```
-
-> **Status must be `'Active'` (capital A).** The app also accepts `'active'` (lowercase) and normalises it automatically.
 
 ---
 
 ## 6. Diagnostic Page
 
-After setup, visit `/supabase-check` (no login required) to verify:
+Visit `/supabase-check` (no login required) to verify:
 - Both env vars present
 - Supabase client initialised
 - Session and profile after login
 
 ---
 
-## 7. Replit Deployment Checklist
-
-- [ ] Add `VITE_SUPABASE_URL` in Replit Secrets
-- [ ] Add `VITE_SUPABASE_ANON_KEY` in Replit Secrets
-- [ ] Restart Replit app
-- [ ] Visit `/supabase-check` → confirm env vars present
-- [ ] Visit `/login` → sign in → confirm no error
-- [ ] Visit `/supabase-check` again → confirm profile found, role = `super_admin`
-- [ ] Confirm role-based dashboard loads correctly
-- [ ] Push to GitHub once login is verified
-
-## 8. Render Deployment Checklist
-
-- [ ] Add `VITE_SUPABASE_URL` in Render service → Environment
-- [ ] Add `VITE_SUPABASE_ANON_KEY` in Render service → Environment
-- [ ] Click **Save Changes**
-- [ ] Click **Manual Deploy → Deploy latest commit**
-- [ ] Confirm deployed commit includes Supabase auth changes
-- [ ] Visit deployed URL → `/supabase-check` → verify all checks pass
-
-## 9. Build Command (Render)
+## 7. Build Command (Render)
 
 ```
 pnpm install --frozen-lockfile && pnpm --filter @workspace/asset-desk run build:render
@@ -327,11 +258,150 @@ pnpm install --frozen-lockfile && pnpm --filter @workspace/asset-desk run build:
 
 ---
 
-## Security Checklist
+## 8. Replit Deployment Checklist
 
-- [x] Only `anon` / `public` key used in frontend code
-- [x] `service_role` key never in codebase
-- [x] RLS enabled on all tables with `auth.uid() is not null` (avoids 42P17)
-- [x] Env vars stored in Replit Secrets / Render Environment only
+- [ ] `VITE_SUPABASE_URL` in Replit Secrets
+- [ ] `VITE_SUPABASE_ANON_KEY` in Replit Secrets
+- [ ] Restart Replit app
+- [ ] `/supabase-check` → all green
+- [ ] `/login` → sign in → profile found, role = `super_admin`
+- [ ] `/users` → user list loads, Add User button visible
+
+---
+
+## 9. Render Deployment Checklist
+
+- [ ] `VITE_SUPABASE_URL` in Render service → Environment
+- [ ] `VITE_SUPABASE_ANON_KEY` in Render service → Environment
+- [ ] Save Changes → Manual Deploy → Deploy latest commit
+- [ ] Confirm env vars were set BEFORE the build
+
+---
+
+## 10. Supabase Edge Function — admin-users
+
+The Edge Function handles user creation and deletion, which requires the `service_role` key.
+The frontend never sees or uses the service_role key.
+
+### File location in this repo
+
+```
+supabase/
+  functions/
+    admin-users/
+      index.ts      ← Edge Function source
+```
+
+### Supported actions
+
+| Action | What it does |
+|--------|-------------|
+| `createUser` | Creates Supabase Auth user + profile row |
+| `updateUserProfile` | Updates profile fields via service role |
+| `deactivateUser` | Sets `status = 'Inactive'` in profiles |
+| `deleteUser` | Deletes auth user (cascades to profile) |
+
+### Deploy the Edge Function
+
+#### Prerequisites
+
+Install the Supabase CLI:
+
+```bash
+npm install -g supabase
+```
+
+#### Step 1 — Login and link
+
+```bash
+supabase login
+supabase link --project-ref dimbgprindvmzoylzyud
+```
+
+#### Step 2 — Set the service_role secret on the function
+
+```bash
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+```
+
+Get your service_role key from **Supabase Dashboard → Project Settings → API → service_role (secret)**.
+
+> ⚠️ This key is stored securely in Supabase's function environment only.
+> Do NOT add it to Replit Secrets, Render env, or any frontend config.
+
+#### Step 3 — Deploy the function
+
+```bash
+supabase functions deploy admin-users --no-verify-jwt
+```
+
+> `--no-verify-jwt` is used because the function verifies the JWT manually and checks the
+> caller's profile role (`super_admin`). This gives us more control over the auth check.
+
+#### Step 4 — Test the function
+
+```bash
+curl -i --request POST \
+  "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/admin-users" \
+  --header "Authorization: Bearer <your-anon-or-user-jwt>" \
+  --header "Content-Type: application/json" \
+  --data '{ "action": "createUser", "payload": { "email": "test@example.com", "password": "Test1234!", "full_name": "Test User", "role": "end_user", "department": "IT", "location": "Bangalore" } }'
+```
+
+### How the function enforces security
+
+1. Reads `Authorization: Bearer <token>` from request header
+2. Creates a caller-scoped Supabase client with that token
+3. Calls `getUser()` to verify the token is valid and not expired
+4. Fetches the caller's profile row and checks `role = 'super_admin'`
+5. If not `super_admin` → returns `403 Forbidden`
+6. Only then uses the service-role client for the actual operation
+7. The service_role key is never returned in any response
+
+### Secrets summary
+
+| Secret | Where it lives | Purpose |
+|--------|---------------|---------|
+| `VITE_SUPABASE_URL` | Replit Secrets + Render env | Frontend Supabase connection |
+| `VITE_SUPABASE_ANON_KEY` | Replit Secrets + Render env | Frontend Supabase connection |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Function secrets ONLY | Admin user operations inside Edge Function |
+
+---
+
+## 11. Adding Users (In-App Flow)
+
+Once the Edge Function is deployed, Super Admin can:
+
+1. Go to **Users** page in the app
+2. Click **Add User**
+3. Fill in: Full Name, Email, Role, Department, Location, Temporary Password
+4. Click **Create User**
+5. The Edge Function creates the auth user and profile in one step
+6. Share the temporary password with the new user securely
+7. The user can log in immediately — no email confirmation required
+
+### Without the Edge Function
+
+If the Edge Function is not deployed, the app shows a banner:
+> "Admin user management backend is not configured yet. Please deploy the Supabase Edge Function."
+
+You can still:
+- View all users
+- Edit user profiles (name, role, department, location, status)
+- Deactivate / reactivate users
+- Export users to CSV
+
+You cannot:
+- Create new users from inside the app
+- Hard-delete users from inside the app
+
+---
+
+## 12. Security Checklist
+
+- [x] Only `anon` / `public` key used in frontend
+- [x] `service_role` key never in any frontend config
+- [x] RLS enabled on all tables with `auth.uid() is not null`
+- [x] Edge Function verifies caller is `super_admin` before any operation
 - [x] No demo credentials or hardcoded users in source code
 - [x] Anon key value never shown in `/supabase-check` UI

@@ -1,0 +1,158 @@
+I want Super Admin user management to work from inside the app.
+
+Current issue:
+I do not want to manually create, edit, or delete users from Supabase dashboard every time.
+Super Admin should be able to create users, edit users, deactivate users, reset/update roles, and delete/deactivate users from the app UI.
+When Super Admin creates a user in the app, it should create the Supabase Auth user and also create the matching public.profiles row.
+When Super Admin updates or deletes/deactivates a user in the app, it should reflect in Supabase backend as well.
+
+Important security requirement:
+Do NOT use the Supabase service_role key in the frontend React app.
+Do NOT expose service_role key in Vite variables.
+Do NOT hardcode secrets.
+Only use VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend.
+
+Use a secure backend approach:
+Create Supabase Edge Function documentation and implementation files for user management.
+The Edge Function should use SUPABASE_SERVICE_ROLE_KEY only on the server/function side.
+
+Required user management features:
+
+1. Super Admin User Management UI
+Update the Users page so Super Admin can:
+- View users from public.profiles
+- Add new user
+- Edit user profile
+- Change role
+- Change department
+- Change location
+- Activate/deactivate user
+- Delete/deactivate user
+- Search/filter users
+
+Roles:
+- super_admin
+- it_admin
+- it_agent
+- end_user
+
+Status:
+- Active
+- Inactive
+
+2. Add User flow
+When Super Admin adds a user:
+- Collect full_name
+- Collect email
+- Collect role
+- Collect department
+- Collect location
+- Collect temporary password OR auto-generate temporary password
+- Call a secure Supabase Edge Function named admin-users
+- Edge Function should create user in Supabase Auth using supabase.auth.admin.createUser()
+- Edge Function should create matching row in public.profiles
+- Return success/failure clearly
+- Do not add demo users
+
+3. Edit User flow
+When Super Admin edits a user:
+- Update public.profiles
+- Allow role/status/department/location/full_name changes
+- Do not allow a Super Admin to accidentally remove their own super_admin access without warning
+- Do not allow non-super_admin users to manage users
+
+4. Deactivate user
+Instead of hard delete by default:
+- Update public.profiles.status = 'Inactive'
+- This should block login/access through the app after profile check
+- Optional: Edge Function can also ban or disable user if Supabase supports it safely
+- Prefer deactivate over delete for audit safety
+
+5. Delete user option
+If delete is included:
+- Add confirmation modal
+- Only super_admin can delete
+- Edge Function should delete Supabase Auth user using admin API
+- Delete or cascade matching public.profiles row
+- Make this optional and clearly separated from deactivate
+
+6. Edge Function
+Create folder/file guidance for:
+supabase/functions/admin-users/index.ts
+
+The function should support actions:
+- createUser
+- updateUserProfile
+- deactivateUser
+- deleteUser
+
+Security inside Edge Function:
+- Read Authorization bearer token from request
+- Verify current logged-in user
+- Fetch current user profile from public.profiles
+- Allow only role = super_admin
+- If not super_admin, return 403
+- Use service role key only inside the function
+- Never return secret values
+- Add CORS headers for the frontend
+- Return JSON responses
+
+7. Frontend API helper
+Create a helper like:
+src/lib/adminUsersApi.ts
+
+It should:
+- Get current Supabase session access token
+- Call the Supabase Edge Function with Authorization: Bearer <access_token>
+- Send action payload
+- Handle errors and return clear messages
+
+8. Users page integration
+Update Users page to use:
+- Supabase table read for listing profiles
+- Edge Function for create/delete/deactivate actions
+- Supabase direct update only if RLS allows safe update, otherwise use Edge Function
+- Loading states
+- Success/error toast messages
+- Empty state if no users
+
+9. SQL / RLS update
+Update SUPABASE_SETUP.md with SQL needed for:
+- profiles table
+- policies
+- grants
+- helper policies
+- profile status check
+- super_admin role setup
+
+10. Deployment instructions
+Update SUPABASE_SETUP.md with:
+- How to deploy Supabase Edge Function
+- Which secret must be added to Supabase function environment:
+  SUPABASE_SERVICE_ROLE_KEY
+- Explain that SUPABASE_SERVICE_ROLE_KEY must NOT be added to Replit frontend or Render frontend
+- Explain Render only needs:
+  VITE_SUPABASE_URL
+  VITE_SUPABASE_ANON_KEY
+
+11. Keep current working login
+Do not break current Supabase login.
+Do not break dashboard.
+Do not break protected routes.
+Do not add demo data.
+Do not add demo credentials.
+Do not remove existing pages.
+
+12. Add safety message in app
+In Users page, if Edge Function is not deployed yet, show:
+“Admin user management backend is not configured yet. Please deploy the Supabase Edge Function.”
+
+13. Build check
+Run typecheck/build and fix errors.
+
+After changes, summarize:
+- Files changed
+- Edge Function created
+- How to deploy the function
+- What secrets are required
+- How to test creating a user from Super Admin panel
