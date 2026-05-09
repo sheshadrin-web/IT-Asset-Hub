@@ -2,7 +2,7 @@ import { useParams, Link } from "wouter";
 import {
   ArrowLeft, Monitor, Smartphone, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
-  Wrench, Archive, UserPlus,
+  Wrench, Archive, UserPlus, RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -139,9 +139,16 @@ export default function AssetDetail() {
             </Button>
           )}
           {isAdmin && asset.status === "Assigned" && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={handleUnassign}>
-              <UserPlus className="h-4 w-4" /> Unassign
-            </Button>
+            <>
+              <Link href={`/assets/${asset.assetId}/return`}>
+                <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" data-testid="button-return-asset">
+                  <RotateCcw className="h-4 w-4" /> Return Asset
+                </Button>
+              </Link>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleUnassign}>
+                <UserPlus className="h-4 w-4" /> Unassign
+              </Button>
+            </>
           )}
           {isAdmin && asset.status !== "Under Repair" && asset.status !== "Retired" && (
             <Button variant="outline" size="sm" className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => handleUpdateStatus("Under Repair")} data-testid="button-mark-repair">

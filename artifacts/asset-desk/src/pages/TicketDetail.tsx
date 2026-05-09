@@ -3,6 +3,7 @@ import { useParams, Link } from "wouter";
 import {
   ArrowLeft, AlertTriangle, Send, UserCheck, CheckCircle,
   RefreshCw, Trash2, Monitor, Smartphone, MessageSquare, ClipboardCheck, Info,
+  XCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,20 +66,22 @@ export default function TicketDetail() {
   const { toast }       = useToast();
   const [, setLocation] = useLocation();
 
-  const [newComment,       setNewComment]       = useState("");
-  const [draftStatus,      setDraftStatus]       = useState<TicketStatus | "">("");
-  const [draftPriority,    setDraftPriority]     = useState<TicketPriority | "">("");
-  const [draftAgent,       setDraftAgent]        = useState("");
-  const [draftResolution,  setDraftResolution]   = useState("");
-  const [deleteOpen,       setDeleteOpen]        = useState(false);
-  const [saved,            setSaved]             = useState(false);
+  const [newComment,      setNewComment]      = useState("");
+  const [draftStatus,     setDraftStatus]     = useState<TicketStatus | "">("");
+  const [draftPriority,   setDraftPriority]   = useState<TicketPriority | "">("");
+  const [draftAgent,      setDraftAgent]      = useState("");
+  const [draftResolution, setDraftResolution] = useState("");
+  const [deleteOpen,      setDeleteOpen]      = useState(false);
+  const [rejectOpen,      setRejectOpen]      = useState(false);
+  const [saved,           setSaved]           = useState(false);
 
   const ticket = getTicket(id);
-  const isAdmin   = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
-  const isAgent   = currentUser?.role === "it_agent";
-  const canManage = isAdmin || isAgent;
+  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isAdmin      = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+  const isAgent      = currentUser?.role === "it_agent";
+  const isEndUser    = currentUser?.role === "end_user";
+  const canManage    = isAdmin || isAgent;
 
-  // Agents and admins from the profiles list
   const agents = users.filter(u => u.role === "it_agent" || u.role === "super_admin" || u.role === "it_admin");
   const linkedAsset = ticket?.assetId && ticket.assetId !== "N/A" ? getAsset(ticket.assetId) : null;
 
@@ -86,6 +89,10 @@ export default function TicketDetail() {
   const effectivePriority   = (draftPriority   || ticket?.priority)   as TicketPriority;
   const effectiveAgent      = draftAgent !== "" ? draftAgent : (ticket?.assignedAgent ?? "");
   const effectiveResolution = draftResolution !== "" ? draftResolution : (ticket?.resolutionNote ?? "");
+
+  // Agent status options — agents can only progress forward, not close/reject
+  const agentStatusOptions: TicketStatus[] = ["Open", "Assigned", "In Progress", "Waiting for User", "Resolved"];
+  const adminStatusOptions: TicketStatus[] = ["Open", "Assigned", "In Progress", "Waiting for User", "Resolved", "Closed", "Rejected"];
 
   const handleSaveChanges = async () => {
     if (!ticket) return;
@@ -148,6 +155,18 @@ export default function TicketDetail() {
     toast({ title: "Ticket reopened" });
   };
 
+  const handleReject = async () => {
+    if (!ticket) return;
+    try {
+      await updateTicket(ticket.ticketId, { status: "Rejected" });
+      setDraftStatus("Rejected");
+      setRejectOpen(false);
+      toast({ title: "Ticket rejected" });
+    } catch (err) {
+      toast({ title: "Failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    }
+  };
+
   const handleDelete = async () => {
     if (!ticket) return;
     try {
@@ -169,8 +188,11 @@ export default function TicketDetail() {
     );
   }
 
+  const isOwnTicket = ticket.raisedBy === currentUser?.name;
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <Link href="/tickets"><Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button></Link>
@@ -190,14 +212,19 @@ export default function TicketDetail() {
               <UserCheck className="h-4 w-4" /> Assign to Me
             </Button>
           )}
-          {isAdmin && ticket.status !== "Closed" && (
+          {isAdmin && ticket.status !== "Closed" && ticket.status !== "Rejected" && (
             <Button variant="outline" size="sm" className="gap-2 text-gray-600" onClick={handleClose} data-testid="button-close-ticket">
               <CheckCircle className="h-4 w-4" /> Close
             </Button>
           )}
-          {isAdmin && ticket.status === "Closed" && (
+          {isAdmin && (ticket.status === "Closed" || ticket.status === "Rejected") && (
             <Button variant="outline" size="sm" className="gap-2 text-blue-600" onClick={handleReopen} data-testid="button-reopen-ticket">
               <RefreshCw className="h-4 w-4" /> Reopen
+            </Button>
+          )}
+          {isAdmin && ticket.status !== "Rejected" && ticket.status !== "Closed" && (
+            <Button variant="outline" size="sm" className="gap-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => setRejectOpen(true)} data-testid="button-reject-ticket">
+              <XCircle className="h-4 w-4" /> Reject
             </Button>
           )}
           {isAdmin && (
@@ -210,6 +237,7 @@ export default function TicketDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-5">
+          {/* Description */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -221,6 +249,7 @@ export default function TicketDetail() {
             </CardContent>
           </Card>
 
+          {/* Resolution note — visible to all, editable by IT */}
           {(ticket.resolutionNote || (canManage && (ticket.status === "Resolved" || ticket.status === "Closed"))) && (
             <Card className={cn("border-2", ticket.resolutionNote ? "border-emerald-300 bg-emerald-500/5" : "border-dashed border-border")}>
               <CardHeader className="pb-3">
@@ -238,6 +267,17 @@ export default function TicketDetail() {
             </Card>
           )}
 
+          {/* Rejection notice for end user */}
+          {isEndUser && ticket.status === "Rejected" && (
+            <Card className="border-2 border-red-200 bg-red-50">
+              <CardContent className="py-4 flex items-center gap-3">
+                <XCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                <p className="text-sm text-red-700">This ticket has been rejected by the IT team. Please raise a new ticket or contact IT directly for more information.</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Comments */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -270,6 +310,7 @@ export default function TicketDetail() {
                 );
               })}
 
+              {/* Comment box — available to all roles */}
               <div className="border-t border-border pt-4 space-y-2">
                 <div className="flex items-center gap-2 mb-2">
                   <Avatar className="h-7 w-7">
@@ -290,7 +331,9 @@ export default function TicketDetail() {
           </Card>
         </div>
 
+        {/* Right sidebar */}
         <div className="space-y-4">
+          {/* Ticket info */}
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Ticket Info</CardTitle></CardHeader>
             <CardContent className="space-y-2.5 text-sm">
@@ -317,6 +360,7 @@ export default function TicketDetail() {
             </CardContent>
           </Card>
 
+          {/* Raised By */}
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Raised By</CardTitle></CardHeader>
             <CardContent>
@@ -334,6 +378,7 @@ export default function TicketDetail() {
             </CardContent>
           </Card>
 
+          {/* Linked asset */}
           {linkedAsset && (
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Asset Info</CardTitle></CardHeader>
@@ -357,16 +402,21 @@ export default function TicketDetail() {
             </Card>
           )}
 
+          {/* Manage panel — IT Agent and IT Admin/Super Admin */}
           {canManage && (
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Manage Ticket</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-                  <Select value={effectiveStatus} onValueChange={v => setDraftStatus(v as TicketStatus)}>
+                  <Select
+                    value={effectiveStatus}
+                    onValueChange={v => setDraftStatus(v as TicketStatus)}
+                    disabled={isAgent && ticket.status === "Closed"}
+                  >
                     <SelectTrigger className="text-sm" data-testid="select-update-status"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {(["Open","Assigned","In Progress","Waiting for User","Resolved","Closed","Rejected"] as TicketStatus[]).map(s => (
+                      {(isAdmin ? adminStatusOptions : agentStatusOptions).map(s => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
                     </SelectContent>
@@ -383,18 +433,21 @@ export default function TicketDetail() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Assigned Agent</label>
-                  <Select value={effectiveAgent || "unassigned"} onValueChange={v => setDraftAgent(v === "unassigned" ? "" : v)} disabled={isAgent && !isAdmin}>
-                    <SelectTrigger className="text-sm" data-testid="select-assigned-agent"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {agents.map(agent => (
-                        <SelectItem key={agent.id} value={agent.full_name}>{agent.full_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* Agent assignment — admins only */}
+                {isAdmin && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Assigned Agent</label>
+                    <Select value={effectiveAgent || "unassigned"} onValueChange={v => setDraftAgent(v === "unassigned" ? "" : v)}>
+                      <SelectTrigger className="text-sm" data-testid="select-assigned-agent"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {agents.map(agent => (
+                          <SelectItem key={agent.id} value={agent.full_name}>{agent.full_name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 {(effectiveStatus === "Resolved" || effectiveStatus === "Closed") && (
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Resolution Note</label>
@@ -411,9 +464,55 @@ export default function TicketDetail() {
               </CardContent>
             </Card>
           )}
+
+          {/* End user — read-only status view */}
+          {isEndUser && (
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Ticket Status</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Status</span>
+                  <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[ticket.status])}>{ticket.status}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Priority</span>
+                  <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[ticket.priority])}>{ticket.priority}</span>
+                </div>
+                {ticket.assignedAgent && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Agent</span>
+                    <span className="font-medium text-foreground">{ticket.assignedAgent}</span>
+                  </div>
+                )}
+                {ticket.resolutionNote && (
+                  <div className="pt-2 border-t border-border">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Resolution</p>
+                    <p className="text-sm text-foreground">{ticket.resolutionNote}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
+      {/* Reject confirm */}
+      <AlertDialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reject Ticket</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to reject <strong>{ticket.ticketId}</strong>? The user will be notified and cannot edit the ticket.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={handleReject}>Reject Ticket</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete confirm */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -424,9 +523,7 @@ export default function TicketDetail() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={handleDelete}>
-              Delete
-            </AlertDialogAction>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={handleDelete}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

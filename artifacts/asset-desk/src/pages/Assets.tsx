@@ -4,11 +4,14 @@ import {
   Plus, Search, Monitor, Smartphone, Eye, Edit,
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -17,7 +20,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -46,12 +49,10 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   Retired:        "bg-gray-400",
 };
 
-// ─── CSV helpers ────────────────────────────────────────────────────────────
 const CSV_HEADERS = [
   "assetType","brand","model","serialNumber","imeiNumber",
   "purchaseDate","warrantyEndDate","location","accessories","remarks",
 ];
-
 const CSV_TEMPLATE = [
   CSV_HEADERS.join(","),
   "Laptop,Dell,Latitude 5540,SN-EXAMPLE-001,,2024-01-15,2027-01-15,IT Storage,Charger,New stock",
@@ -68,37 +69,33 @@ function parseCsvText(text: string): ParsedRow[] {
   const lines = text.trim().split("\n").filter(Boolean);
   if (lines.length < 2) return [];
   const [headerLine, ...dataLines] = lines;
-  const headers = headerLine.split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-
+  const headers = headerLine.split(",").map(h => h.trim().replace(/^"|"$/g, ""));
   return dataLines.map((line, i) => {
-    const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+    const values = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
     const row: Record<string, string> = {};
     headers.forEach((h, j) => { row[h] = values[j] ?? ""; });
-
     const errors: string[] = [];
-    if (!["Laptop","Mobile"].includes(row.assetType ?? ""))
-      errors.push("assetType must be Laptop or Mobile");
+    if (!["Laptop", "Mobile"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop or Mobile");
     if (!row.brand) errors.push("brand is required");
     if (!row.model) errors.push("model is required");
     if (!row.serialNumber) errors.push("serialNumber is required");
     if (!row.purchaseDate) errors.push("purchaseDate is required");
     if (!row.warrantyEndDate) errors.push("warrantyEndDate is required");
     if (!row.location) errors.push("location is required");
-
     return {
       index: i + 1,
       data: {
-        assetType:      (row.assetType as "Laptop" | "Mobile") || "Laptop",
-        brand:          row.brand,
-        model:          row.model,
-        serialNumber:   row.serialNumber,
-        imeiNumber:     row.imeiNumber || undefined,
-        purchaseDate:   row.purchaseDate,
-        warrantyEndDate:row.warrantyEndDate,
-        status:         "Available" as AssetStatus,
-        location:       row.location,
-        accessories:    row.accessories ?? "",
-        remarks:        row.remarks ?? "",
+        assetType:       (row.assetType as "Laptop" | "Mobile") || "Laptop",
+        brand:           row.brand,
+        model:           row.model,
+        serialNumber:    row.serialNumber,
+        imeiNumber:      row.imeiNumber || undefined,
+        purchaseDate:    row.purchaseDate,
+        warrantyEndDate: row.warrantyEndDate,
+        status:          "Available" as AssetStatus,
+        location:        row.location,
+        accessories:     row.accessories ?? "",
+        remarks:         row.remarks ?? "",
       },
       errors,
     };
@@ -107,46 +104,47 @@ function parseCsvText(text: string): ParsedRow[] {
 
 function downloadTemplate() {
   const blob = new Blob([CSV_TEMPLATE], { type: "text/csv" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
-  a.download = "asset_bulk_upload_template.csv";
-  a.click();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "asset_bulk_upload_template.csv"; a.click();
   URL.revokeObjectURL(url);
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
 export default function Assets() {
   const { assets, addAssets, assignAsset, updateStatus, unassignAsset, deleteAssets } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
-  // Filters
-  const [search, setSearch]         = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const [search, setSearch]           = useState("");
+  const [typeFilter, setTypeFilter]   = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // Row selection
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected]         = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const selectAllRef = useRef<HTMLButtonElement>(null);
 
-  // Assign dialog
+  // Assign state
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
-  const [assignUser, setAssignUser]     = useState("");
+  const [assignStep,   setAssignStep]   = useState<"select" | "handover">("select");
+  const [assignUser,   setAssignUser]   = useState("");
+  const [handoverDate, setHandoverDate] = useState(new Date().toISOString().split("T")[0]);
+  const [handoverAcc,  setHandoverAcc]  = useState("");
+  const [handoverNote, setHandoverNote] = useState("");
+  const [assignConfirmOpen, setAssignConfirmOpen] = useState(false);
+  const [assigning, setAssigning] = useState(false);
 
-  // Bulk upload dialog
-  const [uploadOpen, setUploadOpen]     = useState(false);
-  const [parsedRows, setParsedRows]     = useState<ParsedRow[]>([]);
+  // Bulk upload
+  const [uploadOpen, setUploadOpen]   = useState(false);
+  const [parsedRows, setParsedRows]   = useState<ParsedRow[]>([]);
   const [uploadFileName, setUploadFileName] = useState("");
-  const [dragOver, setDragOver]         = useState(false);
+  const [dragOver, setDragOver]       = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
   const canEdit = isAdmin || currentUser?.role === "it_agent";
 
-  const filtered = assets.filter((a) => {
+  const filtered = assets.filter(a => {
     const q = search.toLowerCase();
     const matchSearch = !q
       || a.assetId.toLowerCase().includes(q)
@@ -159,67 +157,71 @@ export default function Assets() {
     return matchSearch && matchType && matchStatus;
   });
 
-  const allFilteredIds   = filtered.map((a) => a.assetId);
-  const allSelected      = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
-  const someSelected     = allFilteredIds.some((id) => selected.has(id)) && !allSelected;
-  const selectedCount    = [...selected].filter((id) => allFilteredIds.includes(id)).length;
+  const allFilteredIds = filtered.map(a => a.assetId);
+  const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.has(id));
+  const someSelected   = allFilteredIds.some(id => selected.has(id)) && !allSelected;
+  const selectedCount  = [...selected].filter(id => allFilteredIds.includes(id)).length;
 
-  // Sync indeterminate state on the select-all checkbox
   useEffect(() => {
-    if (selectAllRef.current) {
+    if (selectAllRef.current)
       (selectAllRef.current as unknown as HTMLInputElement).indeterminate = someSelected;
-    }
   }, [someSelected]);
 
   const toggleAll = () => {
     if (allSelected) {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        allFilteredIds.forEach((id) => next.delete(id));
-        return next;
-      });
+      setSelected(prev => { const n = new Set(prev); allFilteredIds.forEach(id => n.delete(id)); return n; });
     } else {
-      setSelected((prev) => new Set([...prev, ...allFilteredIds]));
+      setSelected(prev => new Set([...prev, ...allFilteredIds]));
     }
   };
-
   const toggleRow = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
   const handleBulkDelete = async () => {
-    const ids = [...selected].filter((id) => allFilteredIds.includes(id));
+    const ids = [...selected].filter(id => allFilteredIds.includes(id));
     try {
       await deleteAssets(ids);
-      setSelected(new Set());
-      setDeleteConfirmOpen(false);
+      setSelected(new Set()); setDeleteConfirmOpen(false);
       toast({ title: `${ids.length} asset${ids.length !== 1 ? "s" : ""} deleted` });
     } catch {
       toast({ title: "Failed to delete assets", variant: "destructive" });
     }
   };
 
-  // Assign
-  const activeUsers  = users.filter((u) => u.status === "active");
-  const selectedUser = users.find((u) => u.id === assignUser);
+  const activeUsers  = users.filter(u => u.status === "active");
+  const selectedUser = users.find(u => u.id === assignUser);
+  const assignAssetObj = assets.find(a => a.assetId === assignTarget);
+
+  const openAssignDialog = (assetId: string) => {
+    const a = assets.find(x => x.assetId === assetId);
+    setAssignTarget(assetId);
+    setAssignUser("");
+    setAssignStep("select");
+    setHandoverDate(new Date().toISOString().split("T")[0]);
+    setHandoverAcc(a?.accessories ?? "");
+    setHandoverNote("");
+  };
 
   const handleAssignConfirm = async () => {
     if (!assignTarget || !selectedUser) return;
+    setAssigning(true);
     try {
-      await assignAsset(assignTarget, selectedUser.full_name, selectedUser.email, selectedUser.department);
+      const note = [
+        `Handover Date: ${handoverDate}`,
+        handoverAcc  ? `Accessories: ${handoverAcc}` : "",
+        handoverNote ? `Notes: ${handoverNote}` : "",
+      ].filter(Boolean).join(" | ");
+      await assignAsset(assignTarget, selectedUser.full_name, selectedUser.email, selectedUser.department, note);
       toast({ title: "Asset assigned", description: `${assignTarget} → ${selectedUser.full_name}` });
     } catch {
       toast({ title: "Failed to assign asset", variant: "destructive" });
     }
+    setAssigning(false);
     setAssignTarget(null);
-    setAssignUser("");
+    setAssignConfirmOpen(false);
   };
 
-  // Status actions
   const handleMarkRepair = async (id: string) => {
     try { await updateStatus(id, "Under Repair"); toast({ title: "Marked as Under Repair", description: id }); }
     catch { toast({ title: "Failed to update status", variant: "destructive" }); }
@@ -229,7 +231,6 @@ export default function Assets() {
     catch { toast({ title: "Failed to retire asset", variant: "destructive" }); }
   };
 
-  // ─── CSV Upload ───────────────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
     if (!file.name.endsWith(".csv")) {
       toast({ title: "Invalid file", description: "Please upload a .csv file", variant: "destructive" });
@@ -237,52 +238,41 @@ export default function Assets() {
     }
     setUploadFileName(file.name);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      setParsedRows(parseCsvText(text));
-    };
+    reader.onload = e => setParsedRows(parseCsvText(e.target?.result as string));
     reader.readAsText(file);
   }, [toast]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = "";
+    const file = e.target.files?.[0]; if (file) handleFile(file); e.target.value = "";
   };
-
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleFile(file);
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer.files?.[0]; if (file) handleFile(file);
   };
 
-  const validRows   = parsedRows.filter((r) => r.errors.length === 0);
-  const invalidRows = parsedRows.filter((r) => r.errors.length > 0);
+  const validRows   = parsedRows.filter(r => r.errors.length === 0);
+  const invalidRows = parsedRows.filter(r => r.errors.length > 0);
 
   const handleImport = async () => {
-    const toImport = validRows.map((r) => r.data as Omit<Asset, "assetId">);
     try {
-      const created = await addAssets(toImport);
+      const created = await addAssets(validRows.map(r => r.data as Omit<Asset, "assetId">));
       toast({ title: `${created.length} asset${created.length !== 1 ? "s" : ""} imported successfully` });
     } catch {
       toast({ title: "Import failed", variant: "destructive" });
     }
-    setUploadOpen(false);
-    setParsedRows([]);
-    setUploadFileName("");
+    setUploadOpen(false); setParsedRows([]); setUploadFileName("");
   };
 
   const counts = {
-    total:    assets.length,
-    available:assets.filter((a) => a.status === "Available").length,
-    assigned: assets.filter((a) => a.status === "Assigned").length,
-    repair:   assets.filter((a) => a.status === "Under Repair").length,
+    total:     assets.length,
+    available: assets.filter(a => a.status === "Available").length,
+    assigned:  assets.filter(a => a.status === "Assigned").length,
+    repair:    assets.filter(a => a.status === "Under Repair").length,
   };
 
   return (
     <div className="space-y-5 pb-20">
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground">Asset Management</h1>
@@ -302,21 +292,21 @@ export default function Assets() {
         )}
       </div>
 
-      {/* ── Summary chips ── */}
+      {/* Summary chips */}
       <div className="flex flex-wrap gap-2">
         {[
           { label: "Total",        val: counts.total,     color: "bg-slate-100 text-slate-700 border-slate-200" },
           { label: "Available",    val: counts.available, color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
           { label: "Assigned",     val: counts.assigned,  color: "bg-blue-50 text-blue-700 border-blue-200" },
           { label: "Under Repair", val: counts.repair,    color: "bg-amber-50 text-amber-700 border-amber-200" },
-        ].map((chip) => (
+        ].map(chip => (
           <span key={chip.label} className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium", chip.color)}>
             <span className="font-bold">{chip.val}</span> {chip.label}
           </span>
         ))}
       </div>
 
-      {/* ── Filters ── */}
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -324,9 +314,8 @@ export default function Assets() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by Asset ID, serial, model, or assigned user…"
-                className="pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9" value={search}
+                onChange={e => setSearch(e.target.value)}
                 data-testid="input-search-assets"
               />
               {search && (
@@ -336,9 +325,7 @@ export default function Assets() {
               )}
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full sm:w-40" data-testid="select-type-filter">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
+              <SelectTrigger className="w-full sm:w-40" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="Laptop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Laptop</span></SelectItem>
@@ -346,16 +333,12 @@ export default function Assets() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
+              <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {(["Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map((s) => (
+                {(["Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
                   <SelectItem key={s} value={s}>
-                    <span className="flex items-center gap-2">
-                      <span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} /> {s}
-                    </span>
+                    <span className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} />{s}</span>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -364,92 +347,76 @@ export default function Assets() {
         </CardContent>
       </Card>
 
-      {/* ── Table ── */}
+      {/* Table */}
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[960px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {/* Select-all checkbox */}
                   {isAdmin && (
                     <th className="w-10 px-3 py-3">
-                      <Checkbox
-                        checked={allSelected}
-                        onCheckedChange={toggleAll}
-                        aria-label="Select all"
-                        data-testid="checkbox-select-all"
+                      <Checkbox checked={allSelected} onCheckedChange={toggleAll}
+                        aria-label="Select all" data-testid="checkbox-select-all"
                         className={someSelected ? "data-[state=unchecked]:bg-primary/20" : ""}
                       />
                     </th>
                   )}
-                  {["Asset ID","Type","Brand / Model","Serial Number","Assigned To","Department","Status","Warranty End","Actions"].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">
-                      {h}
-                    </th>
+                  {["Asset ID","Type","Brand / Model","Serial Number","Assigned To","Department","Status","Warranty End","Actions"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 10 : 9} className="px-4 py-14 text-center text-muted-foreground">
-                      No assets match your filters.
+                    <td colSpan={isAdmin ? 10 : 9} className="px-4 py-16 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <Monitor className="h-10 w-10 text-muted-foreground/40" />
+                        <p className="text-muted-foreground font-medium">No assets found</p>
+                        <p className="text-xs text-muted-foreground">
+                          {assets.length === 0 ? "Add your first asset to get started." : "Try adjusting your search or filters."}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 )}
-                {filtered.map((asset) => {
+                {filtered.map(asset => {
                   const isSelected = selected.has(asset.assetId);
                   return (
-                    <tr
-                      key={asset.assetId}
-                      className={cn(
-                        "border-b border-border last:border-0 transition-colors",
+                    <tr key={asset.assetId}
+                      className={cn("border-b border-border last:border-0 transition-colors",
                         isSelected ? "bg-primary/5 hover:bg-primary/8" : "hover:bg-muted/25"
                       )}
                       data-testid={`row-asset-${asset.assetId}`}
                     >
-                      {/* Row checkbox */}
                       {isAdmin && (
                         <td className="w-10 px-3 py-3">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleRow(asset.assetId)}
-                            aria-label={`Select ${asset.assetId}`}
-                            data-testid={`checkbox-${asset.assetId}`}
+                          <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(asset.assetId)}
+                            aria-label={`Select ${asset.assetId}`} data-testid={`checkbox-${asset.assetId}`}
                           />
                         </td>
                       )}
-
-                      {/* Asset ID */}
                       <td className="px-4 py-3">
-                        <Link href={`/assets/${asset.assetId}`} className="font-semibold text-primary hover:underline">
-                          {asset.assetId}
-                        </Link>
+                        <Link href={`/assets/${asset.assetId}`} className="font-semibold text-primary hover:underline">{asset.assetId}</Link>
                       </td>
-                      {/* Type */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          {asset.assetType === "Laptop"
-                            ? <Monitor className="h-3.5 w-3.5 text-blue-500" />
-                            : <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
+                          {asset.assetType === "Laptop" ? <Monitor className="h-3.5 w-3.5 text-blue-500" /> : <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
                           <span className="text-xs font-medium text-foreground">{asset.assetType}</span>
                         </div>
                       </td>
-                      {/* Brand / Model */}
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground leading-tight">{asset.brand}</div>
                         <div className="text-xs text-muted-foreground">{asset.model}</div>
                       </td>
-                      {/* Serial */}
                       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{asset.serialNumber}</td>
-                      {/* Assigned To */}
                       <td className="px-4 py-3">
                         {asset.assignedTo ? (
                           <div className="flex items-center gap-2">
                             <Avatar className="h-6 w-6 flex-shrink-0">
                               <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">
-                                {asset.assignedTo.split(" ").map((n) => n[0]).join("")}
+                                {asset.assignedTo.split(" ").map(n => n[0]).join("")}
                               </AvatarFallback>
                             </Avatar>
                             <span className="text-sm text-foreground">{asset.assignedTo}</span>
@@ -458,18 +425,14 @@ export default function Assets() {
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
                       </td>
-                      {/* Department */}
                       <td className="px-4 py-3 text-muted-foreground text-xs">{asset.department ?? "—"}</td>
-                      {/* Status */}
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
                           <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[asset.status])} />
                           {asset.status}
                         </span>
                       </td>
-                      {/* Warranty */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
-                      {/* Actions */}
                       <td className="px-4 py-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -477,7 +440,7 @@ export default function Assets() {
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem asChild>
                               <Link href={`/assets/${asset.assetId}`} className="flex items-center gap-2 cursor-pointer">
                                 <Eye className="h-3.5 w-3.5 text-muted-foreground" /> View Details
@@ -494,13 +457,20 @@ export default function Assets() {
                               <>
                                 <DropdownMenuSeparator />
                                 {asset.status !== "Assigned" ? (
-                                  <DropdownMenuItem onClick={() => { setAssignTarget(asset.assetId); setAssignUser(""); }} className="flex items-center gap-2 cursor-pointer">
+                                  <DropdownMenuItem onClick={() => openAssignDialog(asset.assetId)} className="flex items-center gap-2 cursor-pointer">
                                     <UserPlus className="h-3.5 w-3.5 text-muted-foreground" /> Assign
                                   </DropdownMenuItem>
                                 ) : (
-                                  <DropdownMenuItem onClick={() => { unassignAsset(asset.assetId); toast({ title: "Asset unassigned" }); }} className="flex items-center gap-2 cursor-pointer">
-                                    <UserPlus className="h-3.5 w-3.5 text-muted-foreground" /> Unassign
-                                  </DropdownMenuItem>
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/assets/${asset.assetId}/return`} className="flex items-center gap-2 cursor-pointer">
+                                        <RotateCcw className="h-3.5 w-3.5 text-emerald-600" /> Return Asset
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => { unassignAsset(asset.assetId); toast({ title: "Asset unassigned" }); }} className="flex items-center gap-2 cursor-pointer">
+                                      <UserPlus className="h-3.5 w-3.5 text-muted-foreground" /> Unassign
+                                    </DropdownMenuItem>
+                                  </>
                                 )}
                                 {asset.status !== "Under Repair" && (
                                   <DropdownMenuItem onClick={() => handleMarkRepair(asset.assetId)} className="flex items-center gap-2 cursor-pointer">
@@ -509,17 +479,6 @@ export default function Assets() {
                                 )}
                                 <DropdownMenuItem onClick={() => handleRetire(asset.assetId)} className="flex items-center gap-2 cursor-pointer text-muted-foreground">
                                   <Archive className="h-3.5 w-3.5" /> Retire
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            {isAdmin && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => { setSelected(new Set([asset.assetId])); setDeleteConfirmOpen(true); }}
-                                  className="flex items-center gap-2 cursor-pointer text-destructive focus:text-destructive"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" /> Delete
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -535,15 +494,13 @@ export default function Assets() {
           {filtered.length > 0 && (
             <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
               Showing {filtered.length} of {assets.length} assets
-              {selectedCount > 0 && (
-                <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>
-              )}
+              {selectedCount > 0 && <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* ── Bulk action bar (floats at bottom when rows are selected) ── */}
+      {/* Bulk action bar */}
       {isAdmin && selectedCount > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-popover shadow-xl px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -551,244 +508,172 @@ export default function Assets() {
             <span>{selectedCount} asset{selectedCount !== 1 ? "s" : ""} selected</span>
           </div>
           <div className="h-4 w-px bg-border" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={() => setSelected(new Set())}
-          >
-            Clear
-          </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            className="gap-2"
-            onClick={() => setDeleteConfirmOpen(true)}
-            data-testid="button-bulk-delete"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete {selectedCount}
+          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>Clear</Button>
+          <Button size="sm" variant="destructive" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete {selectedCount}
           </Button>
         </div>
       )}
 
-      {/* ── Assign Dialog ── */}
-      <Dialog open={!!assignTarget} onOpenChange={(v) => !v && setAssignTarget(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Assign Asset</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1 font-medium">Asset</p>
-              <p className="text-sm font-semibold text-foreground">{assignTarget}</p>
+      {/* ── Assign Dialog ─────────────────────────────────────────────────── */}
+      <Dialog open={!!assignTarget && !assignConfirmOpen} onOpenChange={v => !v && setAssignTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign Asset</DialogTitle>
+            <DialogDescription>
+              {assignAssetObj ? `${assignAssetObj.assetId} — ${assignAssetObj.brand} ${assignAssetObj.model}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {assignStep === "select" ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Assign To <span className="text-destructive">*</span></Label>
+                <Select value={assignUser} onValueChange={setAssignUser}>
+                  <SelectTrigger data-testid="select-assign-user">
+                    <SelectValue placeholder="Select a user…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeUsers.map(u => (
+                      <SelectItem key={u.id} value={u.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{u.full_name}</span>
+                          <span className="text-xs text-muted-foreground">{u.email} · {u.department}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-medium text-foreground block mb-1.5">
-                Select User <span className="text-destructive">*</span>
-              </label>
-              <Select value={assignUser} onValueChange={setAssignUser}>
-                <SelectTrigger data-testid="select-assign-user">
-                  <SelectValue placeholder="Choose a user…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeUsers.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      <span className="font-medium">{u.full_name}</span>
-                      <span className="text-xs text-muted-foreground ml-1">· {u.department}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          ) : (
+            <div className="space-y-4 py-2">
+              <div className="bg-muted/50 rounded-lg px-4 py-3 text-sm">
+                <span className="text-muted-foreground">Assigning to: </span>
+                <span className="font-semibold text-foreground">{selectedUser?.full_name}</span>
+                <span className="text-muted-foreground ml-2">({selectedUser?.department})</span>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Handover Date</Label>
+                <Input type="date" value={handoverDate} onChange={e => setHandoverDate(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Accessories Being Handed Over</Label>
+                <Input value={handoverAcc} onChange={e => setHandoverAcc(e.target.value)}
+                  placeholder="e.g. Charger, Mouse, Laptop Bag" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Additional Notes</Label>
+                <Textarea value={handoverNote} onChange={e => setHandoverNote(e.target.value)}
+                  rows={2} placeholder="Any handover instructions or remarks…" />
+              </div>
             </div>
-            {selectedUser && (
-              <div className="rounded-lg bg-muted/50 border border-border px-4 py-3 text-sm space-y-1">
-                {[
-                  { label: "User",       val: selectedUser.full_name },
-                  { label: "Department", val: selectedUser.department },
-                  { label: "Email",      val: selectedUser.email },
-                ].map((r) => (
-                  <div key={r.label} className="flex justify-between">
-                    <span className="text-muted-foreground">{r.label}</span>
-                    <span className="font-medium text-xs">{r.val}</span>
+          )}
+
+          <DialogFooter>
+            {assignStep === "select" ? (
+              <>
+                <Button variant="outline" onClick={() => setAssignTarget(null)}>Cancel</Button>
+                <Button disabled={!assignUser} onClick={() => setAssignStep("handover")}>
+                  Next →
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setAssignStep("select")}>← Back</Button>
+                <Button onClick={() => setAssignConfirmOpen(true)} disabled={!selectedUser}>
+                  Review & Confirm
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Confirmation */}
+      <AlertDialog open={assignConfirmOpen} onOpenChange={setAssignConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Asset Assignment</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <div className="bg-muted rounded-lg px-4 py-3 space-y-1">
+                  <div><span className="font-semibold">Asset:</span> {assignTarget} — {assignAssetObj?.brand} {assignAssetObj?.model}</div>
+                  <div><span className="font-semibold">Assign To:</span> {selectedUser?.full_name} ({selectedUser?.email})</div>
+                  <div><span className="font-semibold">Department:</span> {selectedUser?.department}</div>
+                  <div><span className="font-semibold">Handover Date:</span> {handoverDate}</div>
+                  {handoverAcc && <div><span className="font-semibold">Accessories:</span> {handoverAcc}</div>}
+                </div>
+                <p className="text-muted-foreground">Asset status will change to <strong>Assigned</strong>. A handover record will be saved in remarks.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={assigning}>Back</AlertDialogCancel>
+            <AlertDialogAction onClick={handleAssignConfirm} disabled={assigning}>
+              {assigning ? "Assigning…" : "Confirm Assignment"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete confirm */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedCount} Asset{selectedCount !== 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently remove the selected assets. This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={handleBulkDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Upload Dialog */}
+      <Dialog open={uploadOpen} onOpenChange={v => { setUploadOpen(v); if (!v) { setParsedRows([]); setUploadFileName(""); } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bulk Upload Assets</DialogTitle>
+            <DialogDescription>Upload a CSV file to import multiple assets at once.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Button variant="outline" size="sm" className="gap-2" onClick={downloadTemplate}>
+              <Download className="h-4 w-4" /> Download Template
+            </Button>
+            <div
+              className={cn("border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors",
+                dragOver ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/40"
+              )}
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-8 w-8 mx-auto mb-3 text-muted-foreground" />
+              <p className="text-sm font-medium text-foreground">{uploadFileName || "Drop your CSV file here or click to browse"}</p>
+              <p className="text-xs text-muted-foreground mt-1">Supports .csv files only</p>
+              <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileInput} />
+            </div>
+            {parsedRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 className="h-4 w-4" />{validRows.length} valid</span>
+                  {invalidRows.length > 0 && <span className="flex items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{invalidRows.length} errors</span>}
+                </div>
+                {invalidRows.map(r => (
+                  <div key={r.index} className="text-xs text-destructive bg-destructive/5 rounded px-3 py-2">
+                    <span className="font-semibold">Row {r.index}:</span> {r.errors.join(", ")}
                   </div>
                 ))}
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignTarget(null)}>Cancel</Button>
-            <Button onClick={handleAssignConfirm} disabled={!assignUser} data-testid="button-confirm-assign">
-              Assign Asset
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Bulk Delete Confirm ── */}
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selectedCount} Asset{selectedCount !== 1 ? "s" : ""}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove the selected asset{selectedCount !== 1 ? "s" : ""} from the system.
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteConfirmOpen(false)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleBulkDelete}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* ── Bulk Upload Dialog ── */}
-      <Dialog open={uploadOpen} onOpenChange={(v) => { if (!v) { setUploadOpen(false); setParsedRows([]); setUploadFileName(""); } }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-primary" /> Bulk Upload Assets
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto space-y-4 py-2">
-            {/* Instructions */}
-            <div className="flex items-start gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-              <FileText className="h-4 w-4 mt-0.5 flex-shrink-0 text-blue-500" />
-              <div className="space-y-1">
-                <p className="font-medium">How it works</p>
-                <p className="text-xs text-blue-700">Upload a CSV file with your asset data. Required columns: <code className="bg-blue-100 px-1 rounded">assetType</code>, <code className="bg-blue-100 px-1 rounded">brand</code>, <code className="bg-blue-100 px-1 rounded">model</code>, <code className="bg-blue-100 px-1 rounded">serialNumber</code>, <code className="bg-blue-100 px-1 rounded">purchaseDate</code>, <code className="bg-blue-100 px-1 rounded">warrantyEndDate</code>, <code className="bg-blue-100 px-1 rounded">location</code>.</p>
-              </div>
-            </div>
-
-            {/* Download template */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={downloadTemplate}
-              data-testid="button-download-template"
-            >
-              <Download className="h-3.5 w-3.5" /> Download CSV Template
-            </Button>
-
-            {/* Drop zone */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={handleFileInput}
-            />
-            <div
-              className={cn(
-                "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all",
-                dragOver
-                  ? "border-primary bg-primary/5"
-                  : uploadFileName
-                    ? "border-emerald-400 bg-emerald-50"
-                    : "border-border hover:border-primary/40 hover:bg-muted/30"
-              )}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              data-testid="upload-dropzone"
-            >
-              {uploadFileName ? (
-                <div className="flex flex-col items-center gap-2">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-                  <p className="text-sm font-semibold text-foreground">{uploadFileName}</p>
-                  <p className="text-xs text-muted-foreground">{parsedRows.length} rows detected — click to replace</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <Upload className="h-8 w-8 text-muted-foreground" />
-                  <p className="text-sm font-semibold text-foreground">Click to upload or drag & drop</p>
-                  <p className="text-xs text-muted-foreground">.csv files only</p>
-                </div>
-              )}
-            </div>
-
-            {/* Preview */}
-            {parsedRows.length > 0 && (
-              <div className="space-y-3">
-                {/* Summary */}
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                    <CheckCircle2 className="h-4 w-4" /> {validRows.length} valid
-                  </span>
-                  {invalidRows.length > 0 && (
-                    <span className="flex items-center gap-1.5 text-red-500 font-medium">
-                      <AlertCircle className="h-4 w-4" /> {invalidRows.length} with errors (will be skipped)
-                    </span>
-                  )}
-                </div>
-
-                {/* Table preview */}
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <div className="overflow-x-auto max-h-56">
-                    <table className="w-full text-xs min-w-[600px]">
-                      <thead>
-                        <tr className="border-b border-border bg-muted/30">
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">#</th>
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">Type</th>
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">Brand</th>
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">Model</th>
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">Serial</th>
-                          <th className="px-3 py-2 text-left text-muted-foreground font-semibold uppercase">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parsedRows.map((row) => (
-                          <tr
-                            key={row.index}
-                            className={cn(
-                              "border-b border-border last:border-0",
-                              row.errors.length > 0 ? "bg-red-50" : "hover:bg-muted/20"
-                            )}
-                          >
-                            <td className="px-3 py-2 text-muted-foreground">{row.index}</td>
-                            <td className="px-3 py-2">{row.data.assetType ?? <span className="text-red-500">—</span>}</td>
-                            <td className="px-3 py-2">{row.data.brand || <span className="text-red-500">—</span>}</td>
-                            <td className="px-3 py-2">{row.data.model || <span className="text-red-500">—</span>}</td>
-                            <td className="px-3 py-2 font-mono">{row.data.serialNumber || <span className="text-red-500">—</span>}</td>
-                            <td className="px-3 py-2">
-                              {row.errors.length > 0 ? (
-                                <span className="text-red-500 flex items-center gap-1">
-                                  <AlertCircle className="h-3 w-3" /> {row.errors[0]}
-                                </span>
-                              ) : (
-                                <span className="text-emerald-600 flex items-center gap-1">
-                                  <CheckCircle2 className="h-3 w-3" /> OK
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="border-t border-border pt-4 mt-2">
-            <Button variant="outline" onClick={() => { setUploadOpen(false); setParsedRows([]); setUploadFileName(""); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleImport}
-              disabled={validRows.length === 0}
-              className="gap-2"
-              data-testid="button-confirm-import"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Import {validRows.length > 0 ? `${validRows.length} Asset${validRows.length !== 1 ? "s" : ""}` : "Assets"}
+            <Button variant="outline" onClick={() => { setUploadOpen(false); setParsedRows([]); setUploadFileName(""); }}>Cancel</Button>
+            <Button disabled={validRows.length === 0} onClick={handleImport} className="gap-2">
+              <FileText className="h-4 w-4" /> Import {validRows.length > 0 ? `${validRows.length} Assets` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

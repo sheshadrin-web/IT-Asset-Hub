@@ -2,8 +2,6 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Asset, AssetStatus, AssetType } from "@/data/mockData";
 
-// ─── DB row → App model ───────────────────────────────────────────────────────
-// RLS policies on the "assets" table control who can read/write rows.
 function mapFromDB(row: Record<string, unknown>): Asset {
   return {
     id:              String(row.id ?? ""),
@@ -12,13 +10,23 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     brand:           String(row.brand ?? ""),
     model:           String(row.model ?? ""),
     serialNumber:    String(row.serial_number ?? ""),
-    imeiNumber:      row.imei_1 ? String(row.imei_1) : undefined,
+    productNumber:   row.product_number  ? String(row.product_number)  : undefined,
+    processor:       row.processor       ? String(row.processor)       : undefined,
+    ram:             row.ram             ? String(row.ram)             : undefined,
+    operatingSystem: row.operating_system ? String(row.operating_system) : undefined,
+    storage:         row.storage         ? String(row.storage)         : undefined,
+    imeiNumber:      row.imei_1          ? String(row.imei_1)          : undefined,
+    imei2:           row.imei_2          ? String(row.imei_2)          : undefined,
+    simNumber:       row.sim_number      ? String(row.sim_number)      : undefined,
+    phoneNumber:     row.phone_number    ? String(row.phone_number)    : undefined,
     purchaseDate:    String(row.purchase_date ?? ""),
     warrantyEndDate: String(row.warranty_end_date ?? ""),
+    vendor:          row.vendor          ? String(row.vendor)          : undefined,
+    invoice:         row.invoice         ? String(row.invoice)         : undefined,
     status:          (row.status as AssetStatus) ?? "Available",
-    assignedTo:      row.assigned_to  ? String(row.assigned_to)  : undefined,
-    assignedEmail:   row.assigned_email ? String(row.assigned_email) : undefined,
-    department:      row.department   ? String(row.department)   : undefined,
+    assignedTo:      row.assigned_to     ? String(row.assigned_to)    : undefined,
+    assignedEmail:   row.assigned_email  ? String(row.assigned_email) : undefined,
+    department:      row.department      ? String(row.department)     : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
     remarks:         String(row.remarks ?? ""),
@@ -32,16 +40,26 @@ function mapToDB(data: Omit<Asset, "assetId" | "id">, assetId: string): Record<s
     brand:             data.brand,
     model:             data.model,
     serial_number:     data.serialNumber,
-    imei_1:            data.imeiNumber ?? null,
+    product_number:    data.productNumber    ?? null,
+    processor:         data.processor        ?? null,
+    ram:               data.ram              ?? null,
+    operating_system:  data.operatingSystem  ?? null,
+    storage:           data.storage          ?? null,
+    imei_1:            data.imeiNumber       ?? null,
+    imei_2:            data.imei2            ?? null,
+    sim_number:        data.simNumber        ?? null,
+    phone_number:      data.phoneNumber      ?? null,
     purchase_date:     data.purchaseDate,
     warranty_end_date: data.warrantyEndDate,
+    vendor:            data.vendor           ?? null,
+    invoice:           data.invoice          ?? null,
     status:            data.status,
-    assigned_to:       data.assignedTo    ?? null,
-    assigned_email:    data.assignedEmail ?? null,
-    department:        data.department    ?? null,
+    assigned_to:       data.assignedTo       ?? null,
+    assigned_email:    data.assignedEmail    ?? null,
+    department:        data.department       ?? null,
     location:          data.location,
-    // accessories column does not exist in DB schema — omitted
-    remarks:           data.remarks,
+    accessories:       data.accessories      ?? "",
+    remarks:           data.remarks          ?? "",
   };
 }
 
@@ -53,19 +71,19 @@ function nextAssetId(existing: Asset[]): string {
   return `AST-${String(n).padStart(3, "0")}`;
 }
 
-// ─── Context shape ────────────────────────────────────────────────────────────
 interface AssetContextType {
-  assets:       Asset[];
-  loading:      boolean;
-  getAsset:     (id: string) => Asset | undefined;
-  refresh:      () => Promise<void>;
-  addAsset:     (data: Omit<Asset, "assetId" | "id">) => Promise<Asset>;
-  addAssets:    (dataList: Omit<Asset, "assetId" | "id">[]) => Promise<Asset[]>;
-  updateAsset:  (asset: Asset) => Promise<void>;
-  assignAsset:  (assetId: string, userName: string, userEmail: string, department: string) => Promise<void>;
-  updateStatus: (assetId: string, status: AssetStatus) => Promise<void>;
-  unassignAsset:(assetId: string) => Promise<void>;
-  deleteAssets: (ids: string[]) => Promise<void>;
+  assets:        Asset[];
+  loading:       boolean;
+  getAsset:      (id: string) => Asset | undefined;
+  refresh:       () => Promise<void>;
+  addAsset:      (data: Omit<Asset, "assetId" | "id">) => Promise<Asset>;
+  addAssets:     (dataList: Omit<Asset, "assetId" | "id">[]) => Promise<Asset[]>;
+  updateAsset:   (asset: Asset) => Promise<void>;
+  assignAsset:   (assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string) => Promise<void>;
+  returnAsset:   (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
+  updateStatus:  (assetId: string, status: AssetStatus) => Promise<void>;
+  unassignAsset: (assetId: string) => Promise<void>;
+  deleteAssets:  (ids: string[]) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -93,10 +111,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     const assetId = nextAssetId(assets);
     const row = mapToDB(data, assetId);
     const { data: inserted, error } = await supabase
-      .from("assets")
-      .insert(row)
-      .select()
-      .single();
+      .from("assets").insert(row).select().single();
     if (error || !inserted) throw new Error(error?.message ?? "Failed to add asset");
     const newAsset = mapFromDB(inserted as Record<string, unknown>);
     setAssets(prev => [newAsset, ...prev]);
@@ -124,20 +139,19 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const updateAsset = async (asset: Asset): Promise<void> => {
     const row = mapToDB(asset, asset.assetId);
     const { error } = await supabase
-      .from("assets")
-      .update(row)
-      .eq("asset_id", asset.assetId);
+      .from("assets").update(row).eq("asset_id", asset.assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a => a.assetId === asset.assetId ? { ...a, ...asset } : a));
   };
 
   const assignAsset = async (
-    assetId: string, userName: string, userEmail: string, department: string
+    assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string
   ): Promise<void> => {
-    const { error } = await supabase
-      .from("assets")
-      .update({ status: "Assigned", assigned_to: userName, assigned_email: userEmail, department })
-      .eq("asset_id", assetId);
+    const updates: Record<string, unknown> = {
+      status: "Assigned", assigned_to: userName, assigned_email: userEmail, department,
+    };
+    if (handoverNote) updates.remarks = handoverNote;
+    const { error } = await supabase.from("assets").update(updates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
@@ -146,11 +160,22 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
+    const updates: Record<string, unknown> = {
+      status: finalStatus, assigned_to: null, assigned_email: null,
+    };
+    if (returnNote) updates.remarks = returnNote;
+    const { error } = await supabase.from("assets").update(updates).eq("asset_id", assetId);
+    if (error) throw new Error(error.message);
+    setAssets(prev => prev.map(a =>
+      a.assetId === assetId
+        ? { ...a, status: finalStatus, assignedTo: undefined, assignedEmail: undefined }
+        : a
+    ));
+  };
+
   const updateStatus = async (assetId: string, status: AssetStatus): Promise<void> => {
-    const { error } = await supabase
-      .from("assets")
-      .update({ status })
-      .eq("asset_id", assetId);
+    const { error } = await supabase.from("assets").update({ status }).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a => a.assetId === assetId ? { ...a, status } : a));
   };
@@ -169,10 +194,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteAssets = async (ids: string[]): Promise<void> => {
-    const { error } = await supabase
-      .from("assets")
-      .delete()
-      .in("asset_id", ids);
+    const { error } = await supabase.from("assets").delete().in("asset_id", ids);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.filter(a => !ids.includes(a.assetId)));
   };
@@ -180,7 +202,8 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   return (
     <AssetContext.Provider value={{
       assets, loading, getAsset, refresh: fetchAssets,
-      addAsset, addAssets, updateAsset, assignAsset, updateStatus, unassignAsset, deleteAssets,
+      addAsset, addAssets, updateAsset, assignAsset, returnAsset,
+      updateStatus, unassignAsset, deleteAssets,
     }}>
       {children}
     </AssetContext.Provider>

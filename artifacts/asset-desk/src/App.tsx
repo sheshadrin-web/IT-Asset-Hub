@@ -22,6 +22,7 @@ import Users from "@/pages/Users";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import MyAssets from "@/pages/MyAssets";
+import ReturnAsset from "@/pages/ReturnAsset";
 import SupabaseCheck from "@/pages/SupabaseCheck";
 import NotFound from "@/pages/not-found";
 
@@ -106,6 +107,9 @@ function Router() {
       </Route>
       <Route path="/assets/:id/edit">
         <ProtectedRoute component={EditAsset} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
+      </Route>
+      <Route path="/assets/:id/return">
+        <ProtectedRoute component={ReturnAsset} allowedRoles={["super_admin", "it_admin"]} />
       </Route>
       <Route path="/assets/:id">
         <ProtectedRoute component={AssetDetail} allowedRoles={["super_admin", "it_admin", "it_agent"]} />

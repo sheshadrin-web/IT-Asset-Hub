@@ -119,6 +119,7 @@ export default function Users() {
   const [showPw, setShowPw] = useState(false);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
+  const isAdmin      = isSuperAdmin || currentUser?.role === "it_admin";
 
   // ── Forms ──────────────────────────────────────────────────────────────────
   const addForm = useForm<AddFormValues>({
@@ -405,7 +406,7 @@ export default function Users() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        {isSuperAdmin ? (
+                        {isAdmin ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-7 w-7" disabled={busy} data-testid={`btn-actions-${user.id}`}>
@@ -428,7 +429,8 @@ export default function Users() {
                                   <RefreshCw className="h-3.5 w-3.5" /> Reactivate
                                 </DropdownMenuItem>
                               )}
-                              {!isSelf && (
+                              {/* IT Admin cannot delete Super Admin users */}
+                              {!isSelf && isSuperAdmin && (
                                 <>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem

@@ -10,9 +10,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 // ─── Supabase Profile ────────────────────────────────────────────────────────
-// Matches the public.profiles table schema.
 export interface Profile {
-  id:         string;      // UUID — matches Supabase auth.users.id
+  id:         string;
   full_name:  string;
   email:      string;
   role:       UserRole;
@@ -23,7 +22,6 @@ export interface Profile {
   updated_at: string;
 }
 
-// ─── CurrentUser (computed from Profile for backward-compat with pages) ──────
 export interface CurrentUser {
   userId:         string;
   name:           string;
@@ -34,7 +32,6 @@ export interface CurrentUser {
   assignedAssets: number;
 }
 
-// Helper: map Profile → CurrentUser shape used throughout the app
 export function profileToCurrentUser(p: Profile): CurrentUser {
   return {
     userId:         p.id,
@@ -52,22 +49,35 @@ export type AssetType   = "Laptop" | "Mobile";
 export type AssetStatus = "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
 
 export interface Asset {
-  id?:            string;   // Supabase UUID (populated after fetch)
-  assetId:        string;   // e.g. AST-001
-  assetType:      AssetType;
-  brand:          string;
-  model:          string;
-  serialNumber:   string;
-  imeiNumber?:    string;
-  purchaseDate:   string;
-  warrantyEndDate:string;
-  status:         AssetStatus;
-  assignedTo?:    string;
-  assignedEmail?: string;
-  department?:    string;
-  location:       string;
-  accessories:    string;
-  remarks:        string;
+  id?:              string;   // Supabase UUID
+  assetId:          string;   // e.g. AST-001
+  assetType:        AssetType;
+  brand:            string;
+  model:            string;
+  serialNumber:     string;
+  productNumber?:   string;   // Laptop: product number / Mobile: N/A
+  // Laptop-specific
+  processor?:       string;
+  ram?:             string;
+  operatingSystem?: string;
+  // Mobile-specific
+  imeiNumber?:      string;   // IMEI 1
+  imei2?:           string;   // IMEI 2
+  simNumber?:       string;
+  phoneNumber?:     string;
+  // Shared
+  storage?:         string;
+  purchaseDate:     string;
+  warrantyEndDate:  string;
+  vendor?:          string;
+  invoice?:         string;
+  status:           AssetStatus;
+  assignedTo?:      string;
+  assignedEmail?:   string;
+  department?:      string;
+  location:         string;
+  accessories:      string;
+  remarks:          string;
 }
 
 // ─── Ticket types ─────────────────────────────────────────────────────────────
@@ -83,9 +93,9 @@ export interface TicketComment {
 }
 
 export interface Ticket {
-  id?:            string;   // Supabase UUID
-  ticketId:       string;   // e.g. TKT-0001
-  raisedBy:       string;   // user's full_name
+  id?:            string;
+  ticketId:       string;
+  raisedBy:       string;
   employeeEmail?: string;
   assetId:        string;
   category:       string;
@@ -102,12 +112,15 @@ export interface Ticket {
 
 // ─── Ticket categories ────────────────────────────────────────────────────────
 export const TICKET_CATEGORIES: Record<string, string[]> = {
-  "Laptop Issue":      ["Battery Issue", "Display Issue", "Keyboard Issue", "Charger Issue", "Software Issue", "Slow Performance"],
-  "Mobile Issue":      ["Battery Issue", "Screen Issue", "SIM Issue", "App Issue", "Network Issue"],
-  "Asset Request":     ["New Laptop Request", "Replacement Request", "Mobile Request"],
-  "Asset Return":      ["Resignation Handover", "Device Return"],
-  "Lost or Damage":    ["Lost Device", "Physical Damage"],
-  "Accessory Request": ["Charger", "Mouse", "Keyboard", "Laptop Bag"],
+  "Laptop Issue":      ["Battery Issue", "Display Issue", "Keyboard Issue", "Charger Issue", "Slow Performance", "Overheating", "Boot Issue", "Other"],
+  "Mobile Issue":      ["Battery Issue", "Screen Issue", "SIM Issue", "App Issue", "Network Issue", "Camera Issue", "Other"],
+  "Accessory Issue":   ["Charger Not Working", "Mouse Issue", "Keyboard Issue", "Headset Issue", "Adapter Issue", "Other Accessory"],
+  "Software Issue":    ["Application Error", "OS Issue", "Driver Issue", "Antivirus Issue", "License Issue", "Installation Request", "Other Software"],
+  "Network Issue":     ["No Internet", "Slow Internet", "WiFi Issue", "VPN Issue", "LAN Issue", "Other Network"],
+  "Account & Access":  ["Password Reset", "Account Locked", "New Access Request", "Permission Issue", "Email Issue", "MFA Setup", "Other Access"],
+  "Lost / Damage":     ["Lost Device", "Physical Damage", "Theft", "Liquid Damage", "Other"],
+  "Asset Request":     ["New Laptop Request", "Replacement Request", "Mobile Request", "Accessory Request", "Other Request"],
+  "Other IT Support":  ["General Query", "Data Backup / Recovery", "Printer Issue", "Others"],
 };
 
 // No mock data — all data comes from Supabase.
