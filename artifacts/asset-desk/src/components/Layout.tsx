@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
-  LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package, GraduationCap,
+  LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package,
   ChevronDown,
 } from "lucide-react";
+import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
@@ -96,12 +97,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       >
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary flex-shrink-0">
-            <GraduationCap className="h-4 w-4 text-white" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-white leading-tight truncate">Miles Education Pvt Ltd</div>
-            <div className="text-[10px] text-sidebar-foreground/60 mt-0.5 truncate">IT Helpdesk Portal</div>
+          <img
+            src={milesLogo}
+            alt="Miles Education"
+            className="h-8 w-auto flex-shrink-0 object-contain"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] text-sidebar-foreground/60 truncate">IT Helpdesk Portal</div>
           </div>
           <button
             className="ml-auto lg:hidden text-sidebar-foreground hover:text-white flex-shrink-0"

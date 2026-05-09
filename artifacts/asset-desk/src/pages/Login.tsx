@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { GraduationCap, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, AlertCircle } from "lucide-react";
+import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,11 +53,8 @@ export default function Login() {
           {/* Header stripe */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-8 py-7">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm flex-shrink-0">
-                <GraduationCap className="h-6 w-6 text-white" />
-              </div>
+              <img src={milesLogo} alt="Miles Education" className="h-10 w-auto object-contain flex-shrink-0" />
               <div>
-                <h1 className="text-base font-bold text-white leading-tight">Miles Education Pvt Ltd</h1>
                 <p className="text-blue-200 text-xs mt-0.5">IT Asset &amp; Helpdesk Portal</p>
               </div>
             </div>
