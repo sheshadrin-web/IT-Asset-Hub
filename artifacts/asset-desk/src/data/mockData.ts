@@ -45,17 +45,17 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
 }
 
 // ─── Asset types ─────────────────────────────────────────────────────────────
-export type AssetType   = "Laptop" | "Mobile";
+export type AssetType   = "Laptop" | "Mobile" | "Desktop";
 export type AssetStatus = "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
 
 export interface Asset {
   id?:              string;   // Supabase UUID
-  assetId:          string;   // e.g. AST-001
+  assetId:          string;   // e.g. AST-001 — manually entered
   assetType:        AssetType;
   brand:            string;
   model:            string;
   serialNumber:     string;
-  productNumber?:   string;   // Laptop: product number / Mobile: N/A
+  productNumber?:   string;
   // Laptop-specific
   processor?:       string;
   ram?:             string;
@@ -65,6 +65,14 @@ export interface Asset {
   imei2?:           string;   // IMEI 2
   simNumber?:       string;
   phoneNumber?:     string;
+  // Desktop-specific
+  monitorBrand?:    string;
+  monitorModel?:    string;
+  monitorSize?:     string;
+  keyboard?:        string;
+  mouse?:           string;
+  cpu?:             string;
+  others?:          string;
   // Shared
   storage?:         string;
   purchaseDate:     string;
@@ -114,16 +122,16 @@ export interface Ticket {
 export const TICKET_CATEGORIES: Record<string, string[]> = {
   "Laptop Issue":      ["Battery Issue", "Display Issue", "Keyboard Issue", "Charger Issue", "Slow Performance", "Overheating", "Boot Issue", "Other"],
   "Mobile Issue":      ["Battery Issue", "Screen Issue", "SIM Issue", "App Issue", "Network Issue", "Camera Issue", "Other"],
+  "Desktop Issue":     ["Monitor Issue", "CPU Issue", "Keyboard/Mouse Issue", "Power Issue", "Slow Performance", "Boot Issue", "Other"],
   "Accessory Issue":   ["Charger Not Working", "Mouse Issue", "Keyboard Issue", "Headset Issue", "Adapter Issue", "Other Accessory"],
   "Software Issue":    ["Application Error", "OS Issue", "Driver Issue", "Antivirus Issue", "License Issue", "Installation Request", "Other Software"],
   "Network Issue":     ["No Internet", "Slow Internet", "WiFi Issue", "VPN Issue", "LAN Issue", "Other Network"],
   "Account & Access":  ["Password Reset", "Account Locked", "New Access Request", "Permission Issue", "Email Issue", "MFA Setup", "Other Access"],
   "Lost / Damage":     ["Lost Device", "Physical Damage", "Theft", "Liquid Damage", "Other"],
-  "Asset Request":     ["New Laptop Request", "Replacement Request", "Mobile Request", "Accessory Request", "Other Request"],
+  "Asset Request":     ["New Laptop Request", "New Desktop Request", "Replacement Request", "Mobile Request", "Accessory Request", "Other Request"],
   "Other IT Support":  ["General Query", "Data Backup / Recovery", "Printer Issue", "Others"],
 };
 
-// No mock data — all data comes from Supabase.
 export const mockUsers:   never[] = [];
 export const mockAssets:  never[] = [];
 export const mockTickets: never[] = [];

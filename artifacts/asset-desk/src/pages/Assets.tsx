@@ -50,18 +50,19 @@ const STATUS_DOT: Record<AssetStatus, string> = {
 };
 
 const CSV_HEADERS = [
-  "assetType","brand","model","serialNumber","imeiNumber",
+  "assetId","assetType","brand","model","serialNumber","imeiNumber",
   "purchaseDate","warrantyEndDate","location","accessories","remarks",
 ];
 const CSV_TEMPLATE = [
   CSV_HEADERS.join(","),
-  "Laptop,Dell,Latitude 5540,SN-EXAMPLE-001,,2024-01-15,2027-01-15,IT Storage,Charger,New stock",
-  "Mobile,Apple,iPhone 15 Pro,SN-EXAMPLE-002,358765432109876,2024-02-01,2026-02-01,IT Storage,Charger,",
+  "LAP-001,Laptop,Dell,Latitude 5540,SN-EXAMPLE-001,,2024-01-15,2027-01-15,IT Storage,Charger,New stock",
+  "MOB-001,Mobile,Apple,iPhone 15 Pro,SN-EXAMPLE-002,358765432109876,2024-02-01,2026-02-01,IT Storage,Charger,",
+  "DSK-001,Desktop,Dell,OptiPlex 7090,SN-EXAMPLE-003,,2024-03-01,2027-03-01,IT Storage,Power Cable,",
 ].join("\n");
 
 interface ParsedRow {
   index: number;
-  data: Partial<Omit<Asset, "assetId">> & { assetType?: string };
+  data: Partial<Omit<Asset, "id">> & { assetType?: string };
   errors: string[];
 }
 
@@ -75,7 +76,8 @@ function parseCsvText(text: string): ParsedRow[] {
     const row: Record<string, string> = {};
     headers.forEach((h, j) => { row[h] = values[j] ?? ""; });
     const errors: string[] = [];
-    if (!["Laptop", "Mobile"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop or Mobile");
+    if (!row.assetId) errors.push("assetId is required");
+    if (!["Laptop", "Mobile", "Desktop"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop, Mobile, or Desktop");
     if (!row.brand) errors.push("brand is required");
     if (!row.model) errors.push("model is required");
     if (!row.serialNumber) errors.push("serialNumber is required");
@@ -85,7 +87,8 @@ function parseCsvText(text: string): ParsedRow[] {
     return {
       index: i + 1,
       data: {
-        assetType:       (row.assetType as "Laptop" | "Mobile") || "Laptop",
+        assetId:         row.assetId,
+        assetType:       (row.assetType as "Laptop" | "Mobile" | "Desktop") || "Laptop",
         brand:           row.brand,
         model:           row.model,
         serialNumber:    row.serialNumber,
@@ -230,6 +233,10 @@ export default function Assets() {
     try { await updateStatus(id, "Retired"); toast({ title: "Asset retired", description: id }); }
     catch { toast({ title: "Failed to retire asset", variant: "destructive" }); }
   };
+  const handleMarkAvailable = async (id: string) => {
+    try { await updateStatus(id, "Available"); toast({ title: "Marked as Available", description: id }); }
+    catch { toast({ title: "Failed to update status", variant: "destructive" }); }
+  };
 
   const handleFile = useCallback((file: File) => {
     if (!file.name.endsWith(".csv")) {
@@ -255,7 +262,7 @@ export default function Assets() {
 
   const handleImport = async () => {
     try {
-      const created = await addAssets(validRows.map(r => r.data as Omit<Asset, "assetId">));
+      const created = await addAssets(validRows.map(r => r.data as Omit<Asset, "id">));
       toast({ title: `${created.length} asset${created.length !== 1 ? "s" : ""} imported successfully` });
     } catch {
       toast({ title: "Import failed", variant: "destructive" });
@@ -330,6 +337,7 @@ export default function Assets() {
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="Laptop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Laptop</span></SelectItem>
                 <SelectItem value="Mobile"><span className="flex items-center gap-2"><Smartphone className="h-3.5 w-3.5" /> Mobile</span></SelectItem>
+                <SelectItem value="Desktop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Desktop</span></SelectItem>
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -453,14 +461,23 @@ export default function Assets() {
                                 </Link>
                               </DropdownMenuItem>
                             )}
-                            {isAdmin && asset.status !== "Retired" && (
+                            {isAdmin && (
                               <>
                                 <DropdownMenuSeparator />
-                                {asset.status !== "Assigned" ? (
+                                {/* Mark Available — Retired, Under Repair, Lost */}
+                                {(asset.status === "Retired" || asset.status === "Under Repair" || asset.status === "Lost") && (
+                                  <DropdownMenuItem onClick={() => handleMarkAvailable(asset.assetId)} className="flex items-center gap-2 cursor-pointer text-emerald-600">
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Mark Available
+                                  </DropdownMenuItem>
+                                )}
+                                {/* Assign — Available or Under Repair */}
+                                {(asset.status === "Available" || asset.status === "Under Repair") && (
                                   <DropdownMenuItem onClick={() => openAssignDialog(asset.assetId)} className="flex items-center gap-2 cursor-pointer">
                                     <UserPlus className="h-3.5 w-3.5 text-muted-foreground" /> Assign
                                   </DropdownMenuItem>
-                                ) : (
+                                )}
+                                {/* Return / Unassign — Assigned only */}
+                                {asset.status === "Assigned" && (
                                   <>
                                     <DropdownMenuItem asChild>
                                       <Link href={`/assets/${asset.assetId}/return`} className="flex items-center gap-2 cursor-pointer">
@@ -472,14 +489,18 @@ export default function Assets() {
                                     </DropdownMenuItem>
                                   </>
                                 )}
-                                {asset.status !== "Under Repair" && (
+                                {/* Mark Repair — Available or Assigned */}
+                                {(asset.status === "Available" || asset.status === "Assigned") && (
                                   <DropdownMenuItem onClick={() => handleMarkRepair(asset.assetId)} className="flex items-center gap-2 cursor-pointer">
                                     <Wrench className="h-3.5 w-3.5 text-amber-500" /> Mark Repair
                                   </DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem onClick={() => handleRetire(asset.assetId)} className="flex items-center gap-2 cursor-pointer text-muted-foreground">
-                                  <Archive className="h-3.5 w-3.5" /> Retire
-                                </DropdownMenuItem>
+                                {/* Retire — not already Retired */}
+                                {asset.status !== "Retired" && (
+                                  <DropdownMenuItem onClick={() => handleRetire(asset.assetId)} className="flex items-center gap-2 cursor-pointer text-muted-foreground">
+                                    <Archive className="h-3.5 w-3.5" /> Retire
+                                  </DropdownMenuItem>
+                                )}
                               </>
                             )}
                           </DropdownMenuContent>

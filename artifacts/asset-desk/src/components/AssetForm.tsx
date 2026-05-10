@@ -9,11 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Laptop, Smartphone } from "lucide-react";
+import { Laptop, Smartphone, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const assetFormSchema = z.object({
-  assetType:       z.enum(["Laptop", "Mobile"]),
+  assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
+  assetType:       z.enum(["Laptop", "Mobile", "Desktop"]),
   brand:           z.string().min(1, "Brand is required"),
   model:           z.string().min(1, "Model is required"),
   serialNumber:    z.string().min(1, "Serial number is required"),
@@ -27,6 +28,14 @@ export const assetFormSchema = z.object({
   imei2:           z.string().optional(),
   simNumber:       z.string().optional(),
   phoneNumber:     z.string().optional(),
+  // Desktop
+  monitorBrand:    z.string().optional(),
+  monitorModel:    z.string().optional(),
+  monitorSize:     z.string().optional(),
+  keyboard:        z.string().optional(),
+  mouse:           z.string().optional(),
+  cpu:             z.string().optional(),
+  others:          z.string().optional(),
   // Shared
   storage:         z.string().optional(),
   purchaseDate:    z.string().min(1, "Purchase date is required"),
@@ -48,6 +57,7 @@ interface AssetFormProps {
   isSubmitting?: boolean;
   disabled?: boolean;
   submitLabel?: string;
+  assetIdReadOnly?: boolean;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -61,9 +71,36 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-const RAM_OPTIONS = ["2 GB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB"];
+const RAM_OPTIONS     = ["2 GB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB"];
 const STORAGE_OPTIONS = ["64 GB", "128 GB", "256 GB", "512 GB", "1 TB", "2 TB"];
-const OS_OPTIONS = ["Windows 10", "Windows 11", "macOS Ventura", "macOS Sonoma", "Ubuntu 22.04", "Other"];
+const OS_OPTIONS      = ["Windows 10", "Windows 11", "macOS Ventura", "macOS Sonoma", "Ubuntu 22.04", "Other"];
+const MONITOR_SIZES   = ['17"', '19"', '21"', '22"', '24"', '27"', '32"', 'Other'];
+
+function SelectField({
+  label, value, onChange, placeholder, options,
+}: {
+  label: string;
+  value: string | undefined;
+  onChange: (v: string) => void;
+  placeholder: string;
+  options: string[];
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium leading-none">{label}</label>
+      <Select
+        value={value || "__none__"}
+        onValueChange={v => onChange(v === "__none__" ? "" : v)}
+      >
+        <SelectTrigger><SelectValue placeholder={placeholder} /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">Not specified</SelectItem>
+          {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 export default function AssetForm({
   defaultValues,
@@ -72,14 +109,17 @@ export default function AssetForm({
   isSubmitting,
   disabled,
   submitLabel = "Save Asset",
+  assetIdReadOnly = false,
 }: AssetFormProps) {
   const form = useForm<AssetFormValues>({
     resolver: zodResolver(assetFormSchema),
     defaultValues: {
-      assetType: "Laptop",
+      assetId: "", assetType: "Laptop",
       brand: "", model: "", serialNumber: "", productNumber: "",
       processor: "", ram: "", operatingSystem: "",
       imeiNumber: "", imei2: "", simNumber: "", phoneNumber: "",
+      monitorBrand: "", monitorModel: "", monitorSize: "",
+      keyboard: "", mouse: "", cpu: "", others: "",
       storage: "", purchaseDate: "", warrantyEndDate: "",
       vendor: "", invoice: "", location: "", department: "",
       accessories: "", remarks: "",
@@ -94,36 +134,63 @@ export default function AssetForm({
 
   const assetType = form.watch("assetType");
   const isLaptop  = assetType === "Laptop";
+  const isMobile  = assetType === "Mobile";
+  const isDesktop = assetType === "Desktop";
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
 
+        {/* Asset ID — manual entry */}
+        <Section title="Asset ID">
+          <FormField control={form.control} name="assetId" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Asset ID <span className="text-destructive">*</span></FormLabel>
+              <FormControl>
+                <Input
+                  {...field}
+                  placeholder="e.g. AST-001, LAP-042, MOB-010"
+                  disabled={assetIdReadOnly}
+                  className={assetIdReadOnly ? "bg-muted text-muted-foreground" : ""}
+                  data-testid="input-asset-id"
+                />
+              </FormControl>
+              <FormDescription className="text-xs">
+                {assetIdReadOnly
+                  ? "Asset ID cannot be changed after creation."
+                  : "Enter a unique ID for this asset. Use a consistent naming convention (e.g. LAP-001, MOB-001, DSK-001)."}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </Section>
+
         {/* Asset Type */}
-        <div>
-          <p className="text-sm font-semibold text-foreground mb-3">
-            Asset Type <span className="text-destructive">*</span>
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {(["Laptop", "Mobile"] as const).map((type) => (
+        <Section title="Asset Type">
+          <div className="grid grid-cols-3 gap-3">
+            {(["Laptop", "Mobile", "Desktop"] as const).map((type) => (
               <button
                 key={type}
                 type="button"
-                onClick={() => form.setValue("assetType", type, { shouldValidate: true })}
+                onClick={() => !assetIdReadOnly && form.setValue("assetType", type, { shouldValidate: true })}
+                disabled={assetIdReadOnly}
                 className={cn(
                   "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all",
                   assetType === type
                     ? "border-primary bg-primary/5 text-primary"
-                    : "border-border hover:border-muted-foreground/40 text-muted-foreground"
+                    : "border-border hover:border-muted-foreground/40 text-muted-foreground",
+                  assetIdReadOnly && "cursor-not-allowed opacity-60"
                 )}
                 data-testid={`type-selector-${type.toLowerCase()}`}
               >
-                {type === "Laptop" ? <Laptop className="h-7 w-7" /> : <Smartphone className="h-7 w-7" />}
+                {type === "Laptop"  ? <Laptop className="h-7 w-7" />   :
+                 type === "Mobile"  ? <Smartphone className="h-7 w-7" /> :
+                                      <Monitor className="h-7 w-7" />}
                 <span className="text-sm font-semibold">{type}</span>
               </button>
             ))}
           </div>
-        </div>
+        </Section>
 
         {/* Device Identification */}
         <Section title="Device Identification">
@@ -138,7 +205,7 @@ export default function AssetForm({
             <FormField control={form.control} name="model" render={({ field }) => (
               <FormItem>
                 <FormLabel>Model <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input {...field} placeholder="e.g. Latitude 5540, iPhone 15 Pro" data-testid="input-model" /></FormControl>
+                <FormControl><Input {...field} placeholder="e.g. Latitude 5540, OptiPlex 7090" data-testid="input-model" /></FormControl>
                 <FormMessage />
               </FormItem>
             )} />
@@ -160,27 +227,22 @@ export default function AssetForm({
           </div>
         </Section>
 
-        {/* Laptop Specs */}
+        {/* ── Laptop Specs ─────────────────────────────────────────────── */}
         {isLaptop && (
           <Section title="Hardware Specifications">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField control={form.control} name="processor" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Processor</FormLabel>
-                  <FormControl><Input {...field} placeholder="e.g. Intel Core i5-1235U, Ryzen 5 7530U" /></FormControl>
+                  <FormControl><Input {...field} placeholder="e.g. Intel Core i5-1235U" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={form.control} name="ram" render={({ field }) => (
                 <FormItem>
                   <FormLabel>RAM</FormLabel>
-                  <Select
-                    value={field.value || "__none__"}
-                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select RAM size" /></SelectTrigger>
-                    </FormControl>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select RAM size" /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="__none__">Not specified</SelectItem>
                       {RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
@@ -192,13 +254,8 @@ export default function AssetForm({
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
-                  <Select
-                    value={field.value || "__none__"}
-                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select storage size" /></SelectTrigger>
-                    </FormControl>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="__none__">Not specified</SelectItem>
                       {STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -210,13 +267,8 @@ export default function AssetForm({
               <FormField control={form.control} name="operatingSystem" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Operating System</FormLabel>
-                  <Select
-                    value={field.value || "__none__"}
-                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger>
-                    </FormControl>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="__none__">Not specified</SelectItem>
                       {OS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -229,8 +281,8 @@ export default function AssetForm({
           </Section>
         )}
 
-        {/* Mobile Specs */}
-        {!isLaptop && (
+        {/* ── Mobile Details ───────────────────────────────────────────── */}
+        {isMobile && (
           <Section title="Mobile Details">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField control={form.control} name="imeiNumber" render={({ field }) => (
@@ -265,13 +317,8 @@ export default function AssetForm({
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
-                  <Select
-                    value={field.value || "__none__"}
-                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
-                    </FormControl>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="__none__">Not specified</SelectItem>
                       {["64 GB", "128 GB", "256 GB", "512 GB", "1 TB"].map(s => (
@@ -284,6 +331,121 @@ export default function AssetForm({
               )} />
             </div>
           </Section>
+        )}
+
+        {/* ── Desktop Details ──────────────────────────────────────────── */}
+        {isDesktop && (
+          <>
+            <Section title="Monitor">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField control={form.control} name="monitorBrand" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Monitor Brand</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. Dell, LG, Samsung, HP" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="monitorModel" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Monitor Model</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. U2722D, 27UK850" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="monitorSize" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Monitor Size</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select size" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not specified</SelectItem>
+                        {MONITOR_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+            </Section>
+
+            <Section title="CPU & Memory">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField control={form.control} name="cpu" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>CPU (Processor)</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. Intel Core i7-12700, Ryzen 5 5600G" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="ram" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>RAM</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not specified</SelectItem>
+                        {RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="storage" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Storage</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not specified</SelectItem>
+                        {STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="operatingSystem" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Operating System</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not specified</SelectItem>
+                        {OS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+            </Section>
+
+            <Section title="Peripherals">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField control={form.control} name="keyboard" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Keyboard</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. Dell KB216, Logitech K120" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="mouse" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mouse</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. Dell MS116, Logitech M100" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="others" render={({ field }) => (
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel>Other Peripherals</FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. Webcam, Headset, USB Hub, Docking Station" /></FormControl>
+                    <FormDescription className="text-xs">List any other peripherals included with this desktop</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+            </Section>
+          </>
         )}
 
         {/* Purchase & Warranty */}
@@ -321,7 +483,7 @@ export default function AssetForm({
           </div>
         </Section>
 
-        {/* Location & Assignment */}
+        {/* Location & Department */}
         <Section title="Location & Department">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormField control={form.control} name="location" render={({ field }) => (
@@ -347,7 +509,7 @@ export default function AssetForm({
             <FormItem>
               <FormLabel>Accessories</FormLabel>
               <FormControl>
-                <Input {...field} placeholder="e.g. Charger, Mouse, Laptop Bag, USB Hub" data-testid="input-accessories" />
+                <Input {...field} placeholder={isDesktop ? "e.g. Power Cable, UPS" : "e.g. Charger, Mouse, Laptop Bag"} data-testid="input-accessories" />
               </FormControl>
               <FormDescription className="text-xs">List all items bundled with this device</FormDescription>
               <FormMessage />

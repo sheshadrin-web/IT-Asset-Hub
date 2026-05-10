@@ -2,7 +2,7 @@ import { useParams, Link } from "wouter";
 import {
   ArrowLeft, Monitor, Smartphone, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
-  Wrench, Archive, UserPlus, RotateCcw,
+  Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -133,11 +133,19 @@ export default function AssetDetail() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {isAdmin && asset.status !== "Assigned" && asset.status !== "Retired" && (
+          {/* Mark Available — for Under Repair, Retired, Lost */}
+          {isAdmin && (asset.status === "Under Repair" || asset.status === "Retired" || asset.status === "Lost") && (
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-mark-available">
+              <CheckCircle2 className="h-4 w-4" /> Mark Available
+            </Button>
+          )}
+          {/* Assign — for Available or Under Repair (not Assigned, not Retired) */}
+          {isAdmin && (asset.status === "Available" || asset.status === "Under Repair") && (
             <Button variant="outline" size="sm" className="gap-2" onClick={() => { setAssignDialogOpen(true); setAssignUserId(""); }} data-testid="button-assign">
               <UserPlus className="h-4 w-4" /> Assign
             </Button>
           )}
+          {/* Return / Unassign — only for Assigned */}
           {isAdmin && asset.status === "Assigned" && (
             <>
               <Link href={`/assets/${asset.assetId}/return`}>
@@ -150,11 +158,13 @@ export default function AssetDetail() {
               </Button>
             </>
           )}
-          {isAdmin && asset.status !== "Under Repair" && asset.status !== "Retired" && (
+          {/* Mark Repair — for Available or Assigned */}
+          {isAdmin && (asset.status === "Available" || asset.status === "Assigned") && (
             <Button variant="outline" size="sm" className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => handleUpdateStatus("Under Repair")} data-testid="button-mark-repair">
               <Wrench className="h-4 w-4" /> Mark Repair
             </Button>
           )}
+          {/* Retire — for anything except already Retired */}
           {isAdmin && asset.status !== "Retired" && (
             <Button variant="outline" size="sm" className="gap-2 text-muted-foreground" onClick={() => handleUpdateStatus("Retired")} data-testid="button-retire">
               <Archive className="h-4 w-4" /> Retire

@@ -8,11 +8,11 @@ import { useAssets } from "@/context/AssetContext";
 import { useToast } from "@/hooks/use-toast";
 
 export default function EditAsset() {
-  const { id }                          = useParams<{ id: string }>();
-  const { getAsset, updateAsset }       = useAssets();
-  const [, setLocation]                 = useLocation();
-  const { toast }                       = useToast();
-  const [saving, setSaving]             = useState(false);
+  const { id }                    = useParams<{ id: string }>();
+  const { getAsset, updateAsset } = useAssets();
+  const [, setLocation]           = useLocation();
+  const { toast }                 = useToast();
+  const [saving, setSaving]       = useState(false);
 
   const asset = getAsset(id);
 
@@ -34,9 +34,10 @@ export default function EditAsset() {
       await updateAsset({
         ...asset,
         ...values,
-        imeiNumber:  values.imeiNumber || undefined,
+        assetId:     asset.assetId,          // ID is immutable after creation
+        imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
-        remarks:     values.remarks ?? "",
+        remarks:     values.remarks     ?? "",
       });
       toast({ title: "Asset updated", description: `${asset.assetId} has been updated successfully.` });
       setLocation(`/assets/${asset.assetId}`);
@@ -64,19 +65,38 @@ export default function EditAsset() {
 
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-sm font-semibold text-muted-foreground">Update Asset Details</CardTitle>
+          <CardTitle className="text-sm font-semibold text-muted-foreground">Asset Details</CardTitle>
         </CardHeader>
         <CardContent>
           <AssetForm
             defaultValues={{
+              assetId:         asset.assetId,
               assetType:       asset.assetType,
               brand:           asset.brand,
               model:           asset.model,
               serialNumber:    asset.serialNumber,
-              imeiNumber:      asset.imeiNumber ?? "",
+              productNumber:   asset.productNumber   ?? "",
+              processor:       asset.processor       ?? "",
+              ram:             asset.ram             ?? "",
+              operatingSystem: asset.operatingSystem ?? "",
+              imeiNumber:      asset.imeiNumber      ?? "",
+              imei2:           asset.imei2           ?? "",
+              simNumber:       asset.simNumber       ?? "",
+              phoneNumber:     asset.phoneNumber     ?? "",
+              monitorBrand:    asset.monitorBrand    ?? "",
+              monitorModel:    asset.monitorModel    ?? "",
+              monitorSize:     asset.monitorSize     ?? "",
+              keyboard:        asset.keyboard        ?? "",
+              mouse:           asset.mouse           ?? "",
+              cpu:             asset.cpu             ?? "",
+              others:          asset.others          ?? "",
+              storage:         asset.storage         ?? "",
               purchaseDate:    asset.purchaseDate,
               warrantyEndDate: asset.warrantyEndDate,
+              vendor:          asset.vendor          ?? "",
+              invoice:         asset.invoice         ?? "",
               location:        asset.location,
+              department:      asset.department      ?? "",
               accessories:     asset.accessories,
               remarks:         asset.remarks,
             }}
@@ -84,6 +104,7 @@ export default function EditAsset() {
             onCancel={() => setLocation(`/assets/${asset.assetId}`)}
             submitLabel={saving ? "Saving…" : "Save Changes"}
             disabled={saving}
+            assetIdReadOnly={true}
           />
         </CardContent>
       </Card>

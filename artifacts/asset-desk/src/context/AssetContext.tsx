@@ -10,32 +10,39 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     brand:           String(row.brand ?? ""),
     model:           String(row.model ?? ""),
     serialNumber:    String(row.serial_number ?? ""),
-    productNumber:   row.product_number  ? String(row.product_number)  : undefined,
-    processor:       row.processor       ? String(row.processor)       : undefined,
-    ram:             row.ram             ? String(row.ram)             : undefined,
+    productNumber:   row.product_number   ? String(row.product_number)   : undefined,
+    processor:       row.processor        ? String(row.processor)        : undefined,
+    ram:             row.ram              ? String(row.ram)              : undefined,
     operatingSystem: row.operating_system ? String(row.operating_system) : undefined,
-    storage:         row.storage         ? String(row.storage)         : undefined,
-    imeiNumber:      row.imei_1          ? String(row.imei_1)          : undefined,
-    imei2:           row.imei_2          ? String(row.imei_2)          : undefined,
-    simNumber:       row.sim_number      ? String(row.sim_number)      : undefined,
-    phoneNumber:     row.phone_number    ? String(row.phone_number)    : undefined,
+    storage:         row.storage          ? String(row.storage)          : undefined,
+    imeiNumber:      row.imei_1           ? String(row.imei_1)           : undefined,
+    imei2:           row.imei_2           ? String(row.imei_2)           : undefined,
+    simNumber:       row.sim_number       ? String(row.sim_number)       : undefined,
+    phoneNumber:     row.phone_number     ? String(row.phone_number)     : undefined,
+    monitorBrand:    row.monitor_brand    ? String(row.monitor_brand)    : undefined,
+    monitorModel:    row.monitor_model    ? String(row.monitor_model)    : undefined,
+    monitorSize:     row.monitor_size     ? String(row.monitor_size)     : undefined,
+    keyboard:        row.keyboard         ? String(row.keyboard)         : undefined,
+    mouse:           row.mouse            ? String(row.mouse)            : undefined,
+    cpu:             row.cpu              ? String(row.cpu)              : undefined,
+    others:          row.others           ? String(row.others)           : undefined,
     purchaseDate:    String(row.purchase_date ?? ""),
     warrantyEndDate: String(row.warranty_end_date ?? ""),
-    vendor:          row.vendor          ? String(row.vendor)          : undefined,
-    invoice:         row.invoice         ? String(row.invoice)         : undefined,
+    vendor:          row.vendor           ? String(row.vendor)           : undefined,
+    invoice:         row.invoice          ? String(row.invoice)          : undefined,
     status:          (row.status as AssetStatus) ?? "Available",
-    assignedTo:      row.assigned_to     ? String(row.assigned_to)    : undefined,
-    assignedEmail:   row.assigned_email  ? String(row.assigned_email) : undefined,
-    department:      row.department      ? String(row.department)     : undefined,
+    assignedTo:      row.assigned_to      ? String(row.assigned_to)      : undefined,
+    assignedEmail:   row.assigned_email   ? String(row.assigned_email)   : undefined,
+    department:      row.department       ? String(row.department)       : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
     remarks:         String(row.remarks ?? ""),
   };
 }
 
-function mapToDB(data: Omit<Asset, "assetId" | "id">, assetId: string): Record<string, unknown> {
+function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
   return {
-    asset_id:          assetId,
+    asset_id:          data.assetId,
     asset_type:        data.assetType,
     brand:             data.brand,
     model:             data.model,
@@ -49,6 +56,13 @@ function mapToDB(data: Omit<Asset, "assetId" | "id">, assetId: string): Record<s
     imei_2:            data.imei2            ?? null,
     sim_number:        data.simNumber        ?? null,
     phone_number:      data.phoneNumber      ?? null,
+    monitor_brand:     data.monitorBrand     ?? null,
+    monitor_model:     data.monitorModel     ?? null,
+    monitor_size:      data.monitorSize      ?? null,
+    keyboard:          data.keyboard         ?? null,
+    mouse:             data.mouse            ?? null,
+    cpu:               data.cpu              ?? null,
+    others:            data.others           ?? null,
     purchase_date:     data.purchaseDate,
     warranty_end_date: data.warrantyEndDate,
     vendor:            data.vendor           ?? null,
@@ -63,21 +77,13 @@ function mapToDB(data: Omit<Asset, "assetId" | "id">, assetId: string): Record<s
   };
 }
 
-function nextAssetId(existing: Asset[]): string {
-  const nums = existing
-    .map(a => parseInt(a.assetId.replace("AST-", ""), 10))
-    .filter(n => !isNaN(n));
-  const n = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-  return `AST-${String(n).padStart(3, "0")}`;
-}
-
 interface AssetContextType {
   assets:        Asset[];
   loading:       boolean;
   getAsset:      (id: string) => Asset | undefined;
   refresh:       () => Promise<void>;
-  addAsset:      (data: Omit<Asset, "assetId" | "id">) => Promise<Asset>;
-  addAssets:     (dataList: Omit<Asset, "assetId" | "id">[]) => Promise<Asset[]>;
+  addAsset:      (data: Omit<Asset, "id">) => Promise<Asset>;
+  addAssets:     (dataList: Omit<Asset, "id">[]) => Promise<Asset[]>;
   updateAsset:   (asset: Asset) => Promise<void>;
   assignAsset:   (assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string) => Promise<void>;
   returnAsset:   (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
@@ -107,9 +113,8 @@ export function AssetProvider({ children }: { children: ReactNode }) {
 
   const getAsset = (id: string) => assets.find(a => a.assetId === id);
 
-  const addAsset = async (data: Omit<Asset, "assetId" | "id">): Promise<Asset> => {
-    const assetId = nextAssetId(assets);
-    const row = mapToDB(data, assetId);
+  const addAsset = async (data: Omit<Asset, "id">): Promise<Asset> => {
+    const row = mapToDB(data);
     const { data: inserted, error } = await supabase
       .from("assets").insert(row).select().single();
     if (error || !inserted) throw new Error(error?.message ?? "Failed to add asset");
@@ -118,18 +123,15 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     return newAsset;
   };
 
-  const addAssets = async (dataList: Omit<Asset, "assetId" | "id">[]): Promise<Asset[]> => {
+  const addAssets = async (dataList: Omit<Asset, "id">[]): Promise<Asset[]> => {
     const created: Asset[] = [];
-    let current = [...assets];
     for (const data of dataList) {
-      const assetId = nextAssetId(current);
-      const row = mapToDB(data, assetId);
+      const row = mapToDB(data);
       const { data: inserted, error } = await supabase
         .from("assets").insert(row).select().single();
       if (!error && inserted) {
         const a = mapFromDB(inserted as Record<string, unknown>);
         created.push(a);
-        current = [a, ...current];
       }
     }
     await fetchAssets();
@@ -137,7 +139,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const updateAsset = async (asset: Asset): Promise<void> => {
-    const row = mapToDB(asset, asset.assetId);
+    const row = mapToDB(asset);
     const { error } = await supabase
       .from("assets").update(row).eq("asset_id", asset.assetId);
     if (error) throw new Error(error.message);

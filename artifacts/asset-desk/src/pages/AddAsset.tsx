@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import AssetForm, { AssetFormValues } from "@/components/AssetForm";
@@ -19,9 +19,9 @@ export default function AddAsset() {
       const newAsset = await addAsset({
         ...values,
         status:      "Available",
-        imeiNumber:  values.imeiNumber || undefined,
+        imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
-        remarks:     values.remarks ?? "",
+        remarks:     values.remarks     ?? "",
       });
       toast({
         title:       "Asset added",
@@ -53,10 +53,10 @@ export default function AddAsset() {
       </div>
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg px-4 py-2.5 border border-border">
-        <CheckCircle className="h-4 w-4 text-primary" />
+        <span className="text-primary font-bold">ℹ</span>
         <span>
-          Fill in the device details below. The asset will be created with{" "}
-          <strong className="text-foreground">Available</strong> status and can be assigned to a user afterwards.
+          Enter a unique <strong className="text-foreground">Asset ID</strong> (e.g. LAP-001, MOB-010, DSK-005).
+          The asset will be created with <strong className="text-foreground">Available</strong> status.
         </span>
       </div>
 
@@ -70,6 +70,7 @@ export default function AddAsset() {
             onCancel={() => setLocation("/assets")}
             submitLabel={saving ? "Saving…" : "Add Asset"}
             disabled={saving}
+            assetIdReadOnly={false}
           />
         </CardContent>
       </Card>

@@ -31,7 +31,7 @@ import { Asset } from "@/data/mockData";
 
 const schema = z.object({
   assetId: z.string().min(1, "Required"),
-  assetType: z.enum(["Laptop", "Mobile"]),
+  assetType: z.enum(["Laptop", "Mobile", "Desktop"]),
   brand: z.string().min(1, "Required"),
   model: z.string().min(1, "Required"),
   serialNumber: z.string().min(1, "Required"),
@@ -168,6 +168,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
                       <SelectContent>
                         <SelectItem value="Laptop">Laptop</SelectItem>
                         <SelectItem value="Mobile">Mobile</SelectItem>
+                        <SelectItem value="Desktop">Desktop</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
