@@ -149,12 +149,15 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const assignAsset = async (
     assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string
   ): Promise<void> => {
-    const updates: Record<string, unknown> = {
+    const coreUpdates: Record<string, unknown> = {
       status: "Assigned", assigned_to: userName, assigned_email: userEmail, department,
     };
-    if (handoverNote) updates.remarks = handoverNote;
-    const { error } = await supabase.from("assets").update(updates).eq("asset_id", assetId);
+    const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
+    // Update remarks separately — non-fatal if column doesn't exist yet
+    if (handoverNote) {
+      await supabase.from("assets").update({ remarks: handoverNote }).eq("asset_id", assetId);
+    }
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
         ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department }
@@ -163,12 +166,14 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
-    const updates: Record<string, unknown> = {
+    const coreUpdates: Record<string, unknown> = {
       status: finalStatus, assigned_to: null, assigned_email: null,
     };
-    if (returnNote) updates.remarks = returnNote;
-    const { error } = await supabase.from("assets").update(updates).eq("asset_id", assetId);
+    const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
+    if (returnNote) {
+      await supabase.from("assets").update({ remarks: returnNote }).eq("asset_id", assetId);
+    }
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
         ? { ...a, status: finalStatus, assignedTo: undefined, assignedEmail: undefined }

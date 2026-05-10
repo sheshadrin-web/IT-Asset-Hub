@@ -215,10 +215,10 @@ export default function Assets() {
         handoverAcc  ? `Accessories: ${handoverAcc}` : "",
         handoverNote ? `Notes: ${handoverNote}` : "",
       ].filter(Boolean).join(" | ");
-      await assignAsset(assignTarget, selectedUser.full_name, selectedUser.email, selectedUser.department, note);
+      await assignAsset(assignTarget, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "", note);
       toast({ title: "Asset assigned", description: `${assignTarget} → ${selectedUser.full_name}` });
-    } catch {
-      toast({ title: "Failed to assign asset", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Failed to assign asset", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     }
     setAssigning(false);
     setAssignTarget(null);
