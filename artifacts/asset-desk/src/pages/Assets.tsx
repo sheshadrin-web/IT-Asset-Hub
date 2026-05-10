@@ -410,7 +410,9 @@ export default function Assets() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          {asset.assetType === "Laptop" ? <Monitor className="h-3.5 w-3.5 text-blue-500" /> : <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
+                          {asset.assetType === "Laptop"  ? <Monitor    className="h-3.5 w-3.5 text-blue-500"   /> :
+                           asset.assetType === "Desktop" ? <Monitor    className="h-3.5 w-3.5 text-violet-500" /> :
+                                                           <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
                           <span className="text-xs font-medium text-foreground">{asset.assetType}</span>
                         </div>
                       </td>
@@ -420,16 +422,24 @@ export default function Assets() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{asset.serialNumber}</td>
                       <td className="px-4 py-3">
-                        {asset.assignedTo ? (
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-6 w-6 flex-shrink-0">
-                              <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">
-                                {asset.assignedTo.split(" ").map(n => n[0]).join("")}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm text-foreground">{asset.assignedTo}</span>
-                          </div>
-                        ) : (
+                        {asset.assignedTo ? (() => {
+                          const assignedUser = users.find(u => u.email === asset.assignedEmail);
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6 flex-shrink-0">
+                                <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">
+                                  {asset.assignedTo.split(" ").map(n => n[0]).join("")}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                {assignedUser?.ecode && (
+                                  <div className="text-[10px] font-mono font-semibold text-muted-foreground leading-none mb-0.5">{assignedUser.ecode}</div>
+                                )}
+                                <span className="text-sm text-foreground leading-tight">{asset.assignedTo}</span>
+                              </div>
+                            </div>
+                          );
+                        })() : (
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
                       </td>

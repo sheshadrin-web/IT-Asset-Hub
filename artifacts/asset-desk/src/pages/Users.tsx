@@ -91,8 +91,8 @@ function downloadCsv(content: string, filename: string) {
 }
 
 function exportUsers(users: Profile[]) {
-  const header = ["User ID", "Name", "Email", "Role", "Department", "Location", "Status"];
-  const rows   = users.map(u => [u.id, u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, statusLabel[u.status]]);
+  const header = ["User ID", "E-Code", "Name", "Email", "Role", "Department", "Location", "Reporting Manager", "Status"];
+  const rows   = users.map(u => [u.id, u.ecode ?? "", u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, u.reporting_manager ?? "", statusLabel[u.status]]);
   const csv    = [header, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
   downloadCsv(csv, `users_export_${new Date().toISOString().split("T")[0]}.csv`);
 }
@@ -128,18 +128,18 @@ export default function Users() {
   // ── Forms ──────────────────────────────────────────────────────────────────
   const addForm = useForm<AddFormValues>({
     resolver: zodResolver(addSchema),
-    defaultValues: { full_name: "", email: "", role: "end_user", department: "", location: "", password: "" },
+    defaultValues: { full_name: "", email: "", role: "end_user", ecode: "", department: "", location: "", reporting_manager: "", password: "" },
   });
 
   const editForm = useForm<EditFormValues>({
     resolver: zodResolver(editSchema),
-    defaultValues: { full_name: "", role: "end_user", department: "", location: "", status: "active" },
+    defaultValues: { full_name: "", role: "end_user", ecode: "", department: "", location: "", reporting_manager: "", status: "active" },
   });
 
   // ── Filtered list ──────────────────────────────────────────────────────────
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
-    const matchSearch = !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.department.toLowerCase().includes(q);
+    const matchSearch = !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.department.toLowerCase().includes(q) || (u.ecode ?? "").toLowerCase().includes(q);
     const matchRole   = roleFilter   === "all" || u.role   === roleFilter;
     const matchStatus = statusFilter === "all" || u.status === statusFilter;
     return matchSearch && matchRole && matchStatus;
@@ -156,14 +156,18 @@ export default function Users() {
 
   // ── Add user ───────────────────────────────────────────────────────────────
   const openAdd = () => {
-    addForm.reset({ full_name: "", email: "", role: "end_user", department: "", location: "", password: "" });
+    addForm.reset({ full_name: "", email: "", role: "end_user", ecode: "", department: "", location: "", reporting_manager: "", password: "" });
     setShowPw(false);
     setAddOpen(true);
   };
 
   const onAddSubmit = async (values: AddFormValues) => {
     setAddSaving(true);
-    const result = await adminUsersApi.createUser(values);
+    const result = await adminUsersApi.createUser({
+      ...values,
+      ecode:             values.ecode             ?? "",
+      reporting_manager: values.reporting_manager ?? "",
+    });
     setAddSaving(false);
 
     if (!result.success) {
@@ -180,11 +184,13 @@ export default function Users() {
   const openEdit = (user: Profile) => {
     setEditingUser(user);
     editForm.reset({
-      full_name:  user.full_name,
-      role:       user.role,
-      department: user.department,
-      location:   user.location,
-      status:     user.status,
+      full_name:         user.full_name,
+      role:              user.role,
+      ecode:             user.ecode             ?? "",
+      department:        user.department,
+      location:          user.location,
+      reporting_manager: user.reporting_manager ?? "",
+      status:            user.status,
     });
     setEditOpen(true);
   };
@@ -201,7 +207,11 @@ export default function Users() {
     }
     setEditSaving(true);
     try {
-      await updateUser(editingUser.id, values);
+      await updateUser(editingUser.id, {
+        ...values,
+        ecode:             values.ecode             ?? "",
+        reporting_manager: values.reporting_manager ?? "",
+      });
       toast({ title: "User updated successfully" });
       setEditOpen(false);
     } catch (err) {
@@ -355,17 +365,17 @@ export default function Users() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {["User", "Role", "Department", "Location", "Status", ""].map(h => (
+                  {["E-Code", "Employee", "Role", "Department", "Location", "Status", ""].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                       {users.length === 0 ? "No users found. Add your first user above." : "No users match the current filters."}
                     </td>
                   </tr>
@@ -383,6 +393,13 @@ export default function Users() {
                       )}
                       data-testid={`row-user-${user.id}`}
                     >
+                      <td className="px-4 py-3">
+                        {user.ecode ? (
+                          <span className="font-mono text-xs font-semibold text-foreground bg-muted px-2 py-1 rounded">{user.ecode}</span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
@@ -479,13 +496,22 @@ export default function Users() {
           </DialogHeader>
           <Form {...addForm}>
             <form onSubmit={addForm.handleSubmit(onAddSubmit)} className="space-y-4">
-              <FormField control={addForm.control} name="full_name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Full Name</FormLabel>
-                  <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={addForm.control} name="full_name" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Full Name</FormLabel>
+                    <FormControl><Input placeholder="Rahul Sharma" {...field} data-testid="input-add-fullname" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={addForm.control} name="ecode" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>E-Code</FormLabel>
+                    <FormControl><Input placeholder="e.g. EMP-001" {...field} data-testid="input-add-ecode" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
               <FormField control={addForm.control} name="email" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Email Address</FormLabel>
@@ -517,13 +543,22 @@ export default function Users() {
                   </FormItem>
                 )} />
               </div>
-              <FormField control={addForm.control} name="location" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Location</FormLabel>
-                  <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={addForm.control} name="location" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={addForm.control} name="reporting_manager" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Reporting Manager</FormLabel>
+                    <FormControl><Input placeholder="Manager name" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
               <FormField control={addForm.control} name="password" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between">
@@ -586,9 +621,14 @@ export default function Users() {
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-              <FormField control={editForm.control} name="full_name" render={({ field }) => (
-                <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} data-testid="input-user-name" /></FormControl><FormMessage /></FormItem>
-              )} />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={editForm.control} name="full_name" render={({ field }) => (
+                  <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} data-testid="input-user-name" /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="ecode" render={({ field }) => (
+                  <FormItem><FormLabel>E-Code</FormLabel><FormControl><Input placeholder="e.g. EMP-001" {...field} data-testid="input-user-ecode" /></FormControl><FormMessage /></FormItem>
+                )} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <FormField control={editForm.control} name="role" render={({ field }) => (
                   <FormItem>
@@ -619,11 +659,16 @@ export default function Users() {
                   </FormItem>
                 )} />
               </div>
-              <FormField control={editForm.control} name="department" render={({ field }) => (
-                <FormItem><FormLabel>Department</FormLabel><FormControl><Input placeholder="Engineering, HR…" {...field} data-testid="input-user-department" /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={editForm.control} name="location" render={({ field }) => (
-                <FormItem><FormLabel>Location</FormLabel><FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl><FormMessage /></FormItem>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={editForm.control} name="department" render={({ field }) => (
+                  <FormItem><FormLabel>Department</FormLabel><FormControl><Input placeholder="Engineering, HR…" {...field} data-testid="input-user-department" /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="location" render={({ field }) => (
+                  <FormItem><FormLabel>Location</FormLabel><FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+              </div>
+              <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
+                <FormItem><FormLabel>Reporting Manager</FormLabel><FormControl><Input placeholder="Manager name" {...field} /></FormControl><FormMessage /></FormItem>
               )} />
               {editingUser?.id === currentUser?.userId && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-center gap-1.5">

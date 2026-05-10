@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
   LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package,
-  ChevronDown,
+  ChevronDown, MapPin, Building, Hash, UserCircle, Edit,
 } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
@@ -11,6 +11,7 @@ import { UserRole, ROLE_LABELS } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import ProfileSettingsModal from "@/components/ProfileSettingsModal";
 
 interface NavItem {
   label: string;
@@ -44,7 +45,6 @@ const roleIconMap: Record<UserRole, React.ElementType> = {
   end_user:    User,
 };
 
-// Badge colours for the header dropdown (light bg)
 const roleBadgeColors: Record<UserRole, string> = {
   super_admin: "bg-purple-100 text-purple-700 border-purple-200",
   it_admin:    "bg-blue-100 text-blue-700 border-blue-200",
@@ -53,13 +53,13 @@ const roleBadgeColors: Record<UserRole, string> = {
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen,  setSidebarOpen]  = useState(false);
-  const [profileOpen,  setProfileOpen]  = useState(false);
-  const [location]                      = useLocation();
-  const { currentUser, signOut }        = useAuth();
-  const profileRef                      = useRef<HTMLDivElement>(null);
+  const [sidebarOpen,       setSidebarOpen]       = useState(false);
+  const [profileOpen,       setProfileOpen]       = useState(false);
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
+  const [location]                                = useLocation();
+  const { currentUser, signOut }                  = useAuth();
+  const profileRef                                = useRef<HTMLDivElement>(null);
 
-  // Close profile dropdown when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
@@ -112,7 +112,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — fills full height, no bottom sign-out */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
             {visibleItems.map((item, idx) => {
@@ -143,18 +143,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             })}
           </ul>
         </nav>
-
-        {/* Logout */}
-        <div className="border-t border-sidebar-border p-3">
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-3 text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
-            onClick={() => signOut()}
-            data-testid="button-logout"
-          >
-            <LogOut className="h-4 w-4" />Sign Out
-          </Button>
-        </div>
+        {/* No Sign Out button here — use profile dropdown in top-right header */}
       </aside>
 
       {/* ── Main content ──────────────────────────────────────────────────────── */}
@@ -174,7 +163,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Notification bell */}
             <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
               <Bell className="h-4 w-4" />
             </Button>
@@ -193,12 +181,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </button>
 
               {profileOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden">
-                  {/* Profile card */}
-                  <div className="px-4 py-4 border-b border-border">
+                <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden">
+                  {/* Avatar + name + email */}
+                  <div className="px-4 pt-4 pb-3 border-b border-border">
                     <div className="flex items-center gap-3 mb-3">
-                      <Avatar className="h-10 w-10 flex-shrink-0">
-                        <AvatarFallback className="bg-primary text-white text-sm font-bold">{initials}</AvatarFallback>
+                      <Avatar className="h-12 w-12 flex-shrink-0">
+                        <AvatarFallback className="bg-primary text-white text-base font-bold">{initials}</AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground truncate">{currentUser.name}</p>
@@ -213,7 +201,45 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       {roleLabel}
                     </span>
                   </div>
-                  {/* Sign out */}
+
+                  {/* Profile details */}
+                  <div className="px-4 py-3 space-y-2 border-b border-border">
+                    {currentUser.ecode && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Hash className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="text-foreground font-mono font-semibold">{currentUser.ecode}</span>
+                        <span className="text-muted-foreground/60">E-Code</span>
+                      </div>
+                    )}
+                    {currentUser.department && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Building className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{currentUser.department}</span>
+                      </div>
+                    )}
+                    {currentUser.location && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{currentUser.location}</span>
+                      </div>
+                    )}
+                    {currentUser.reportingManager && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <UserCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">Reports to: <strong className="text-foreground">{currentUser.reportingManager}</strong></span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <button
+                    onClick={() => { setProfileOpen(false); setProfileSettingsOpen(true); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-foreground hover:bg-accent transition-colors border-b border-border"
+                    data-testid="button-profile-settings"
+                  >
+                    <Edit className="h-4 w-4 text-muted-foreground" />
+                    Profile Settings
+                  </button>
                   <button
                     onClick={() => { setProfileOpen(false); signOut(); }}
                     className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-destructive hover:bg-destructive/5 transition-colors"
@@ -230,6 +256,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
+
+      {/* Profile Settings Modal */}
+      <ProfileSettingsModal
+        open={profileSettingsOpen}
+        onClose={() => setProfileSettingsOpen(false)}
+      />
     </div>
   );
 }
