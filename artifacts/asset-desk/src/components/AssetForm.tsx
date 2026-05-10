@@ -174,12 +174,15 @@ export default function AssetForm({
               <FormField control={form.control} name="ram" render={({ field }) => (
                 <FormItem>
                   <FormLabel>RAM</FormLabel>
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                  >
                     <FormControl>
                       <SelectTrigger><SelectValue placeholder="Select RAM size" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="__none__">Not specified</SelectItem>
                       {RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -189,12 +192,15 @@ export default function AssetForm({
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                  >
                     <FormControl>
                       <SelectTrigger><SelectValue placeholder="Select storage size" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="__none__">Not specified</SelectItem>
                       {STORAGE_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -204,12 +210,15 @@ export default function AssetForm({
               <FormField control={form.control} name="operatingSystem" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Operating System</FormLabel>
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                  >
                     <FormControl>
                       <SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="__none__">Not specified</SelectItem>
                       {OS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -256,12 +265,15 @@ export default function AssetForm({
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
-                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                  >
                     <FormControl>
                       <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="__none__">Not specified</SelectItem>
                       {["64 GB", "128 GB", "256 GB", "512 GB", "1 TB"].map(s => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
