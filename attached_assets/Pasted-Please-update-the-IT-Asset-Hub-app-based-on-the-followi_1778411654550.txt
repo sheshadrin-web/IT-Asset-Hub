@@ -1,0 +1,144 @@
+Please update the IT Asset Hub app based on the following UI and workflow changes. Keep the current Supabase authentication working. Do not break login, dashboard, protected routes, Render deployment, or existing pages.
+
+Required changes:
+
+1. Users page changes
+In the Users module, add a new column before employee/name column:
+
+Column name:
+E-Code
+
+Requirements:
+- Add field `ecode` or `employee_code` to user/profile data model.
+- Show E-Code in Users table before employee/name.
+- Add E-Code field in Add User form.
+- Add E-Code field in Edit User form.
+- E-Code should be searchable.
+- E-Code should be included in user CSV export if export exists.
+- E-Code should be stored in Supabase `public.profiles`.
+- Update TypeScript types/interfaces accordingly.
+
+2. User profile dropdown/settings
+When I click the user/profile avatar at top-right, show a proper profile dropdown/settings panel.
+
+It should show:
+- Profile photo/avatar
+- Full name
+- Email ID
+- E-Code
+- Department
+- Location
+- Reporting Manager
+- Role badge
+- Sign out option
+
+Also add an option:
+“Profile Settings”
+
+When clicked, open a profile settings modal/page where the logged-in user can view and update:
+- Profile photo/avatar
+- Name
+- E-Code
+- Email ID readonly
+- Department
+- Location
+- Reporting Manager
+
+Do not allow normal users to change their own role.
+
+3. Profiles table/schema update
+Update Supabase setup SQL documentation to include these fields in `public.profiles`:
+
+- ecode text
+- profile_photo_url text
+- reporting_manager text
+
+If the app has migration/helper SQL, add this SQL:
+
+alter table public.profiles
+add column if not exists ecode text,
+add column if not exists profile_photo_url text,
+add column if not exists reporting_manager text;
+
+Make sure all profile fetch/update code handles these fields safely.
+
+4. Assets page changes
+In Assets module/table, I want E-Code before employee/name column wherever assigned user/employee name is shown.
+
+Also Asset ID should be manual, not auto-generated.
+
+Requirements:
+- Add E-Code column before assigned employee/name column in Assets table.
+- Asset ID must be manually entered by admin while adding asset.
+- Do not auto-generate Asset ID.
+- Asset ID should be required and unique.
+- Add validation message if Asset ID is empty.
+- Add validation message if duplicate Asset ID exists.
+- Update Add Asset form to include manual Asset ID field.
+- Update Edit Asset form to allow editing Asset ID only if safe; otherwise keep it readonly with a clear note.
+- Include Asset ID and E-Code in CSV export if export exists.
+
+5. Sign out cleanup
+There are currently two sign out options:
+- One in the user dropdown
+- One in the left sidebar bottom
+
+Remove the bottom left sidebar Sign Out option.
+
+Keep only the profile dropdown Sign Out option at the top-right.
+
+Make sure logout still calls:
+supabase.auth.signOut()
+
+After logout, redirect to /login.
+
+6. Sidebar cleanup
+Remove duplicate sign out block from sidebar bottom.
+Keep sidebar navigation clean:
+- Dashboard
+- Assets
+- Tickets
+- Users
+- Reports
+- Settings
+
+7. Data consistency
+Update all relevant contexts/hooks/services/types:
+- Profile type
+- User type
+- Asset type if needed
+- CSV export mapping
+- Add/Edit forms
+- Table columns
+- Search/filter logic
+
+8. Empty states
+Keep existing empty states working.
+Do not bring back demo data.
+Do not add fake users, fake assets, fake tickets, or demo credentials.
+
+9. Supabase/RLS safety
+Do not use service_role key in frontend.
+Do not hardcode secrets.
+Keep frontend using only:
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+
+10. Build and test
+After changes:
+- Run typecheck/build.
+- Fix all TypeScript errors.
+- Confirm login still works.
+- Confirm dashboard still opens.
+- Confirm Users page shows E-Code column.
+- Confirm Assets page shows manual Asset ID and E-Code.
+- Confirm profile dropdown works.
+- Confirm only one Sign Out option remains.
+
+11. Summary
+After completing, summarize:
+- Files changed
+- SQL changes needed in Supabase
+- Whether build passed
+- Any manual Supabase SQL I need to run
+- Git commands I need to run to push changes

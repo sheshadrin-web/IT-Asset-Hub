@@ -54,21 +54,25 @@ const statusLabel: Record<UserStatus, string> = {
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 const addSchema = z.object({
-  full_name:  z.string().min(2, "Full name is required"),
-  email:      z.string().email("Invalid email address"),
-  role:       z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
-  department: z.string().min(1, "Department is required"),
-  location:   z.string().min(1, "Location is required"),
-  password:   z.string().min(8, "Password must be at least 8 characters"),
+  full_name:         z.string().min(2, "Full name is required"),
+  email:             z.string().email("Invalid email address"),
+  role:              z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
+  ecode:             z.string().optional(),
+  department:        z.string().min(1, "Department is required"),
+  location:          z.string().min(1, "Location is required"),
+  reporting_manager: z.string().optional(),
+  password:          z.string().min(8, "Password must be at least 8 characters"),
 });
 type AddFormValues = z.infer<typeof addSchema>;
 
 const editSchema = z.object({
-  full_name:  z.string().min(2, "Required"),
-  role:       z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
-  department: z.string().min(1, "Required"),
-  location:   z.string().min(1, "Required"),
-  status:     z.enum(["active", "inactive"]),
+  full_name:         z.string().min(2, "Required"),
+  role:              z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
+  ecode:             z.string().optional(),
+  department:        z.string().min(1, "Required"),
+  location:          z.string().min(1, "Required"),
+  reporting_manager: z.string().optional(),
+  status:            z.enum(["active", "inactive"]),
 });
 type EditFormValues = z.infer<typeof editSchema>;
 

@@ -9,21 +9,25 @@ const EDGE_FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-use
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CreateUserPayload {
-  email:      string;
-  password:   string;
-  full_name:  string;
-  role:       string;
-  department: string;
-  location:   string;
+  email:             string;
+  password:          string;
+  full_name:         string;
+  role:              string;
+  ecode:             string;
+  department:        string;
+  location:          string;
+  reporting_manager: string;
 }
 
 export interface UpdateUserPayload {
-  userId:     string;
-  full_name:  string;
-  role:       string;
-  department: string;
-  location:   string;
-  status:     string;
+  userId:            string;
+  full_name:         string;
+  role:              string;
+  ecode:             string;
+  department:        string;
+  location:          string;
+  reporting_manager: string;
+  status:            string;
 }
 
 export interface AdminUsersResult {

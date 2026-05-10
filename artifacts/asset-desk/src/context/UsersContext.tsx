@@ -3,11 +3,13 @@ import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Profile, UserRole, UserStatus } from "@/data/mockData";
 
 interface UpdateProfileInput {
-  full_name:  string;
-  role:       UserRole;
-  department: string;
-  location:   string;
-  status:     UserStatus;
+  full_name:         string;
+  role:              UserRole;
+  ecode:             string;
+  department:        string;
+  location:          string;
+  reporting_manager: string;
+  status:            UserStatus;
 }
 
 interface UsersContextType {
