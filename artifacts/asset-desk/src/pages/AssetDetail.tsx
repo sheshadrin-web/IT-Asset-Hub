@@ -66,7 +66,7 @@ export default function AssetDetail() {
   const handleAssignConfirm = async () => {
     if (!asset || !selectedUser) return;
     try {
-      await assignAsset(asset.assetId, selectedUser.full_name, selectedUser.email, selectedUser.department);
+      await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "");
       toast({ title: "Asset assigned", description: `Assigned to ${selectedUser.full_name}` });
       setAssignDialogOpen(false);
       setAssignUserId("");

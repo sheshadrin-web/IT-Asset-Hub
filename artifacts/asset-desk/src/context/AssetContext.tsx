@@ -31,8 +31,8 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     vendor:          row.vendor           ? String(row.vendor)           : undefined,
     invoice:         row.invoice          ? String(row.invoice)          : undefined,
     status:          (row.status as AssetStatus) ?? "Available",
-    assignedTo:      row.assigned_to      ? String(row.assigned_to)      : undefined,
-    assignedEmail:   row.assigned_email   ? String(row.assigned_email)   : undefined,
+    assignedTo:      row.assigned_to_name  ? String(row.assigned_to_name)  : undefined,
+    assignedEmail:   row.assigned_email    ? String(row.assigned_email)    : undefined,
     department:      row.department       ? String(row.department)       : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
@@ -68,7 +68,8 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
     vendor:            data.vendor           ?? null,
     invoice:           data.invoice          ?? null,
     status:            data.status,
-    assigned_to:       data.assignedTo       ?? null,
+    assigned_to:       null,
+    assigned_to_name:  data.assignedTo       ?? null,
     assigned_email:    data.assignedEmail    ?? null,
     department:        data.department       ?? null,
     location:          data.location,
@@ -85,7 +86,7 @@ interface AssetContextType {
   addAsset:      (data: Omit<Asset, "id">) => Promise<Asset>;
   addAssets:     (dataList: Omit<Asset, "id">[]) => Promise<Asset[]>;
   updateAsset:   (asset: Asset) => Promise<void>;
-  assignAsset:   (assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string) => Promise<void>;
+  assignAsset:   (assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string) => Promise<void>;
   returnAsset:   (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
   updateStatus:  (assetId: string, status: AssetStatus) => Promise<void>;
   unassignAsset: (assetId: string) => Promise<void>;
@@ -147,10 +148,14 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const assignAsset = async (
-    assetId: string, userName: string, userEmail: string, department: string, handoverNote?: string
+    assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string
   ): Promise<void> => {
     const coreUpdates: Record<string, unknown> = {
-      status: "Assigned", assigned_to: userName, assigned_email: userEmail, department,
+      status:           "Assigned",
+      assigned_to:      userId,        // UUID FK to profiles
+      assigned_to_name: userName,      // TEXT display name
+      assigned_email:   userEmail,
+      department,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -167,7 +172,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
 
   const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
     const coreUpdates: Record<string, unknown> = {
-      status: finalStatus, assigned_to: null, assigned_email: null,
+      status: finalStatus, assigned_to: null, assigned_to_name: null, assigned_email: null,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -190,7 +195,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const unassignAsset = async (assetId: string): Promise<void> => {
     const { error } = await supabase
       .from("assets")
-      .update({ status: "Available", assigned_to: null, assigned_email: null, department: null })
+      .update({ status: "Available", assigned_to: null, assigned_to_name: null, assigned_email: null, department: null })
       .eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a =>

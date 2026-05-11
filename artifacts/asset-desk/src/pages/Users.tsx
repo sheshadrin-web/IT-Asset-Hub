@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
+  Upload, CheckSquare,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -122,8 +123,97 @@ export default function Users() {
   // Password visibility
   const [showPw, setShowPw] = useState(false);
 
+  // Bulk select
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen]   = useState(false);
+
+  // Import
+  const [importOpen,    setImportOpen]    = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importRows, setImportRows]       = useState<Array<{
+    full_name: string; email: string; role: string; ecode: string;
+    department: string; location: string; reporting_manager: string; password: string;
+    _status?: "pending" | "ok" | "error"; _error?: string;
+  }>>([]);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin      = isSuperAdmin || currentUser?.role === "it_admin";
+
+  // ── Bulk select helpers (uses toggleSelect/toggleSelectAll defined after filtered) ──
+  const toggleSelect = (id: string) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedUserIds(new Set());
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedUserIds];
+    for (const id of ids) {
+      await deleteUser(id);
+    }
+    clearSelection();
+    setBulkDeleteOpen(false);
+    toast({ title: "Users deleted", description: `${ids.length} user${ids.length !== 1 ? "s" : ""} removed.` });
+  };
+
+  // ── Import CSV ──────────────────────────────────────────────────────────────
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      // Skip header row if it matches expected headers
+      const isHeader = (row: string) => /full.?name|email|role/i.test(row);
+      const dataLines = lines.filter((l, i) => i === 0 && isHeader(l) ? false : true);
+      const rows = dataLines.map(line => {
+        const cols = line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+        return {
+          full_name:         cols[0] ?? "",
+          email:             cols[1] ?? "",
+          role:              cols[2] ?? "end_user",
+          ecode:             cols[3] ?? "",
+          department:        cols[4] ?? "",
+          location:          cols[5] ?? "",
+          reporting_manager: cols[6] ?? "",
+          password:          cols[7] ?? "",
+          _status:           "pending" as const,
+        };
+      }).filter(r => r.email);
+      setImportRows(rows);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleImportSubmit = async () => {
+    setImportLoading(true);
+    const updated = [...importRows];
+    for (let i = 0; i < updated.length; i++) {
+      if (updated[i]._status === "ok") continue;
+      const row = updated[i];
+      const result = await adminUsersApi.createUser({
+        full_name:         row.full_name,
+        email:             row.email,
+        role:              (row.role as "super_admin" | "it_admin" | "it_agent" | "end_user") || "end_user",
+        ecode:             row.ecode,
+        department:        row.department,
+        location:          row.location,
+        reporting_manager: row.reporting_manager,
+        password:          row.password || "Miles@12345",
+      });
+      updated[i] = { ...row, _status: result.success ? "ok" : "error", _error: result.error ?? undefined };
+      setImportRows([...updated]);
+    }
+    setImportLoading(false);
+    await refresh();
+  };
 
   // ── Forms ──────────────────────────────────────────────────────────────────
   const addForm = useForm<AddFormValues>({
@@ -144,6 +234,26 @@ export default function Users() {
     const matchStatus = statusFilter === "all" || u.status === statusFilter;
     return matchSearch && matchRole && matchStatus;
   });
+
+  const selectableIds  = filtered.filter(u => u.id !== currentUser?.userId).map(u => u.id);
+  const allSelected    = selectableIds.length > 0 && selectableIds.every(id => selectedUserIds.has(id));
+  const someSelected   = selectableIds.some(id => selectedUserIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedUserIds(prev => {
+        const next = new Set(prev);
+        selectableIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedUserIds(prev => {
+        const next = new Set(prev);
+        selectableIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  };
 
   const roleCounts = {
     superAdmins: users.filter(u => u.role === "super_admin").length,
@@ -282,7 +392,7 @@ export default function Users() {
             {loading ? "Loading…" : `${users.length} user${users.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" className="gap-2" onClick={() => refresh()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -290,9 +400,18 @@ export default function Users() {
             <Download className="h-4 w-4" /> Export
           </Button>
           {isSuperAdmin && (
-            <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
-              <Plus className="h-4 w-4" /> Add User
-            </Button>
+            <>
+              <Button
+                variant="outline" size="sm" className="gap-2"
+                onClick={() => { setImportRows([]); setImportOpen(true); }}
+                data-testid="button-import-users"
+              >
+                <Upload className="h-4 w-4" /> Import Users
+              </Button>
+              <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
+                <Plus className="h-4 w-4" /> Add User
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -358,6 +477,24 @@ export default function Users() {
         </CardContent>
       </Card>
 
+      {/* Bulk action bar */}
+      {selectedUserIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg text-sm">
+          <CheckSquare className="h-4 w-4 text-primary" />
+          <span className="font-medium text-primary">{selectedUserIds.size} selected</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={clearSelection}>
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+            {isSuperAdmin && (
+              <Button size="sm" variant="destructive" className="gap-1.5 h-7 text-xs" onClick={() => setBulkDeleteOpen(true)}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete Selected
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Users Table */}
       <Card>
         <CardContent className="p-0">
@@ -365,6 +502,18 @@ export default function Users() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-3 w-10">
+                    {isSuperAdmin && (
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-border cursor-pointer accent-primary"
+                        checked={allSelected}
+                        ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all"
+                      />
+                    )}
+                  </th>
                   {["E-Code", "Employee", "Role", "Department", "Location", "Status", ""].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                   ))}
@@ -372,10 +521,10 @@ export default function Users() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                       {users.length === 0 ? "No users found. Add your first user above." : "No users match the current filters."}
                     </td>
                   </tr>
@@ -383,16 +532,29 @@ export default function Users() {
                   const initials = user.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
                   const isSelf   = user.id === currentUser?.userId;
                   const busy     = actionSaving === user.id;
+                  const isChecked = selectedUserIds.has(user.id);
 
                   return (
                     <tr
                       key={user.id}
                       className={cn(
                         "border-b border-border last:border-0 hover:bg-muted/30 transition-colors",
-                        user.status === "inactive" && "opacity-60"
+                        user.status === "inactive" && "opacity-60",
+                        isChecked && "bg-primary/5"
                       )}
                       data-testid={`row-user-${user.id}`}
                     >
+                      <td className="px-4 py-3 w-10">
+                        {isSuperAdmin && !isSelf && (
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-border cursor-pointer accent-primary"
+                            checked={isChecked}
+                            onChange={() => toggleSelect(user.id)}
+                            aria-label={`Select ${user.full_name}`}
+                          />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         {user.ecode ? (
                           <span className="font-mono text-xs font-semibold text-foreground bg-muted px-2 py-1 rounded">{user.ecode}</span>
@@ -705,6 +867,122 @@ export default function Users() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Bulk Delete Confirm ───────────────────────────────────────────────── */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={v => !v && setBulkDeleteOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete {selectedUserIds.size} User{selectedUserIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the selected {selectedUserIds.size} user{selectedUserIds.size !== 1 ? "s" : ""} from Supabase Auth and their profiles.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleBulkDelete}
+            >
+              Delete {selectedUserIds.size} User{selectedUserIds.size !== 1 ? "s" : ""}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Import Users Dialog ───────────────────────────────────────────────── */}
+      <Dialog open={importOpen} onOpenChange={v => !importLoading && setImportOpen(v)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Import Users from CSV</DialogTitle>
+            <DialogDescription>
+              Upload a CSV file with columns: <code className="text-xs bg-muted px-1 py-0.5 rounded">full_name, email, role, ecode, department, location, reporting_manager, password</code>.
+              If password is blank, default <code className="text-xs bg-muted px-1 py-0.5 rounded">Miles@12345</code> is used.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto space-y-4">
+            {/* File picker */}
+            <div className="flex items-center gap-3">
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => importFileRef.current?.click()}
+                disabled={importLoading}
+              >
+                <Upload className="h-4 w-4" /> Choose CSV File
+              </Button>
+              {importRows.length > 0 && (
+                <span className="text-sm text-muted-foreground">{importRows.length} row{importRows.length !== 1 ? "s" : ""} ready to import</span>
+              )}
+            </div>
+
+            {/* Preview table */}
+            {importRows.length > 0 && (
+              <div className="border rounded-lg overflow-auto max-h-60">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-muted/50 border-b">
+                      {["Status", "Name", "Email", "Role", "E-Code", "Dept", "Location"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map((row, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        <td className="px-3 py-2">
+                          {row._status === "ok"    && <span className="text-emerald-600 font-medium">✓ Done</span>}
+                          {row._status === "error" && <span className="text-destructive font-medium" title={row._error}>✗ Error</span>}
+                          {row._status === "pending" && <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-3 py-2 font-medium">{row.full_name}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.email}</td>
+                        <td className="px-3 py-2">{row.role}</td>
+                        <td className="px-3 py-2 font-mono">{row.ecode || "—"}</td>
+                        <td className="px-3 py-2">{row.department || "—"}</td>
+                        <td className="px-3 py-2">{row.location || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {importRows.length === 0 && (
+              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground">Choose a CSV file to preview users before importing</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importLoading}>Cancel</Button>
+            <Button
+              onClick={handleImportSubmit}
+              disabled={importRows.length === 0 || importLoading || importRows.every(r => r._status === "ok")}
+            >
+              {importLoading
+                ? `Importing… ${importRows.filter(r => r._status === "ok").length}/${importRows.length}`
+                : importRows.every(r => r._status === "ok")
+                  ? "All Imported"
+                  : `Import ${importRows.filter(r => r._status !== "ok").length} Users`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Delete Confirm ────────────────────────────────────────────────────── */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
