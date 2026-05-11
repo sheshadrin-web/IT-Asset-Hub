@@ -51,7 +51,10 @@ export default function RaiseTicket() {
 
   const isEndUser      = currentUser?.role === "end_user";
   const availableAssets = isEndUser
-    ? assets.filter(a => a.assignedTo === currentUser?.name)
+    ? assets.filter(a =>
+        (a.assignedTo && a.assignedTo === currentUser?.name) ||
+        (a.assignedEmail && a.assignedEmail === currentUser?.email)
+      )
     : assets;
 
   const form = useForm<FormValues>({

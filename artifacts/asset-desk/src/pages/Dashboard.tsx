@@ -40,11 +40,15 @@ function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; mes
 }
 
 function EndUserDashboard({ userName }: { userName: string }) {
-  const { assets }  = useAssets();
-  const { tickets } = useTickets();
+  const { assets }      = useAssets();
+  const { tickets }     = useTickets();
+  const { currentUser } = useAuth();
 
   const myTickets     = tickets.filter((t) => t.raisedBy === userName);
-  const myAssets      = assets.filter((a) => a.assignedTo === userName);
+  const myAssets      = assets.filter((a) =>
+    (a.assignedTo && a.assignedTo === userName) ||
+    (a.assignedEmail && a.assignedEmail === currentUser?.email)
+  );
   const openCount     = myTickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length;
   const resolvedCount = myTickets.filter((t) => ["Resolved", "Closed"].includes(t.status)).length;
   const recentTickets = [...myTickets].sort((a, b) => b.createdDate.localeCompare(a.createdDate)).slice(0, 5);

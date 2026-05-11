@@ -422,26 +422,25 @@ export default function Assets() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{asset.serialNumber}</td>
                       <td className="px-4 py-3">
-                        {asset.assignedTo ? (() => {
-                          const assignedUser = users.find(u => u.email === asset.assignedEmail);
+                        {(() => {
+                          const assignedUser = asset.assignedEmail ? users.find(u => u.email === asset.assignedEmail) : undefined;
+                          const displayName  = asset.assignedTo || assignedUser?.full_name;
+                          if (!displayName && !assignedUser) return <span className="text-muted-foreground text-xs">—</span>;
+                          const initials = (displayName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
                           return (
                             <div className="flex items-center gap-2">
                               <Avatar className="h-6 w-6 flex-shrink-0">
-                                <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">
-                                  {asset.assignedTo.split(" ").map(n => n[0]).join("")}
-                                </AvatarFallback>
+                                <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
                               </Avatar>
                               <div className="min-w-0">
                                 {assignedUser?.ecode && (
                                   <div className="text-[10px] font-mono font-semibold text-muted-foreground leading-none mb-0.5">{assignedUser.ecode}</div>
                                 )}
-                                <span className="text-sm text-foreground leading-tight">{asset.assignedTo}</span>
+                                <span className="text-sm text-foreground leading-tight">{displayName ?? asset.assignedEmail}</span>
                               </div>
                             </div>
                           );
-                        })() : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{asset.department ?? "—"}</td>
                       <td className="px-4 py-3">

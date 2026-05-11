@@ -18,7 +18,10 @@ export default function MyAssets() {
   const { currentUser }  = useAuth();
   const { assets, loading } = useAssets();
 
-  const myAssets = assets.filter(a => a.assignedTo === currentUser?.name);
+  const myAssets = assets.filter(a =>
+    (a.assignedTo && a.assignedTo === currentUser?.name) ||
+    (a.assignedEmail && a.assignedEmail === currentUser?.email)
+  );
 
   return (
     <div className="space-y-5">

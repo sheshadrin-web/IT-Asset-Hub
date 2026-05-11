@@ -270,18 +270,18 @@ export default function AssetDetail() {
             </CardContent>
           </Card>
 
-          {asset.assignedTo && (
+          {(asset.assignedTo || asset.assignedEmail) && (
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Assigned User</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
-                      {asset.assignedTo.split(" ").map(n => n[0]).join("")}
+                      {(asset.assignedTo ?? asset.assignedEmail ?? "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="text-sm font-semibold text-foreground">{asset.assignedTo}</p>
+                    <p className="text-sm font-semibold text-foreground">{asset.assignedTo ?? asset.assignedEmail}</p>
                     <p className="text-xs text-muted-foreground">{asset.department}</p>
                     {asset.assignedEmail && <p className="text-xs text-muted-foreground">{asset.assignedEmail}</p>}
                   </div>
