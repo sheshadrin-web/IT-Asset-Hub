@@ -38,15 +38,43 @@ export interface AdminUsersResult {
   notDeployed?: boolean; // true when the Edge Function 404s
 }
 
+// ─── Token helper ─────────────────────────────────────────────────────────────
+// supabase.auth.getSession() in Supabase v2 does NOT auto-refresh the access
+// token — it just returns whatever is stored in localStorage. If the 1-hour
+// JWT has expired the Edge Function rejects it with 401 "invalid or expired token".
+//
+// This helper fetches the current session and, if the access token has expired
+// or will expire within the next 60 seconds, calls refreshSession() to get a
+// fresh JWT before returning it.
+
+async function getFreshAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
+
+  const nowSeconds   = Math.floor(Date.now() / 1000);
+  const expiresAt    = session.expires_at ?? 0;          // unix seconds
+  const secsLeft     = expiresAt - nowSeconds;
+
+  if (secsLeft > 60) {
+    // Token is still valid for more than 60 seconds — use it directly.
+    return session.access_token;
+  }
+
+  // Token has expired or is about to — force a refresh.
+  const { data: refreshed, error } = await supabase.auth.refreshSession();
+  if (error || !refreshed.session) return null;
+  return refreshed.session.access_token;
+}
+
 // ─── Core caller ──────────────────────────────────────────────────────────────
 
 async function callEdgeFunction(
   action: string,
   payload: Record<string, unknown>,
 ): Promise<AdminUsersResult> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = await getFreshAccessToken();
 
-  if (!session) {
+  if (!accessToken) {
     return { success: false, error: "Not authenticated — please log in again." };
   }
 
@@ -56,7 +84,7 @@ async function callEdgeFunction(
       method: "POST",
       headers: {
         "Content-Type":  "application/json",
-        "Authorization": `Bearer ${session.access_token}`,
+        "Authorization": `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ action, payload }),
     });
