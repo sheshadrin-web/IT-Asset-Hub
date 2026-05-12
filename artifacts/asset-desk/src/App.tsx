@@ -23,6 +23,7 @@ import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import MyAssets from "@/pages/MyAssets";
 import ReturnAsset from "@/pages/ReturnAsset";
+import BulkImport from "@/pages/BulkImport";
 import SupabaseCheck from "@/pages/SupabaseCheck";
 import NotFound from "@/pages/not-found";
 
@@ -102,6 +103,9 @@ function Router() {
       </Route>
 
       {/* Assets — admins and agents */}
+      <Route path="/assets/import">
+        <ProtectedRoute component={BulkImport} allowedRoles={["super_admin", "it_admin"]} />
+      </Route>
       <Route path="/assets/new">
         <ProtectedRoute component={AddAsset} allowedRoles={["super_admin", "it_admin"]} />
       </Route>

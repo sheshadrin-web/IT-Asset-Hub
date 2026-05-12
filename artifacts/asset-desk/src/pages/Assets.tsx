@@ -289,9 +289,11 @@ export default function Assets() {
         </div>
         {isAdmin && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={() => { setParsedRows([]); setUploadFileName(""); setUploadOpen(true); }} data-testid="button-bulk-upload">
-              <Upload className="h-4 w-4" /> Bulk Upload
-            </Button>
+            <Link href="/assets/import">
+              <Button variant="outline" className="gap-2" data-testid="button-bulk-upload">
+                <Upload className="h-4 w-4" /> Bulk Import
+              </Button>
+            </Link>
             <Link href="/assets/new">
               <Button className="gap-2" data-testid="button-add-asset">
                 <Plus className="h-4 w-4" /> Add Asset
