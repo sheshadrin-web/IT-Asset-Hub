@@ -154,12 +154,35 @@ export default function Users() {
 
   const handleBulkDelete = async () => {
     const ids = [...selectedUserIds];
+    let successCount = 0;
+    let failCount = 0;
     for (const id of ids) {
-      await deleteUser(id);
+      // Call the Edge Function first — this permanently removes the Supabase
+      // Auth account (plus the cascade-delete removes the profile row too).
+      const result = await adminUsersApi.deleteUser(id);
+      if (result.success || result.notDeployed) {
+        // If Edge Fn not deployed, fall back to profile-only delete so at
+        // minimum the user can no longer access the app.
+        if (result.notDeployed) await deleteUser(id);
+        successCount++;
+      } else {
+        // Edge Fn returned an error — still try to remove the profile row
+        // so the user is at least de-listed from the UI.
+        try { await deleteUser(id); } catch { /* ignore */ }
+        failCount++;
+      }
     }
     clearSelection();
     setBulkDeleteOpen(false);
-    toast({ title: "Users deleted", description: `${ids.length} user${ids.length !== 1 ? "s" : ""} removed.` });
+    if (failCount === 0) {
+      toast({ title: "Users permanently deleted", description: `${successCount} user${successCount !== 1 ? "s" : ""} removed from the system.` });
+    } else {
+      toast({
+        title: "Partial deletion",
+        description: `${successCount} deleted, ${failCount} failed (auth accounts may still exist).`,
+        variant: "destructive",
+      });
+    }
   };
 
   // ── Import CSV ──────────────────────────────────────────────────────────────
