@@ -6,6 +6,24 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// ── JWT helper ────────────────────────────────────────────────────────────────
+// Supabase Edge Functions verify the JWT signature automatically when deployed
+// with --verify-jwt (the default). We decode the payload here to extract the
+// sub (user UUID) without making an extra network call to Supabase Auth.
+// This bypasses callerClient.auth.getUser() which can fail under rate-limits
+// or when called 300+ times in rapid succession during bulk imports.
+function decodeJWTPayload(token: string): Record<string, unknown> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return {};
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(padded);
+    return JSON.parse(decoded);
+  } catch {
+    return {};
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -15,7 +33,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // ── Verify caller's JWT ───────────────────────────────────────────────────
+    // ── Extract and validate the caller's JWT ─────────────────────────────────
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return json({ error: "Missing Authorization header" }, 401);
@@ -23,34 +41,26 @@ Deno.serve(async (req: Request) => {
     const callerToken = authHeader.replace("Bearer ", "").trim();
 
     const supabaseUrl    = Deno.env.get("SUPABASE_URL")             ?? "";
-    const anonKey        = Deno.env.get("SUPABASE_ANON_KEY")        ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const anonKey        = Deno.env.get("SUPABASE_ANON_KEY")        ?? "";
 
     if (!serviceRoleKey) {
-      return json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured on Edge Function. Run: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<key>" }, 500);
+      return json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured. Run: supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<key>" }, 500);
     }
 
-    // Caller-scoped client — only used to verify identity and role
-    const callerClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${callerToken}` } },
-    });
+    // ── Decode JWT to get the caller's user ID ───────────────────────────────
+    // Supabase proxy already verified the signature (--verify-jwt default).
+    // We decode the payload to extract `sub` (UUID) and `exp` (expiry).
+    const payload = decodeJWTPayload(callerToken);
+    const callerUserId = payload.sub as string | undefined;
+    const exp          = payload.exp as number | undefined;
 
-    const { data: { user: callerUser }, error: userErr } = await callerClient.auth.getUser();
-    if (userErr || !callerUser) {
-      return json({ error: "Unauthorized — invalid or expired token" }, 401);
+    if (!callerUserId) {
+      return json({ error: "Unauthorized — could not decode token identity" }, 401);
     }
-
-    const { data: callerProfile, error: profileErr } = await callerClient
-      .from("profiles")
-      .select("role")
-      .eq("id", callerUser.id)
-      .single();
-
-    if (profileErr || !callerProfile) {
-      return json({ error: "Could not verify caller profile" }, 403);
-    }
-    if (callerProfile.role !== "super_admin") {
-      return json({ error: "Forbidden — only super_admin can perform this action" }, 403);
+    // Check expiry (belt-and-suspenders; Supabase proxy does this too)
+    if (exp && exp < Math.floor(Date.now() / 1000)) {
+      return json({ error: "Unauthorized — token has expired, please refresh the page and log in again" }, 401);
     }
 
     // ── Service-role admin client ─────────────────────────────────────────────
@@ -58,8 +68,35 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // ── Verify the caller is super_admin ──────────────────────────────────────
+    // Use adminClient (service role) so RLS never blocks this check.
+    const { data: callerProfile, error: profileErr } = await adminClient
+      .from("profiles")
+      .select("role")
+      .eq("id", callerUserId)
+      .single();
+
+    if (profileErr || !callerProfile) {
+      // Fallback: verify via Supabase Auth REST endpoint if profile lookup fails
+      const verifyRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          "Authorization": `Bearer ${callerToken}`,
+          "apikey": anonKey,
+        },
+      });
+      if (!verifyRes.ok) {
+        return json({ error: "Unauthorized — could not verify caller identity" }, 401);
+      }
+      return json({ error: "Forbidden — caller profile not found" }, 403);
+    }
+
+    if (callerProfile.role !== "super_admin") {
+      return json({ error: "Forbidden — only super_admin can perform this action" }, 403);
+    }
+
+    // ── Parse request body ────────────────────────────────────────────────────
     const body = await req.json();
-    const { action, payload } = body as { action: string; payload: Record<string, unknown> };
+    const { action, payload: p } = body as { action: string; payload: Record<string, unknown> };
 
     switch (action) {
 
@@ -67,7 +104,7 @@ Deno.serve(async (req: Request) => {
         const {
           email, password, full_name, role,
           ecode, department, location, reporting_manager,
-        } = payload as {
+        } = p as {
           email: string; password: string; full_name: string; role: string;
           ecode?: string; department?: string; location?: string; reporting_manager?: string;
         };
@@ -79,7 +116,7 @@ Deno.serve(async (req: Request) => {
         const cleanEmail = email.trim().toLowerCase();
         const cleanName  = full_name.trim();
 
-        // ── Check if a profile already exists for this email ──────────────────
+        // Check if profile already exists (handles re-imports safely)
         const { data: existingProfile } = await adminClient
           .from("profiles")
           .select("id")
@@ -90,11 +127,9 @@ Deno.serve(async (req: Request) => {
         let isExisting = false;
 
         if (existingProfile) {
-          // Profile already exists — skip auth creation, just upsert profile data
           userId     = existingProfile.id;
           isExisting = true;
         } else {
-          // Create the Supabase Auth user
           const { data: authData, error: createErr } = await adminClient.auth.admin.createUser({
             email:         cleanEmail,
             password,
@@ -111,9 +146,7 @@ Deno.serve(async (req: Request) => {
 
           if (createErr || !authData?.user) {
             const msg = createErr?.message ?? "Failed to create auth user";
-
-            // "User already registered" — auth user exists but profile row is missing.
-            // Find the auth user by listing all users and matching email.
+            // User already registered in Auth but no profile row — find them
             if (
               msg.toLowerCase().includes("already registered") ||
               msg.toLowerCase().includes("already been registered") ||
@@ -125,7 +158,7 @@ Deno.serve(async (req: Request) => {
                 userId     = found.id;
                 isExisting = true;
               } else {
-                return json({ error: `User ${cleanEmail} already registered in Auth but cannot be located.` }, 409);
+                return json({ error: `User ${cleanEmail} is already registered in Auth but cannot be located.` }, 409);
               }
             } else {
               return json({ error: msg }, 400);
@@ -135,19 +168,7 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // ── Upsert the profile row (merge-duplicates handles re-runs safely) ──
-        const profileBody = {
-          id:                userId,
-          email:             cleanEmail,
-          full_name:         cleanName,
-          role,
-          ecode:             ecode?.trim()             ?? "",
-          department:        department?.trim()        ?? "",
-          location:          location?.trim()          ?? "",
-          reporting_manager: reporting_manager?.trim() ?? "",
-          status:            "active",
-        };
-
+        // Upsert the profile row (merge-duplicates = safe re-run)
         const upsertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
           method: "POST",
           headers: {
@@ -156,72 +177,64 @@ Deno.serve(async (req: Request) => {
             "Content-Type":  "application/json",
             "Prefer":        "return=minimal,resolution=merge-duplicates",
           },
-          body: JSON.stringify(profileBody),
+          body: JSON.stringify({
+            id:                userId,
+            email:             cleanEmail,
+            full_name:         cleanName,
+            role,
+            ecode:             ecode?.trim()             ?? "",
+            department:        department?.trim()        ?? "",
+            location:          location?.trim()          ?? "",
+            reporting_manager: reporting_manager?.trim() ?? "",
+            status:            "active",
+          }),
         });
 
         if (!upsertRes.ok) {
           const errText = await upsertRes.text().catch(() => upsertRes.statusText);
-          // Roll back only if we just created the auth user
-          if (!isExisting) {
-            await adminClient.auth.admin.deleteUser(userId);
-          }
+          if (!isExisting) await adminClient.auth.admin.deleteUser(userId);
           return json({ error: `Profile upsert failed: ${errText}` }, 500);
         }
 
         return json({
-          success: true,
-          userId,
+          success: true, userId,
           message: isExisting
-            ? `User ${cleanEmail} already existed — profile updated.`
+            ? `User ${cleanEmail} already existed — profile refreshed.`
             : `User ${cleanEmail} created successfully.`,
         });
       }
 
       case "updateUserProfile": {
-        const { userId, full_name, role, ecode, department, location, reporting_manager, status } = payload as {
+        const { userId, full_name, role, ecode, department, location, reporting_manager, status } = p as {
           userId: string; full_name: string; role: string; ecode?: string;
           department: string; location: string; reporting_manager?: string; status: string;
         };
         if (!userId) return json({ error: "userId is required" }, 400);
-
         const { error: updateErr } = await adminClient
           .from("profiles")
-          .update({
-            full_name,
-            role,
-            ecode:             ecode             ?? "",
-            department,
-            location,
-            reporting_manager: reporting_manager ?? "",
-            status,
-            updated_at: new Date().toISOString(),
-          })
+          .update({ full_name, role, ecode: ecode ?? "", department, location, reporting_manager: reporting_manager ?? "", status, updated_at: new Date().toISOString() })
           .eq("id", userId);
-
         if (updateErr) return json({ error: updateErr.message }, 500);
         return json({ success: true, message: "Profile updated" });
       }
 
       case "deactivateUser": {
-        const { userId } = payload as { userId: string };
+        const { userId } = p as { userId: string };
         if (!userId) return json({ error: "userId is required" }, 400);
-
         const { error: deactivateErr } = await adminClient
           .from("profiles")
           .update({ status: "inactive", updated_at: new Date().toISOString() })
           .eq("id", userId);
-
         if (deactivateErr) return json({ error: deactivateErr.message }, 500);
         return json({ success: true, message: "User deactivated" });
       }
 
       case "deleteUser": {
-        const { userId } = payload as { userId: string };
+        const { userId } = p as { userId: string };
         if (!userId) return json({ error: "userId is required" }, 400);
-        if (userId === callerUser.id) {
+        if (userId === callerUserId) {
           return json({ error: "You cannot delete your own account" }, 400);
         }
-
         const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
         if (deleteErr) return json({ error: deleteErr.message }, 500);
         return json({ success: true, message: "User deleted from Auth and profiles" });
@@ -230,6 +243,7 @@ Deno.serve(async (req: Request) => {
       default:
         return json({ error: `Unknown action: ${action}` }, 400);
     }
+
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected server error";
     console.error("[admin-users]", msg);
