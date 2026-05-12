@@ -68,29 +68,34 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
 function nk(s: string) { return s.toLowerCase().replace(/[^a-z0-9]/g, ""); }
 
 const COL_ALIASES: Record<string, string[]> = {
-  assetId:         ["assettag","assetid","assettagno","tagno","tag","asiid","srno","sno","siNo","slno"],
-  assetType:       ["type","assettype","devicetype","assetcategory"],
-  location:        ["location","loc","city","office"],
-  brand:           ["brand","brandmodel","make","brandname"],
-  model:           ["model","modelname","modelno","modelversion"],
-  serialNumber:    ["serialnumber","serialno","serial","srnumber","serialnum"],
-  operatingSystem: ["os","operatingsystem","ostype","osname"],
-  processor:       ["config","processor","configuration","cpu","processorconfig","proc"],
-  ram:             ["ram","memory","ramgb"],
-  storage:         ["rom","storage","hdd","ssd","disk","romgb","storagegb","harddisk"],
-  purchaseDate:    ["purchaseyear","purchasedate","yearofpurchase","buyyear","podate"],
-  warranty:        ["warranty","warrantyend","warrantyexpiry","warrantyenddate","warrantystatus","warrantyperiod"],
-  status:          ["assetstatus","status","currentstatus","assetcurrentstatus"],
-  condition:       ["assetcondition","condition","physicalcondition"],
-  vendor:          ["ownership","vendor","supplier","ownedby","owner"],
-  employeeName:    ["employeename","assignedto","username","empname","employeefullname","employeenameassigned"],
-  employeeCode:    ["employeecode","empcode","employeeid","empid","ecode","employeeno","empno","mpescode","mpe"],
-  department:      ["employeedepartment","department","dept","empdepartment"],
+  assetId:         [
+    "assettag","assetid","assettagno","tagno","tag","asiid",
+    "srno","sno","sino","slno","assetno","assetnumber","itassetid",
+    "assetcode","itassetcode","deviceid","devicetag","assettagnumber",
+  ],
+  assetType:       ["type","assettype","devicetype","assetcategory","category"],
+  location:        ["location","loc","city","office","branch","place"],
+  brand:           ["brand","brandmodel","make","brandname","manufacturer"],
+  model:           ["model","modelname","modelno","modelversion","modelnum"],
+  serialNumber:    ["serialnumber","serialno","serial","srnumber","serialnum","serialid","sn","snno"],
+  operatingSystem: ["os","operatingsystem","ostype","osname","operatingsystemos"],
+  processor:       ["config","processor","configuration","cpu","processorconfig","proc","processortype","specification"],
+  ram:             ["ram","memory","ramgb","ramsize"],
+  storage:         ["rom","storage","hdd","ssd","disk","romgb","storagegb","harddisk","storagesize","disksize"],
+  purchaseDate:    ["purchaseyear","purchasedate","yearofpurchase","buyyear","podate","dateofpurchase","purchasedyear","year"],
+  warranty:        ["warranty","warrantyend","warrantyexpiry","warrantyenddate","warrantystatus","warrantyperiod","warrantytype"],
+  status:          ["assetstatus","status","currentstatus","assetcurrentstatus","assetstate"],
+  condition:       ["assetcondition","condition","physicalcondition","assetstate","devicecondition"],
+  vendor:          ["ownership","vendor","supplier","ownedby","owner","ownedunder","ownershiptag"],
+  employeeName:    ["employeename","assignedto","username","empname","employeefullname","employeenameassigned","name","fullname","user"],
+  employeeCode:    ["employeecode","empcode","employeeid","empid","ecode","employeeno","empno","mpe","mpecode","employeeidcode"],
+  department:      ["employeedepartment","department","dept","empdepartment","division"],
 };
 
+// Normalize aliases at lookup time so mixed-case aliases always match
 function findCol(headers: string[], field: string): string | undefined {
-  const aliases = COL_ALIASES[field] ?? [];
-  return headers.find(h => aliases.includes(nk(h)));
+  const normAliases = (COL_ALIASES[field] ?? []).map(nk);
+  return headers.find(h => normAliases.includes(nk(h)));
 }
 
 // ─── Value mapping ────────────────────────────────────────────────────────────
@@ -576,10 +581,15 @@ export default function BulkImport() {
                         </td>
                         <td className="px-3 py-2">
                           {row.status === "Assigned" && (
-                            <span className={cn("text-xs", row.assignedToId ? "text-emerald-700" : "text-amber-600")}>
-                              {row.assignedToId ? "✓ " : "? "}
-                              {row.assignedName || row.assignedEmail || row.employeeCode || "—"}
-                            </span>
+                            <div className={cn("text-xs space-y-0.5", row.assignedToId ? "text-emerald-700" : "text-amber-600")}>
+                              {row.employeeCode && (
+                                <p className="font-mono font-semibold">{row.assignedToId ? "✓ " : ""}{row.employeeCode}</p>
+                              )}
+                              {row.assignedName && (
+                                <p className="text-muted-foreground">{row.assignedName}</p>
+                              )}
+                              {!row.employeeCode && !row.assignedName && <span>—</span>}
+                            </div>
                           )}
                         </td>
                         <td className="px-3 py-2 max-w-[200px]">
