@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
@@ -286,38 +287,95 @@ export default function Users() {
     setImportLoading(true);
     const updated = [...importRows];
 
-    // Pre-fetch all existing profile emails in one query so we can skip them instantly
-    const { data: existingProfiles } = await supabase
+    // ── Temporary Supabase client for signUp calls ──────────────────────────
+    // We use a separate client with persistSession:false so signing up 335 users
+    // never overwrites the admin's own session stored in localStorage.
+    // This completely bypasses the Edge Function, which was failing with 401 due
+    // to a known Supabase JS v2 bug where callerClient.auth.getUser() ignores
+    // global.headers when making auth API calls.
+    const tempClient = createClient(
+      (import.meta.env.VITE_SUPABASE_URL  as string) ?? "",
+      (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ?? "",
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
+    );
+
+    // Pre-fetch existing profile emails so re-imports just update the profile
+    // without re-triggering signUp (which would be a no-op but still adds latency).
+    const { data: existingProfileRows } = await supabase
       .from("profiles")
-      .select("email");
-    const existingEmails = new Set(
-      (existingProfiles ?? []).map((p: { email: string }) => p.email?.toLowerCase().trim())
+      .select("id, email");
+    const emailToId = new Map<string, string>(
+      (existingProfileRows ?? []).map((p: { id: string; email: string }) => [
+        p.email?.toLowerCase().trim(), p.id,
+      ])
     );
 
     for (let i = 0; i < updated.length; i++) {
       if (updated[i]._status === "ok") continue;
       const row = updated[i];
+      const cleanEmail = row.email?.toLowerCase().trim();
 
-      // If profile already exists, skip — Edge Function will upsert it anyway
-      // but this saves a round-trip for the common "re-import" case.
-      if (existingEmails.has(row.email?.toLowerCase().trim())) {
-        // Still call Edge Fn so it refreshes the profile data (ecode, dept etc.)
-        // but mark pre-checked so user can see progress faster.
+      let userId: string | null = emailToId.get(cleanEmail) ?? null;
+
+      if (!userId) {
+        // ── Create auth user via signUp ─────────────────────────────────────
+        const { data: signUpData, error: signUpErr } = await tempClient.auth.signUp({
+          email:    cleanEmail,
+          password: row.password || "Miles@12345",
+          options:  { data: { full_name: row.full_name, role: row.role } },
+        });
+
+        if (signUpErr) {
+          updated[i] = { ...row, _status: "error", _error: signUpErr.message };
+          setImportRows([...updated]);
+          continue;
+        }
+
+        // If Supabase returns a user with no identities, the email is already
+        // registered (Supabase hides this for security — treats it as success).
+        if (signUpData.user && (signUpData.user.identities ?? []).length === 0) {
+          // User exists in auth but not in profiles — try to find via email lookup
+          updated[i] = { ...row, _status: "error", _error: `${cleanEmail} already registered in Auth but profile is missing. Delete via Supabase Auth dashboard and re-import.` };
+          setImportRows([...updated]);
+          continue;
+        }
+
+        userId = signUpData.user?.id ?? null;
       }
 
-      const result = await adminUsersApi.createUser({
-        full_name:         row.full_name,
-        email:             row.email,
-        role:              (row.role as "super_admin" | "it_admin" | "it_agent" | "end_user") || "end_user",
-        ecode:             row.ecode,
-        department:        row.department,
-        location:          row.location,
-        reporting_manager: row.reporting_manager,
-        password:          row.password || "Miles@12345",
-      });
-      updated[i] = { ...row, _status: result.success ? "ok" : "error", _error: result.error ?? undefined };
+      if (!userId) {
+        updated[i] = { ...row, _status: "error", _error: "Could not obtain user ID after signup" };
+        setImportRows([...updated]);
+        continue;
+      }
+
+      // ── Upsert profile (main authenticated admin client) ─────────────────
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .upsert(
+          {
+            id:                userId,
+            email:             cleanEmail,
+            full_name:         row.full_name,
+            role:              row.role || "end_user",
+            ecode:             row.ecode             || "",
+            department:        row.department        || "",
+            location:          row.location          || "",
+            reporting_manager: row.reporting_manager || "",
+            status:            "active",
+          },
+          { onConflict: "id" },
+        );
+
+      if (profileErr) {
+        updated[i] = { ...row, _status: "error", _error: `Profile error: ${profileErr.message}` };
+      } else {
+        updated[i] = { ...row, _status: "ok" };
+        emailToId.set(cleanEmail, userId); // cache so duplicates in same CSV skip
+      }
       setImportRows([...updated]);
     }
+
     setImportLoading(false);
     await refresh();
   };
