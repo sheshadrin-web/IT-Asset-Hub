@@ -64,79 +64,138 @@ Deno.serve(async (req: Request) => {
     switch (action) {
 
       case "createUser": {
-        const { email, password, full_name, role, department, location } = payload as {
-          email: string; password: string; full_name: string;
-          role: string; department: string; location: string;
+        const {
+          email, password, full_name, role,
+          ecode, department, location, reporting_manager,
+        } = payload as {
+          email: string; password: string; full_name: string; role: string;
+          ecode?: string; department?: string; location?: string; reporting_manager?: string;
         };
 
         if (!email || !password || !full_name || !role) {
           return json({ error: "email, password, full_name, and role are required" }, 400);
         }
 
-        // Create auth user — pass profile fields as user_metadata.
-        // A SECURITY DEFINER trigger on auth.users reads these and creates the
-        // public.profiles row automatically, bypassing RLS and permission checks.
-        const { data: authData, error: createErr } = await adminClient.auth.admin.createUser({
-          email: email.trim().toLowerCase(),
-          password,
-          email_confirm: true,
-          user_metadata: {
-            full_name: full_name.trim(),
-            role,
-            department: department?.trim() ?? "",
-            location:   location?.trim()   ?? "",
-          },
-        });
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanName  = full_name.trim();
 
-        if (createErr || !authData.user) {
-          return json({ error: createErr?.message ?? "Failed to create auth user" }, 400);
+        // ── Check if a profile already exists for this email ──────────────────
+        const { data: existingProfile } = await adminClient
+          .from("profiles")
+          .select("id")
+          .eq("email", cleanEmail)
+          .maybeSingle();
+
+        let userId: string;
+        let isExisting = false;
+
+        if (existingProfile) {
+          // Profile already exists — skip auth creation, just upsert profile data
+          userId     = existingProfile.id;
+          isExisting = true;
+        } else {
+          // Create the Supabase Auth user
+          const { data: authData, error: createErr } = await adminClient.auth.admin.createUser({
+            email:         cleanEmail,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              full_name:         cleanName,
+              role,
+              ecode:             ecode?.trim()             ?? "",
+              department:        department?.trim()        ?? "",
+              location:          location?.trim()          ?? "",
+              reporting_manager: reporting_manager?.trim() ?? "",
+            },
+          });
+
+          if (createErr || !authData?.user) {
+            const msg = createErr?.message ?? "Failed to create auth user";
+
+            // "User already registered" — auth user exists but profile row is missing.
+            // Find the auth user by listing all users and matching email.
+            if (
+              msg.toLowerCase().includes("already registered") ||
+              msg.toLowerCase().includes("already been registered") ||
+              msg.toLowerCase().includes("already exists")
+            ) {
+              const { data: listData } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 50000 });
+              const found = listData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+              if (found) {
+                userId     = found.id;
+                isExisting = true;
+              } else {
+                return json({ error: `User ${cleanEmail} already registered in Auth but cannot be located.` }, 409);
+              }
+            } else {
+              return json({ error: msg }, 400);
+            }
+          } else {
+            userId = authData.user.id;
+          }
         }
 
-        const newUserId = authData.user.id;
+        // ── Upsert the profile row (merge-duplicates handles re-runs safely) ──
+        const profileBody = {
+          id:                userId,
+          email:             cleanEmail,
+          full_name:         cleanName,
+          role,
+          ecode:             ecode?.trim()             ?? "",
+          department:        department?.trim()        ?? "",
+          location:          location?.trim()          ?? "",
+          reporting_manager: reporting_manager?.trim() ?? "",
+          status:            "active",
+        };
 
-        // Always attempt profile insert via direct PostgREST REST call.
-        // Using service_role key in both apikey + Authorization headers gives
-        // full BYPASSRLS access. "resolution=ignore-duplicates" means if the
-        // DB trigger already created the profile, this is a no-op.
-        const insertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+        const upsertRes = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
           method: "POST",
           headers: {
             "apikey":        serviceRoleKey,
             "Authorization": `Bearer ${serviceRoleKey}`,
             "Content-Type":  "application/json",
-            "Prefer":        "return=minimal,resolution=ignore-duplicates",
+            "Prefer":        "return=minimal,resolution=merge-duplicates",
           },
-          body: JSON.stringify({
-            id:         newUserId,
-            email:      email.trim().toLowerCase(),
-            full_name:  full_name.trim(),
-            role,
-            department: department?.trim() ?? "",
-            location:   location?.trim()   ?? "",
-            status:     "active",
-          }),
+          body: JSON.stringify(profileBody),
         });
 
-        if (!insertRes.ok) {
-          const errText = await insertRes.text().catch(() => insertRes.statusText);
-          // Profile failed — roll back the auth user so nothing is left dangling
-          await adminClient.auth.admin.deleteUser(newUserId);
-          return json({ error: `Profile insert failed: ${errText}` }, 500);
+        if (!upsertRes.ok) {
+          const errText = await upsertRes.text().catch(() => upsertRes.statusText);
+          // Roll back only if we just created the auth user
+          if (!isExisting) {
+            await adminClient.auth.admin.deleteUser(userId);
+          }
+          return json({ error: `Profile upsert failed: ${errText}` }, 500);
         }
 
-        return json({ success: true, userId: newUserId, message: `User ${email} created successfully` });
+        return json({
+          success: true,
+          userId,
+          message: isExisting
+            ? `User ${cleanEmail} already existed — profile updated.`
+            : `User ${cleanEmail} created successfully.`,
+        });
       }
 
       case "updateUserProfile": {
-        const { userId, full_name, role, department, location, status } = payload as {
-          userId: string; full_name: string; role: string;
-          department: string; location: string; status: string;
+        const { userId, full_name, role, ecode, department, location, reporting_manager, status } = payload as {
+          userId: string; full_name: string; role: string; ecode?: string;
+          department: string; location: string; reporting_manager?: string; status: string;
         };
         if (!userId) return json({ error: "userId is required" }, 400);
 
         const { error: updateErr } = await adminClient
           .from("profiles")
-          .update({ full_name, role, department, location, status, updated_at: new Date().toISOString() })
+          .update({
+            full_name,
+            role,
+            ecode:             ecode             ?? "",
+            department,
+            location,
+            reporting_manager: reporting_manager ?? "",
+            status,
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", userId);
 
         if (updateErr) return json({ error: updateErr.message }, 500);

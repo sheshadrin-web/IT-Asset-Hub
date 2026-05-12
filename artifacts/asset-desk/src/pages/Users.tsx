@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { supabase } from "@/lib/supabaseClient";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
@@ -284,9 +285,26 @@ export default function Users() {
   const handleImportSubmit = async () => {
     setImportLoading(true);
     const updated = [...importRows];
+
+    // Pre-fetch all existing profile emails in one query so we can skip them instantly
+    const { data: existingProfiles } = await supabase
+      .from("profiles")
+      .select("email");
+    const existingEmails = new Set(
+      (existingProfiles ?? []).map((p: { email: string }) => p.email?.toLowerCase().trim())
+    );
+
     for (let i = 0; i < updated.length; i++) {
       if (updated[i]._status === "ok") continue;
       const row = updated[i];
+
+      // If profile already exists, skip — Edge Function will upsert it anyway
+      // but this saves a round-trip for the common "re-import" case.
+      if (existingEmails.has(row.email?.toLowerCase().trim())) {
+        // Still call Edge Fn so it refreshes the profile data (ecode, dept etc.)
+        // but mark pre-checked so user can see progress faster.
+      }
+
       const result = await adminUsersApi.createUser({
         full_name:         row.full_name,
         email:             row.email,
@@ -1096,9 +1114,14 @@ export default function Users() {
                   <tbody>
                     {importRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 min-w-[120px]">
                           {row._status === "ok"    && <span className="text-emerald-600 font-medium">✓ Done</span>}
-                          {row._status === "error" && <span className="text-destructive font-medium" title={row._error}>✗ Error</span>}
+                          {row._status === "error" && (
+                            <div>
+                              <span className="text-destructive font-medium">✗ Error</span>
+                              {row._error && <p className="text-[10px] text-destructive/80 leading-tight mt-0.5 max-w-[200px] break-words">{row._error}</p>}
+                            </div>
+                          )}
                           {row._status === "pending" && <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-2 font-medium">{row.full_name}</td>
