@@ -169,21 +169,86 @@ export default function Users() {
     const reader = new FileReader();
     reader.onload = ev => {
       const text = ev.target?.result as string;
+
+      // Robust CSV row splitter (handles quoted commas)
+      const splitRow = (line: string): string[] => {
+        const cells: string[] = [];
+        let cell = "", inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { if (inQ && line[i+1] === '"') { cell += '"'; i++; } else inQ = !inQ; }
+          else if (ch === ',' && !inQ) { cells.push(cell.trim()); cell = ""; }
+          else cell += ch;
+        }
+        cells.push(cell.trim());
+        return cells;
+      };
+
+      // Normalize header key for flexible matching
+      const nk = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+      const FIELD_ALIASES: Record<string, string[]> = {
+        full_name:         ["fullname","name","employeename","empname","username","employeefullname"],
+        email:             ["email","emailid","emailaddress","workemail","corporateemail"],
+        role:              ["role","userrole","accessrole","designation"],
+        ecode:             ["ecode","empcode","employeecode","employeeid","empid","employeeno","empno","mpe","mpecode","staffid","staffcode","employeeidcode"],
+        department:        ["department","dept","division","team","employeedepartment"],
+        location:          ["location","loc","city","office","branch"],
+        reporting_manager: ["reportingmanager","manager","reportsto","supervisorname","managername"],
+        password:          ["password","pwd","pass","defaultpassword"],
+      };
+
       const lines = text.split(/\r?\n/).filter(l => l.trim());
-      // Skip header row if it matches expected headers
-      const isHeader = (row: string) => /full.?name|email|role/i.test(row);
-      const dataLines = lines.filter((l, i) => i === 0 && isHeader(l) ? false : true);
+      if (lines.length === 0) { setImportRows([]); return; }
+
+      // Detect if first row is a header
+      const firstCols = splitRow(lines[0]);
+      const looksLikeHeader = firstCols.some(c => /name|email|role|code|dept|ecode/i.test(c));
+
+      let colIndex: Record<string, number> = {};
+      let dataLines: string[];
+
+      if (looksLikeHeader) {
+        // Map header names to field keys
+        firstCols.forEach((h, i) => {
+          const norm = nk(h);
+          for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+            if (aliases.includes(norm) && !(field in colIndex)) {
+              colIndex[field] = i;
+            }
+          }
+        });
+        dataLines = lines.slice(1);
+      } else {
+        // Positional fallback: name, email, role, ecode, dept, location, manager, password
+        colIndex = { full_name: 0, email: 1, role: 2, ecode: 3, department: 4, location: 5, reporting_manager: 6, password: 7 };
+        dataLines = lines;
+      }
+
+      const get = (cols: string[], field: string) => {
+        const idx = colIndex[field];
+        return idx !== undefined ? (cols[idx] ?? "").replace(/^"|"$/g, "").trim() : "";
+      };
+
+      const mapRole = (raw: string): string => {
+        const v = raw.toLowerCase().trim();
+        if (v.includes("super") || v.includes("superadmin")) return "super_admin";
+        if (v.includes("it admin") || v === "it_admin" || v === "itadmin") return "it_admin";
+        if (v.includes("agent") || v === "it_agent") return "it_agent";
+        return "end_user";
+      };
+
       const rows = dataLines.map(line => {
-        const cols = line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+        const cols = splitRow(line);
         return {
-          full_name:         cols[0] ?? "",
-          email:             cols[1] ?? "",
-          role:              cols[2] ?? "end_user",
-          ecode:             cols[3] ?? "",
-          department:        cols[4] ?? "",
-          location:          cols[5] ?? "",
-          reporting_manager: cols[6] ?? "",
-          password:          cols[7] ?? "",
+          full_name:         get(cols, "full_name"),
+          email:             get(cols, "email"),
+          role:              mapRole(get(cols, "role") || "end_user"),
+          ecode:             get(cols, "ecode"),
+          department:        get(cols, "department"),
+          location:          get(cols, "location"),
+          reporting_manager: get(cols, "reporting_manager"),
+          password:          get(cols, "password"),
           _status:           "pending" as const,
         };
       }).filter(r => r.email);

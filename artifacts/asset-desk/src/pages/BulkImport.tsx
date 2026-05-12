@@ -270,10 +270,32 @@ export default function BulkImport() {
         const empName    = get(row, "employeeName");
         const department = get(row, "department");
 
-        // Lookup user: by ecode first, then by name
+        // Lookup user — try multiple strategies in priority order
+        const nkCode = nk(empCode);
+        const nkName = nk(empName);
         const matchedUser =
-          (empCode && users.find(u => nk(u.ecode ?? "") === nk(empCode))) ||
-          (empName && users.find(u => nk(u.full_name) === nk(empName))) ||
+          // 1. Exact ecode match
+          (empCode && users.find(u => nk(u.ecode ?? "") === nkCode)) ||
+          // 2. Value in "code" column looks like a name → try name lookup too
+          (empCode && empCode.includes(" ") && users.find(u => nk(u.full_name) === nkCode)) ||
+          // 3. Exact full name match
+          (empName && users.find(u => nk(u.full_name) === nkName)) ||
+          // 4. Name column contains an ecode-like value
+          (empName && !empName.includes(" ") && users.find(u => nk(u.ecode ?? "") === nkName)) ||
+          // 5. Partial name match — name starts with the search value
+          (empName && users.find(u => nk(u.full_name).startsWith(nkName) && nkName.length >= 4)) ||
+          // 6. Name match ignoring middle name (first + last only)
+          (empName && (() => {
+            const parts = empName.trim().split(/\s+/);
+            if (parts.length >= 2) {
+              const key = nk(parts[0] + parts[parts.length - 1]);
+              return users.find(u => {
+                const uparts = u.full_name.trim().split(/\s+/);
+                return uparts.length >= 2 && nk(uparts[0] + uparts[uparts.length - 1]) === key;
+              });
+            }
+            return null;
+          })()) ||
           null;
 
         const errors: string[] = [];
