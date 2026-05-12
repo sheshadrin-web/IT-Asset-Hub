@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
-  Upload, CheckSquare,
+  Upload, CheckSquare, User,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,7 @@ export default function Users() {
   const [addOpen,          setAddOpen]          = useState(false);
   const [editingUser,      setEditingUser]       = useState<Profile | null>(null);
   const [editOpen,         setEditOpen]          = useState(false);
+  const [viewingUser,      setViewingUser]       = useState<Profile | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<Profile | null>(null);
   const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
@@ -289,6 +290,9 @@ export default function Users() {
     setAddOpen(false);
     await refresh();
   };
+
+  // ── View user ──────────────────────────────────────────────────────────────
+  const openView = (user: Profile) => setViewingUser(user);
 
   // ── Edit user ──────────────────────────────────────────────────────────────
   const openEdit = (user: Profile) => {
@@ -537,14 +541,15 @@ export default function Users() {
                   return (
                     <tr
                       key={user.id}
+                      onClick={() => openView(user)}
                       className={cn(
-                        "border-b border-border last:border-0 hover:bg-muted/30 transition-colors",
+                        "border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer",
                         user.status === "inactive" && "opacity-60",
                         isChecked && "bg-primary/5"
                       )}
                       data-testid={`row-user-${user.id}`}
                     >
-                      <td className="px-4 py-3 w-10">
+                      <td className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
                         {isSuperAdmin && !isSelf && (
                           <input
                             type="checkbox"
@@ -588,7 +593,7 @@ export default function Users() {
                           {statusLabel[user.status]}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         {isAdmin ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -599,6 +604,9 @@ export default function Users() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openView(user)} className="gap-2 cursor-pointer">
+                                <User className="h-3.5 w-3.5" /> View Details
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEdit(user)} className="gap-2 cursor-pointer">
                                 <Edit className="h-3.5 w-3.5" /> Edit Profile
                               </DropdownMenuItem>
@@ -645,6 +653,64 @@ export default function Users() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── View User Dialog ─────────────────────────────────────────────────── */}
+      <Dialog open={!!viewingUser} onOpenChange={v => !v && setViewingUser(null)}>
+        <DialogContent className="max-w-md">
+          {viewingUser && (() => {
+            const vu = viewingUser;
+            const initials = vu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+            const isSelf = vu.id === currentUser?.userId;
+            return (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-14 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                      <span className="text-xl font-bold text-primary">{initials}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <DialogTitle className="flex items-center gap-2 flex-wrap">
+                        {vu.full_name}
+                        {isSelf && <span className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-medium">You</span>}
+                      </DialogTitle>
+                      <p className="text-sm text-muted-foreground mt-0.5">{vu.email}</p>
+                    </div>
+                  </div>
+                </DialogHeader>
+
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {[
+                    { label: "E-Code",            value: vu.ecode || "—" },
+                    { label: "Role",              value: ROLE_LABELS[vu.role], badge: roleColors[vu.role] },
+                    { label: "Department",        value: vu.department || "—" },
+                    { label: "Location",          value: vu.location || "—" },
+                    { label: "Reporting Manager", value: vu.reporting_manager || "—" },
+                    { label: "Status",            value: statusLabel[vu.status], badge: statusColors[vu.status] },
+                  ].map(({ label, value, badge }) => (
+                    <div key={label} className="space-y-1">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+                      {badge ? (
+                        <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", badge)}>{value}</span>
+                      ) : (
+                        <p className="font-medium text-foreground">{value}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => setViewingUser(null)}>Close</Button>
+                  {isAdmin && (
+                    <Button onClick={() => { setViewingUser(null); openEdit(vu); }} className="gap-2">
+                      <Edit className="h-4 w-4" /> Edit Profile
+                    </Button>
+                  )}
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* ── Add User Dialog ──────────────────────────────────────────────────── */}
       <Dialog open={addOpen} onOpenChange={v => !addSaving && setAddOpen(v)}>
