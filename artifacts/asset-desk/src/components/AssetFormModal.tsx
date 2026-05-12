@@ -38,7 +38,7 @@ const schema = z.object({
   imeiNumber: z.string().optional(),
   purchaseDate: z.string().min(1, "Required"),
   warrantyEndDate: z.string().min(1, "Required"),
-  status: z.enum(["Available", "Assigned", "Under Repair", "Lost", "Retired"]),
+  status: z.enum(["In Procurement", "Available", "Assigned", "Under Repair", "Lost", "Retired"]),
   assignedTo: z.string().optional(),
   department: z.string().optional(),
   location: z.string().min(1, "Required"),
@@ -268,6 +268,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value="In Procurement">In Procurement</SelectItem>
                         <SelectItem value="Available">Available</SelectItem>
                         <SelectItem value="Assigned">Assigned</SelectItem>
                         <SelectItem value="Under Repair">Under Repair</SelectItem>

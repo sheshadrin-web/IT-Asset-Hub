@@ -35,18 +35,20 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
-  Available:      "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
-  Assigned:       "bg-blue-500/15 text-blue-600 border-blue-500/20",
-  "Under Repair": "bg-amber-500/15 text-amber-600 border-amber-500/20",
-  Lost:           "bg-red-500/15 text-red-500 border-red-500/20",
-  Retired:        "bg-gray-500/15 text-gray-500 border-gray-500/20",
+  "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
+  Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
+  Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
 };
 const STATUS_DOT: Record<AssetStatus, string> = {
-  Available:      "bg-emerald-500",
-  Assigned:       "bg-blue-500",
-  "Under Repair": "bg-amber-500",
-  Lost:           "bg-red-500",
-  Retired:        "bg-gray-400",
+  "In Procurement": "bg-orange-500",
+  Available:        "bg-emerald-500",
+  Assigned:         "bg-blue-500",
+  "Under Repair":   "bg-amber-500",
+  Lost:             "bg-red-500",
+  Retired:          "bg-gray-400",
 };
 
 const CSV_HEADERS = [
@@ -344,7 +346,7 @@ export default function Assets() {
               <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {(["Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
+                {(["In Procurement","Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
                   <SelectItem key={s} value={s}>
                     <span className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} />{s}</span>
                   </SelectItem>

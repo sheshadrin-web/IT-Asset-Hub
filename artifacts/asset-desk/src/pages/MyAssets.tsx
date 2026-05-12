@@ -7,11 +7,12 @@ import { AssetStatus } from "@/data/mockData";
 import { cn } from "@/lib/utils";
 
 const assetStatusColors: Record<AssetStatus, string> = {
-  Available:      "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
-  Assigned:       "bg-blue-500/15 text-blue-600 border-blue-500/20",
-  "Under Repair": "bg-amber-500/15 text-amber-600 border-amber-500/20",
-  Lost:           "bg-red-500/15 text-red-500 border-red-500/20",
-  Retired:        "bg-gray-500/15 text-gray-500 border-gray-500/20",
+  "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
+  Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
+  Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
 };
 
 export default function MyAssets() {

@@ -86,7 +86,7 @@ function exportSummaryCsv(assets: Asset[], tickets: TicketType[], users: Profile
     `"Resolution Rate","${resRate}"`,
     "",
     '"=== ASSETS BY STATUS ==="',
-    ...["Available","Assigned","Under Repair","Lost","Retired"].map((s) => `"${s}","${assets.filter((a) => a.status === s).length}"`),
+    ...["In Procurement","Available","Assigned","Under Repair","Lost","Retired"].map((s) => `"${s}","${assets.filter((a) => a.status === s).length}"`),
     "",
     '"=== TICKETS BY PRIORITY ==="',
     ...["Critical","High","Medium","Low"].map((p) => `"${p}","${tickets.filter((t) => t.priority === p).length}"`),

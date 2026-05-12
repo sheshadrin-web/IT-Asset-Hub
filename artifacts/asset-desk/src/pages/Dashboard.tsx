@@ -193,11 +193,12 @@ export default function Dashboard() {
 
   // ── Derived stats ──────────────────────────────────────────────────────────
   const assetStatusData = [
-    { name: "Available",    value: assets.filter((a) => a.status === "Available").length,    color: "#22c55e" },
-    { name: "Assigned",     value: assets.filter((a) => a.status === "Assigned").length,     color: "#3b82f6" },
-    { name: "Under Repair", value: assets.filter((a) => a.status === "Under Repair").length, color: "#f59e0b" },
-    { name: "Lost",         value: assets.filter((a) => a.status === "Lost").length,         color: "#ef4444" },
-    { name: "Retired",      value: assets.filter((a) => a.status === "Retired").length,      color: "#6b7280" },
+    { name: "In Procurement", value: assets.filter((a) => a.status === "In Procurement").length, color: "#f97316" },
+    { name: "Available",      value: assets.filter((a) => a.status === "Available").length,      color: "#22c55e" },
+    { name: "Assigned",       value: assets.filter((a) => a.status === "Assigned").length,       color: "#3b82f6" },
+    { name: "Under Repair",   value: assets.filter((a) => a.status === "Under Repair").length,   color: "#f59e0b" },
+    { name: "Lost",           value: assets.filter((a) => a.status === "Lost").length,           color: "#ef4444" },
+    { name: "Retired",        value: assets.filter((a) => a.status === "Retired").length,        color: "#6b7280" },
   ];
   const assetChartData = assetStatusData.filter((d) => d.value > 0);
 

@@ -3,6 +3,7 @@ import {
   ArrowLeft, Monitor, Smartphone, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
+  ShoppingCart, PackageCheck, ClipboardCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,12 +24,31 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
-  Available:      "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
-  Assigned:       "bg-blue-500/15 text-blue-600 border-blue-500/20",
-  "Under Repair": "bg-amber-500/15 text-amber-600 border-amber-500/20",
-  Lost:           "bg-red-500/15 text-red-500 border-red-500/20",
-  Retired:        "bg-gray-500/15 text-gray-500 border-gray-500/20",
+  "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
+  Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
+  Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
 };
+
+// ─── Lifecycle stages ─────────────────────────────────────────────────────────
+const LIFECYCLE_STAGES = [
+  { key: "procurement", label: "Procurement",   Icon: ShoppingCart,  statuses: ["In Procurement"] as AssetStatus[] },
+  { key: "inventory",   label: "In Inventory",  Icon: Package,       statuses: ["Available"] as AssetStatus[] },
+  { key: "allocated",   label: "Allocated",     Icon: UserPlus,      statuses: ["Assigned"] as AssetStatus[] },
+  { key: "return",      label: "Return",        Icon: RotateCcw,     statuses: ["Under Repair"] as AssetStatus[] },
+  { key: "verified",    label: "Re-verified",   Icon: ClipboardCheck,statuses: ["Retired"] as AssetStatus[] },
+];
+
+function getLifecycleStageIdx(status: AssetStatus): number {
+  if (status === "In Procurement") return 0;
+  if (status === "Available")      return 1;
+  if (status === "Assigned")       return 2;
+  if (status === "Under Repair")   return 3;
+  if (status === "Retired")        return 4;
+  return 1;
+}
 const PRIORITY_COLORS: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-500 border-red-500/20",
   High:     "bg-amber-500/15 text-amber-600 border-amber-500/20",
@@ -133,6 +153,12 @@ export default function AssetDetail() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Move to Inventory — for In Procurement only */}
+          {isAdmin && asset.status === "In Procurement" && (
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-move-inventory">
+              <PackageCheck className="h-4 w-4" /> Move to Inventory
+            </Button>
+          )}
           {/* Mark Available — for Under Repair, Retired, Lost */}
           {isAdmin && (asset.status === "Under Repair" || asset.status === "Retired" || asset.status === "Lost") && (
             <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-mark-available">
@@ -179,6 +205,48 @@ export default function AssetDetail() {
           )}
         </div>
       </div>
+
+      {/* ── Lifecycle tracker ──────────────────────────────────────────────── */}
+      {asset.status !== "Lost" && (
+        <Card className="overflow-hidden">
+          <CardContent className="py-4 px-5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Asset Lifecycle</p>
+            <div className="flex items-start gap-0">
+              {LIFECYCLE_STAGES.map((stage, idx) => {
+                const currentIdx = getLifecycleStageIdx(asset.status);
+                const isActive  = idx === currentIdx;
+                const isDone    = idx < currentIdx;
+                const { Icon }  = stage;
+                return (
+                  <div key={stage.key} className="flex items-center flex-1 min-w-0">
+                    <div className="flex flex-col items-center flex-1 min-w-0">
+                      <div className={cn(
+                        "h-9 w-9 rounded-full flex items-center justify-center mb-2 transition-all border-2",
+                        isActive ? "bg-primary text-primary-foreground border-primary shadow-md" :
+                        isDone   ? "bg-primary/20 text-primary border-primary/40" :
+                                   "bg-muted text-muted-foreground border-border"
+                      )}>
+                        {isDone
+                          ? <CheckCircle2 className="h-4 w-4" />
+                          : <Icon className="h-4 w-4" />}
+                      </div>
+                      <span className={cn(
+                        "text-[10px] font-medium text-center leading-tight px-1 truncate w-full text-center",
+                        isActive ? "text-primary font-semibold" : isDone ? "text-primary/70" : "text-muted-foreground"
+                      )}>
+                        {stage.label}
+                      </span>
+                    </div>
+                    {idx < LIFECYCLE_STAGES.length - 1 && (
+                      <div className={cn("h-0.5 w-full mx-1 mb-5 flex-shrink rounded-full", idx < currentIdx ? "bg-primary/40" : "bg-border")} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">

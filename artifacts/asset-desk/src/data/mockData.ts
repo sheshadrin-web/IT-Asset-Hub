@@ -54,7 +54,7 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
 
 // ─── Asset types ─────────────────────────────────────────────────────────────
 export type AssetType   = "Laptop" | "Mobile" | "Desktop";
-export type AssetStatus = "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
+export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
 
 export interface Asset {
   id?:              string;   // Supabase UUID
