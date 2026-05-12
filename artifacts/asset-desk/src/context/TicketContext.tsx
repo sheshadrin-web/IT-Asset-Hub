@@ -90,11 +90,11 @@ export function TicketProvider({ children }: { children: ReactNode }) {
       subcategory:    data.subcategory,
       priority:       data.priority,
       status:         "Open",
-      assigned_agent:  "",
-      description:     data.description,
-      resolution_note: "",
-      // comments column does not exist in DB schema — omitted from INSERT
-      created_at:      now,
+      // assigned_agent and resolution_note: omit from INSERT so the DB default is used.
+      // Do NOT send "" — if the live column is UUID type, an empty string causes:
+      //   "invalid input syntax for type uuid: """
+      description:    data.description,
+      created_at:     now,
       updated_at:     now,
     };
     const { data: inserted, error } = await supabase
