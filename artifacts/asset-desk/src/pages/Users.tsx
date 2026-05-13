@@ -612,7 +612,7 @@ export default function Users() {
     setResetSending(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(editingUser.email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: window.location.origin,
       });
       if (error) throw error;
       toast({ title: "Reset link sent", description: `A password reset email has been sent to ${editingUser.email}.` });
