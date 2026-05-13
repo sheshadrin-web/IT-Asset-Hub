@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
-  Upload, CheckSquare, User,
+  Upload, CheckSquare, User, KeyRound,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -119,9 +119,10 @@ export default function Users() {
   const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
   // Loading states
-  const [addSaving,    setAddSaving]    = useState(false);
-  const [editSaving,   setEditSaving]   = useState(false);
-  const [actionSaving, setActionSaving] = useState<string | null>(null);
+  const [addSaving,      setAddSaving]      = useState(false);
+  const [editSaving,     setEditSaving]     = useState(false);
+  const [actionSaving,   setActionSaving]   = useState<string | null>(null);
+  const [resetSending,   setResetSending]   = useState(false);
 
   // Password visibility
   const [showPw, setShowPw] = useState(false);
@@ -400,7 +401,7 @@ export default function Users() {
 
           const result = await tempClient.auth.signUp({
             email:    cleanEmail,
-            password: row.password || "Miles@12345",
+            password: row.password || "Miles@123",
             options:  { data: { full_name: row.full_name, role: row.role } },
           });
           signUpData = result.data;
@@ -602,6 +603,23 @@ export default function Users() {
       toast({ title: "Failed to update user", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  // ── Reset password (super_admin only) ──────────────────────────────────────
+  const handleResetPassword = async () => {
+    if (!editingUser) return;
+    setResetSending(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(editingUser.email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      toast({ title: "Reset link sent", description: `A password reset email has been sent to ${editingUser.email}.` });
+    } catch (err) {
+      toast({ title: "Failed to send reset email", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setResetSending(false);
     }
   };
 
@@ -1174,9 +1192,23 @@ export default function Users() {
                   You cannot deactivate your own account from here.
                 </p>
               )}
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving}>Cancel</Button>
-                <Button type="submit" disabled={editSaving} data-testid="button-save-user">
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                {/* Reset password — super_admin only, not for own account */}
+                {currentUser?.role === "super_admin" && editingUser?.id !== currentUser?.userId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400 sm:mr-auto"
+                    disabled={resetSending || editSaving}
+                    onClick={handleResetPassword}
+                    title="Sends a password reset link to the user's email"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    {resetSending ? "Sending…" : "Send Reset Link"}
+                  </Button>
+                )}
+                <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving || resetSending}>Cancel</Button>
+                <Button type="submit" disabled={editSaving || resetSending} data-testid="button-save-user">
                   {editSaving ? "Saving…" : "Save Changes"}
                 </Button>
               </DialogFooter>
@@ -1236,7 +1268,7 @@ export default function Users() {
             <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Import Users from CSV</DialogTitle>
             <DialogDescription>
               Upload a CSV file with columns: <code className="text-xs bg-muted px-1 py-0.5 rounded">full_name, email, role, ecode, department, location, reporting_manager, password</code>.
-              If password is blank, default <code className="text-xs bg-muted px-1 py-0.5 rounded">Miles@12345</code> is used.
+              If password is blank, default <code className="text-xs bg-muted px-1 py-0.5 rounded">Miles@123</code> is used.
             </DialogDescription>
           </DialogHeader>
 
