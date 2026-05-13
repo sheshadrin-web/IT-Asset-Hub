@@ -1,8 +1,15 @@
+import { useState } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabaseClient";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Eye, EyeOff, KeyRound, CheckCircle2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { AssetProvider } from "@/context/AssetContext";
 import { TicketProvider } from "@/context/TicketContext";
 import { UsersProvider } from "@/context/UsersContext";
@@ -28,6 +35,110 @@ import SupabaseCheck from "@/pages/SupabaseCheck";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
+
+// ── Password reset screen (shown when user clicks a reset-link email) ─────────
+function ResetPasswordScreen() {
+  const { toast } = useToast();
+  const [password, setPassword] = useState("");
+  const [confirm,  setConfirm]  = useState("");
+  const [showPw,   setShowPw]   = useState(false);
+  const [saving,   setSaving]   = useState(false);
+  const [done,     setDone]     = useState(false);
+
+  const tooShort = password.length > 0 && password.length < 8;
+  const mismatch = confirm.length > 0 && password !== confirm;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mismatch || tooShort || !password) return;
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      toast({ title: "Failed to set password", description: error.message, variant: "destructive" });
+      setSaving(false);
+    } else {
+      setDone(true);
+      await supabase.auth.signOut();
+      setTimeout(() => { window.location.replace("/"); }, 2500);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <CheckCircle2 className="h-12 w-12 text-emerald-500 mx-auto" />
+          <h2 className="text-xl font-semibold text-foreground">Password updated!</h2>
+          <p className="text-sm text-muted-foreground">Redirecting to login…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen items-center justify-center bg-background p-4">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="text-center space-y-1">
+          <div className="inline-flex items-center justify-center h-12 w-12 rounded-xl bg-primary/10 mb-2">
+            <KeyRound className="h-6 w-6 text-primary" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Set New Password</h1>
+          <p className="text-sm text-muted-foreground">Enter and confirm your new password below.</p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-pw">New Password</Label>
+            <div className="relative">
+              <Input
+                id="new-pw"
+                type={showPw ? "text" : "password"}
+                placeholder="Min. 8 characters"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={tooShort ? "border-destructive" : ""}
+                autoFocus
+              />
+              <button
+                type="button" tabIndex={-1}
+                onClick={() => setShowPw(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            {tooShort && <p className="text-xs text-destructive">Must be at least 8 characters</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm-pw">Confirm Password</Label>
+            <Input
+              id="confirm-pw"
+              type={showPw ? "text" : "password"}
+              placeholder="Repeat new password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              className={mismatch ? "border-destructive" : ""}
+            />
+            {mismatch && <p className="text-xs text-destructive">Passwords do not match</p>}
+          </div>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={saving || !password || !confirm || !!mismatch || tooShort}
+          >
+            {saving ? "Saving…" : "Set Password"}
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Intercepts routing when a password-reset link has been opened
+function RecoveryGate() {
+  const { isRecoveryMode } = useAuth();
+  if (isRecoveryMode) return <ResetPasswordScreen />;
+  return <Router />;
+}
 
 function LoadingScreen() {
   return (
@@ -172,7 +283,7 @@ function App() {
             <TicketProvider>
               <UsersProvider>
                 <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-                  <Router />
+                  <RecoveryGate />
                 </WouterRouter>
                 <Toaster />
               </UsersProvider>
