@@ -136,8 +136,11 @@ export default function Users() {
   const [importRows, setImportRows]       = useState<Array<{
     full_name: string; email: string; role: string; ecode: string;
     department: string; location: string; reporting_manager: string; password: string;
-    _status?: "pending" | "ok" | "error" | "skipped"; _error?: string;
+    _status?: "pending" | "ok" | "error" | "skipped" | "retrying"; _error?: string; _retries?: number;
   }>>([]);
+  const [importSummary, setImportSummary] = useState<{
+    total: number; imported: number; skipped: number; failed: number; retries: number;
+  } | null>(null);
   // Tracks which app fields were matched from the CSV headers
   const [importColMap, setImportColMap]   = useState<Record<string, string | null>>({});
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -312,103 +315,172 @@ export default function Users() {
 
   const handleImportSubmit = async () => {
     setImportLoading(true);
+    setImportSummary(null);
     const updated = [...importRows];
 
-    // ── Temporary Supabase client for signUp calls ──────────────────────────
-    // We use a separate client with persistSession:false so signing up 335 users
-    // never overwrites the admin's own session stored in localStorage.
-    // This completely bypasses the Edge Function, which was failing with 401 due
-    // to a known Supabase JS v2 bug where callerClient.auth.getUser() ignores
-    // global.headers when making auth API calls.
+    // ── Constants ────────────────────────────────────────────────────────────
+    const BATCH_SIZE               = 5;
+    const DELAY_BETWEEN_USERS_MS   = 1200;
+    const DELAY_BETWEEN_BATCHES_MS = 5000;
+    const MAX_RETRIES              = 3;
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    const isRateLimit = (msg: string) =>
+      msg.toLowerCase().includes("rate limit") ||
+      msg.toLowerCase().includes("429")        ||
+      msg.toLowerCase().includes("too many");
+
+    // ── Temp client — never overwrites admin session ──────────────────────
     const tempClient = createClient(
       (import.meta.env.VITE_SUPABASE_URL  as string) ?? "",
       (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ?? "",
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
     );
 
-    // Pre-fetch existing profile emails so re-imports just update the profile
-    // without re-triggering signUp (which would be a no-op but still adds latency).
+    // ── Pre-fetch existing profiles (email + ecode) to detect duplicates ──
     const { data: existingProfileRows } = await supabase
       .from("profiles")
-      .select("id, email");
+      .select("id, email, ecode");
     const emailToId = new Map<string, string>(
       (existingProfileRows ?? []).map((p: { id: string; email: string }) => [
         p.email?.toLowerCase().trim(), p.id,
       ])
     );
+    const existingEcodes = new Set<string>(
+      (existingProfileRows ?? [])
+        .filter((p: { ecode?: string }) => p.ecode)
+        .map((p: { ecode: string }) => p.ecode.toLowerCase().trim())
+    );
 
-    for (let i = 0; i < updated.length; i++) {
-      if (updated[i]._status === "ok" || updated[i]._status === "skipped") continue;
-      const row = updated[i];
-      const cleanEmail = row.email?.toLowerCase().trim();
+    // ── Collect indices that still need processing ────────────────────────
+    const toProcess = updated
+      .map((_, i) => i)
+      .filter(i => updated[i]._status !== "ok" && updated[i]._status !== "skipped");
 
-      let userId: string | null = emailToId.get(cleanEmail) ?? null;
+    let totalRetries = 0;
 
-      // ── Skip users that already exist in the system ───────────────────────
-      if (userId) {
-        updated[i] = { ...row, _status: "skipped", _error: "Already exists — skipped" };
-        setImportRows([...updated]);
-        continue;
-      }
+    // ── Process in batches ────────────────────────────────────────────────
+    for (let b = 0; b < toProcess.length; b += BATCH_SIZE) {
+      const batch = toProcess.slice(b, b + BATCH_SIZE);
 
-      if (!userId) {
-        // ── Create auth user via signUp ─────────────────────────────────────
-        const { data: signUpData, error: signUpErr } = await tempClient.auth.signUp({
-          email:    cleanEmail,
-          password: row.password || "Miles@12345",
-          options:  { data: { full_name: row.full_name, role: row.role } },
-        });
+      for (const i of batch) {
+        const row = updated[i];
+        const cleanEmail = row.email?.toLowerCase().trim();
+        const cleanEcode = row.ecode?.toLowerCase().trim();
+
+        // ── Duplicate checks (email + ecode) ────────────────────────────
+        if (emailToId.has(cleanEmail)) {
+          updated[i] = { ...row, _status: "skipped", _error: "Email already exists — skipped" };
+          setImportRows([...updated]);
+          continue;
+        }
+        if (cleanEcode && existingEcodes.has(cleanEcode)) {
+          updated[i] = { ...row, _status: "skipped", _error: `E-Code ${row.ecode} already exists — skipped` };
+          setImportRows([...updated]);
+          continue;
+        }
+
+        // ── signUp with exponential-backoff retries ──────────────────────
+        let signUpData: Awaited<ReturnType<typeof tempClient.auth.signUp>>["data"] | null = null;
+        let signUpErr: Awaited<ReturnType<typeof tempClient.auth.signUp>>["error"] | null = null;
+        let attempt = 0;
+
+        while (attempt <= MAX_RETRIES) {
+          if (attempt > 0) {
+            const waitMs = Math.pow(2, attempt) * 2000; // 4 s, 8 s, 16 s
+            updated[i] = {
+              ...row,
+              _status: "retrying",
+              _error: `Rate limited — retrying in ${waitMs / 1000}s (attempt ${attempt}/${MAX_RETRIES})`,
+              _retries: attempt,
+            };
+            setImportRows([...updated]);
+            totalRetries++;
+            await sleep(waitMs);
+          }
+
+          const result = await tempClient.auth.signUp({
+            email:    cleanEmail,
+            password: row.password || "Miles@12345",
+            options:  { data: { full_name: row.full_name, role: row.role } },
+          });
+          signUpData = result.data;
+          signUpErr  = result.error;
+
+          if (!signUpErr) break;
+          if (!isRateLimit(signUpErr.message ?? "") || attempt >= MAX_RETRIES) break;
+          attempt++;
+        }
 
         if (signUpErr) {
-          updated[i] = { ...row, _status: "error", _error: signUpErr.message };
+          updated[i] = { ...row, _status: "error", _error: signUpErr.message, _retries: attempt };
           setImportRows([...updated]);
+          await sleep(DELAY_BETWEEN_USERS_MS);
           continue;
         }
 
-        // If Supabase returns a user with no identities, the email is already
-        // registered (Supabase hides this for security — treats it as success).
-        if (signUpData.user && (signUpData.user.identities ?? []).length === 0) {
-          // User exists in auth but not in profiles — try to find via email lookup
-          updated[i] = { ...row, _status: "error", _error: `${cleanEmail} already registered in Auth but profile is missing. Delete via Supabase Auth dashboard and re-import.` };
+        // Supabase silently treats duplicate emails as success but returns empty identities
+        if (signUpData?.user && (signUpData.user.identities ?? []).length === 0) {
+          updated[i] = {
+            ...row, _status: "error",
+            _error: `${cleanEmail} is already in Auth but has no profile. Delete it from Supabase → Auth → Users and re-import.`,
+          };
           setImportRows([...updated]);
+          await sleep(DELAY_BETWEEN_USERS_MS);
           continue;
         }
 
-        userId = signUpData.user?.id ?? null;
-      }
+        const userId = signUpData?.user?.id ?? null;
+        if (!userId) {
+          updated[i] = { ...row, _status: "error", _error: "Could not obtain user ID after signup" };
+          setImportRows([...updated]);
+          await sleep(DELAY_BETWEEN_USERS_MS);
+          continue;
+        }
 
-      if (!userId) {
-        updated[i] = { ...row, _status: "error", _error: "Could not obtain user ID after signup" };
+        // ── Upsert profile ────────────────────────────────────────────────
+        const { error: profileErr } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id:                userId,
+              email:             cleanEmail,
+              full_name:         row.full_name,
+              role:              row.role || "end_user",
+              ecode:             row.ecode             || "",
+              department:        row.department        || "",
+              location:          row.location          || "",
+              reporting_manager: row.reporting_manager || "",
+              status:            "active",
+            },
+            { onConflict: "id" },
+          );
+
+        if (profileErr) {
+          updated[i] = { ...row, _status: "error", _error: `Profile error: ${profileErr.message}` };
+        } else {
+          updated[i] = { ...row, _status: "ok", _retries: attempt > 0 ? attempt : undefined };
+          emailToId.set(cleanEmail, userId);
+          if (cleanEcode) existingEcodes.add(cleanEcode);
+        }
         setImportRows([...updated]);
-        continue;
+        await sleep(DELAY_BETWEEN_USERS_MS);
       }
 
-      // ── Upsert profile (main authenticated admin client) ─────────────────
-      const { error: profileErr } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id:                userId,
-            email:             cleanEmail,
-            full_name:         row.full_name,
-            role:              row.role || "end_user",
-            ecode:             row.ecode             || "",
-            department:        row.department        || "",
-            location:          row.location          || "",
-            reporting_manager: row.reporting_manager || "",
-            status:            "active",
-          },
-          { onConflict: "id" },
-        );
-
-      if (profileErr) {
-        updated[i] = { ...row, _status: "error", _error: `Profile error: ${profileErr.message}` };
-      } else {
-        updated[i] = { ...row, _status: "ok" };
-        emailToId.set(cleanEmail, userId); // cache so duplicates in same CSV skip
+      // Pause between batches (skip after the last one)
+      if (b + BATCH_SIZE < toProcess.length) {
+        await sleep(DELAY_BETWEEN_BATCHES_MS);
       }
-      setImportRows([...updated]);
     }
+
+    // ── Final summary ─────────────────────────────────────────────────────
+    const finalRows = updated;
+    setImportSummary({
+      total:    finalRows.length,
+      imported: finalRows.filter(r => r._status === "ok").length,
+      skipped:  finalRows.filter(r => r._status === "skipped").length,
+      failed:   finalRows.filter(r => r._status === "error").length,
+      retries:  totalRetries,
+    });
 
     setImportLoading(false);
     await refresh();
@@ -1247,16 +1319,26 @@ export default function Users() {
                   <tbody>
                     {importRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="px-3 py-2 min-w-[120px]">
-                          {row._status === "ok"      && <span className="text-emerald-600 font-medium">✓ Done</span>}
-                          {row._status === "skipped" && <span className="text-amber-500 font-medium">⟳ Skipped (exists)</span>}
-                          {row._status === "error" && (
+                        <td className="px-3 py-2 min-w-[140px]">
+                          {row._status === "ok"       && (
+                            <span className="text-emerald-600 font-medium">
+                              ✓ Done{row._retries ? <span className="text-[10px] text-emerald-500 ml-1">({row._retries} retr{row._retries === 1 ? "y" : "ies"})</span> : null}
+                            </span>
+                          )}
+                          {row._status === "skipped"  && <span className="text-amber-500 font-medium">⟳ Skipped</span>}
+                          {row._status === "retrying" && (
+                            <div>
+                              <span className="text-blue-500 font-medium animate-pulse">↻ Retrying…</span>
+                              {row._error && <p className="text-[10px] text-blue-400 leading-tight mt-0.5 max-w-[200px] break-words">{row._error}</p>}
+                            </div>
+                          )}
+                          {row._status === "error"    && (
                             <div>
                               <span className="text-destructive font-medium">✗ Error</span>
                               {row._error && <p className="text-[10px] text-destructive/80 leading-tight mt-0.5 max-w-[200px] break-words">{row._error}</p>}
                             </div>
                           )}
-                          {row._status === "pending" && <span className="text-muted-foreground">—</span>}
+                          {row._status === "pending"  && <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-2 font-medium">{row.full_name}</td>
                         <td className="px-3 py-2 text-muted-foreground">{row.email}</td>
@@ -1279,17 +1361,55 @@ export default function Users() {
             )}
           </div>
 
+          {/* Final summary — shown after import completes */}
+          {importSummary && (
+            <div className="mx-6 mb-2 rounded-lg border bg-muted/40 px-4 py-3 text-xs grid grid-cols-5 gap-2 text-center">
+              <div>
+                <p className="text-muted-foreground font-medium">Total</p>
+                <p className="text-base font-bold">{importSummary.total}</p>
+              </div>
+              <div>
+                <p className="text-emerald-600 font-medium">Imported</p>
+                <p className="text-base font-bold text-emerald-600">{importSummary.imported}</p>
+              </div>
+              <div>
+                <p className="text-amber-500 font-medium">Skipped</p>
+                <p className="text-base font-bold text-amber-500">{importSummary.skipped}</p>
+              </div>
+              <div>
+                <p className="text-destructive font-medium">Failed</p>
+                <p className="text-base font-bold text-destructive">{importSummary.failed}</p>
+              </div>
+              <div>
+                <p className="text-blue-500 font-medium">Retries</p>
+                <p className="text-base font-bold text-blue-500">{importSummary.retries}</p>
+              </div>
+            </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importLoading}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => { setImportOpen(false); setImportSummary(null); }}
+              disabled={importLoading}
+            >
+              Cancel
+            </Button>
             <Button
               onClick={handleImportSubmit}
-              disabled={importRows.length === 0 || importLoading || importRows.every(r => r._status === "ok" || r._status === "skipped")}
+              disabled={
+                importRows.length === 0 ||
+                importLoading ||
+                importRows.every(r => r._status === "ok" || r._status === "skipped")
+              }
             >
               {importLoading
-                ? `Importing… ${importRows.filter(r => r._status === "ok").length}/${importRows.filter(r => r._status !== "skipped").length}`
-                : importRows.every(r => r._status === "ok" || r._status === "skipped")
-                  ? `Done — ${importRows.filter(r => r._status === "ok").length} imported, ${importRows.filter(r => r._status === "skipped").length} skipped`
-                  : `Import ${importRows.filter(r => r._status !== "ok" && r._status !== "skipped").length} New Users`}
+                ? `Importing… ${importRows.filter(r => r._status === "ok").length} / ${importRows.filter(r => r._status !== "skipped").length}`
+                : importSummary
+                  ? `Done — ${importSummary.imported} imported, ${importSummary.skipped} skipped, ${importSummary.failed} failed`
+                  : importRows.every(r => r._status === "ok" || r._status === "skipped")
+                    ? `Done — ${importRows.filter(r => r._status === "ok").length} imported`
+                    : `Import ${importRows.filter(r => r._status !== "ok" && r._status !== "skipped").length} New Users`}
             </Button>
           </DialogFooter>
         </DialogContent>
