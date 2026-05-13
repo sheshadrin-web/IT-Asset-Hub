@@ -9,18 +9,19 @@ import {
 
 // ─── Context shape ────────────────────────────────────────────────────────────
 interface AuthContextType {
-  session:         Session | null;
-  supabaseUser:    SupabaseUser | null;
-  profile:         Profile | null;
-  currentUser:     CurrentUser | null;
-  role:            UserRole | null;
-  loading:         boolean;     // true only while restoring session on app start
-  configError:     boolean;
-  signIn:          (email: string, password: string) => Promise<{ error: string | null }>;
-  signOut:         () => Promise<void>;
-  refreshProfile:  () => Promise<void>;
-  isAuthenticated: boolean;
-  hasRole:         (...roles: UserRole[]) => boolean;
+  session:          Session | null;
+  supabaseUser:     SupabaseUser | null;
+  profile:          Profile | null;
+  currentUser:      CurrentUser | null;
+  role:             UserRole | null;
+  loading:          boolean;     // true only while restoring session on app start
+  configError:      boolean;
+  isRecoveryMode:   boolean;     // true when user clicked a password-reset link
+  signIn:           (email: string, password: string) => Promise<{ error: string | null }>;
+  signOut:          () => Promise<void>;
+  refreshProfile:   () => Promise<void>;
+  isAuthenticated:  boolean;
+  hasRole:          (...roles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -45,8 +46,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session,      setSession]      = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [profile,      setProfile]      = useState<Profile | null>(null);
-  const [loading,      setLoading]      = useState(true); // initial session restore only
-  const [configError,  setConfigError]  = useState(false);
+  const [loading,        setLoading]        = useState(true); // initial session restore only
+  const [configError,    setConfigError]    = useState(false);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
 
   // ── Fetch profile from public.profiles by Supabase auth user ID ─────────────
   const fetchProfile = useCallback(async (userId: string): Promise<{
@@ -107,6 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
         console.log("[AuthContext] onAuthStateChange event:", event);
+
+        // Password reset link — show the "Set New Password" screen instead of logging in
+        if (event === "PASSWORD_RECOVERY") {
+          setIsRecoveryMode(true);
+          setLoading(false);
+          return;
+        }
 
         if (s) {
           setSession(s);
@@ -256,7 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       session, supabaseUser, profile, currentUser, role,
-      loading, configError,
+      loading, configError, isRecoveryMode,
       signIn, signOut, refreshProfile,
       isAuthenticated, hasRole,
     }}>
