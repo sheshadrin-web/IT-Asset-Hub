@@ -143,7 +143,9 @@ export default function RaiseTicket() {
                       <SelectContent>
                         <SelectItem value="N/A">N/A — New request (no asset)</SelectItem>
                         {availableAssets.map(a => (
-                          <SelectItem key={a.assetId} value={a.assetId}>
+                          // value must be the UUID (assets.id) — the DB asset_id column
+                          // is a UUID FK. a.assetId is the human-readable string for display only.
+                          <SelectItem key={a.assetId} value={a.id ?? a.assetId}>
                             <span className="flex items-center gap-2">
                               <span className="font-mono text-xs text-muted-foreground">{a.assetId}</span>
                               <span>{a.brand} {a.model}</span>
