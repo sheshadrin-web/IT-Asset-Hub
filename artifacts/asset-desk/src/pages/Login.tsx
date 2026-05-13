@@ -163,12 +163,8 @@ export default function Login() {
               </Button>
             </form>
 
-            {/* Debug hint for admin */}
             <p className="mt-4 text-center text-xs text-slate-400">
-              Having trouble?{" "}
-              <a href="/supabase-check" className="text-blue-500 hover:underline">
-                Run diagnostics
-              </a>
+              Having trouble signing in? Contact your IT Administrator.
             </p>
           </div>
 
