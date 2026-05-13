@@ -124,6 +124,7 @@ export default function Assets() {
   const [search, setSearch]           = useState("");
   const [typeFilter, setTypeFilter]   = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [userFilter, setUserFilter]   = useState("all");
 
   const [selected, setSelected]         = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -156,10 +157,13 @@ export default function Assets() {
       || a.serialNumber.toLowerCase().includes(q)
       || a.model.toLowerCase().includes(q)
       || a.brand.toLowerCase().includes(q)
-      || (a.assignedTo?.toLowerCase().includes(q) ?? false);
+      || (a.assignedTo?.toLowerCase().includes(q)    ?? false)
+      || (a.assignedEcode?.toLowerCase().includes(q) ?? false)
+      || (a.assignedEmail?.toLowerCase().includes(q) ?? false);
     const matchType   = typeFilter   === "all" || a.assetType === typeFilter;
     const matchStatus = statusFilter === "all" || a.status    === statusFilter;
-    return matchSearch && matchType && matchStatus;
+    const matchUser   = userFilter   === "all" || a.assignedEmail === userFilter || a.assignedEcode === userFilter;
+    return matchSearch && matchType && matchStatus && matchUser;
   });
 
   const allFilteredIds = filtered.map(a => a.assetId);
@@ -259,8 +263,10 @@ export default function Assets() {
     const file = e.dataTransfer.files?.[0]; if (file) handleFile(file);
   };
 
-  const validRows   = parsedRows.filter(r => r.errors.length === 0);
-  const invalidRows = parsedRows.filter(r => r.errors.length > 0);
+  const existingAssetIds = new Set(assets.map(a => a.assetId));
+  const validRows     = parsedRows.filter(r => r.errors.length === 0 && !existingAssetIds.has(r.data.assetId ?? ""));
+  const duplicateRows = parsedRows.filter(r => r.errors.length === 0 &&  existingAssetIds.has(r.data.assetId ?? ""));
+  const invalidRows   = parsedRows.filter(r => r.errors.length > 0);
 
   const handleImport = async () => {
     try {
@@ -355,6 +361,26 @@ export default function Assets() {
                 ))}
               </SelectContent>
             </Select>
+            {/* Assigned-to user filter — only shows users who have ≥1 assigned asset */}
+            <Select value={userFilter} onValueChange={setUserFilter}>
+              <SelectTrigger className="w-full sm:w-52" data-testid="select-user-filter">
+                <SelectValue placeholder="Assigned To" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Users</SelectItem>
+                {users
+                  .filter(u => assets.some(a => a.assignedEmail === u.email || a.assignedEcode === u.ecode))
+                  .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""))
+                  .map(u => (
+                    <SelectItem key={u.id} value={u.email}>
+                      <span className="flex flex-col leading-tight">
+                        <span className="font-medium">{u.full_name}</span>
+                        {u.ecode && <span className="text-xs text-muted-foreground font-mono">{u.ecode}</span>}
+                      </span>
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -427,20 +453,20 @@ export default function Assets() {
                       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{asset.serialNumber}</td>
                       <td className="px-4 py-3">
                         {(() => {
-                          const assignedUser = asset.assignedEmail ? users.find(u => u.email === asset.assignedEmail) : undefined;
-                          const displayName  = asset.assignedTo || assignedUser?.full_name;
-                          if (!displayName && !assignedUser) return <span className="text-muted-foreground text-xs">—</span>;
-                          const initials = (displayName ?? "?").split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+                          const displayName = asset.assignedTo;
+                          const ecode       = asset.assignedEcode;
+                          if (!displayName) return <span className="text-muted-foreground text-xs">—</span>;
+                          const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
                           return (
                             <div className="flex items-center gap-2">
                               <Avatar className="h-6 w-6 flex-shrink-0">
                                 <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
                               </Avatar>
                               <div className="min-w-0">
-                                {assignedUser?.ecode && (
-                                  <div className="text-[10px] font-mono font-semibold text-muted-foreground leading-none mb-0.5">{assignedUser.ecode}</div>
+                                {ecode && (
+                                  <div className="text-[10px] font-mono font-semibold text-muted-foreground leading-none mb-0.5">{ecode}</div>
                                 )}
-                                <span className="text-sm text-foreground leading-tight">{displayName ?? asset.assignedEmail}</span>
+                                <span className="text-sm text-foreground leading-tight">{displayName}</span>
                               </div>
                             </div>
                           );
@@ -692,10 +718,16 @@ export default function Assets() {
             </div>
             {parsedRows.length > 0 && (
               <div className="space-y-2">
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 className="h-4 w-4" />{validRows.length} valid</span>
-                  {invalidRows.length > 0 && <span className="flex items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{invalidRows.length} errors</span>}
+                <div className="flex items-center gap-3 text-sm flex-wrap">
+                  <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 className="h-4 w-4" />{validRows.length} will be imported</span>
+                  {duplicateRows.length > 0 && <span className="flex items-center gap-1.5 text-amber-600"><AlertCircle className="h-4 w-4" />{duplicateRows.length} duplicate{duplicateRows.length !== 1 ? "s" : ""} skipped</span>}
+                  {invalidRows.length > 0 && <span className="flex items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{invalidRows.length} error{invalidRows.length !== 1 ? "s" : ""}</span>}
                 </div>
+                {duplicateRows.map(r => (
+                  <div key={r.index} className="text-xs text-amber-700 bg-amber-500/10 rounded px-3 py-2">
+                    <span className="font-semibold">Row {r.index}:</span> Asset ID <code className="font-mono">{r.data.assetId}</code> already exists — skipped
+                  </div>
+                ))}
                 {invalidRows.map(r => (
                   <div key={r.index} className="text-xs text-destructive bg-destructive/5 rounded px-3 py-2">
                     <span className="font-semibold">Row {r.index}:</span> {r.errors.join(", ")}
