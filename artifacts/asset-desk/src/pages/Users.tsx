@@ -138,6 +138,8 @@ export default function Users() {
     department: string; location: string; reporting_manager: string; password: string;
     _status?: "pending" | "ok" | "error"; _error?: string;
   }>>([]);
+  // Tracks which app fields were matched from the CSV headers
+  const [importColMap, setImportColMap]   = useState<Record<string, string | null>>({});
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
@@ -213,14 +215,30 @@ export default function Users() {
       const nk = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
       const FIELD_ALIASES: Record<string, string[]> = {
-        full_name:         ["fullname","name","employeename","empname","username","employeefullname"],
-        email:             ["email","emailid","emailaddress","workemail","corporateemail"],
-        role:              ["role","userrole","accessrole","designation"],
-        ecode:             ["ecode","empcode","employeecode","employeeid","empid","employeeno","empno","mpe","mpecode","staffid","staffcode","employeeidcode"],
-        department:        ["department","dept","division","team","employeedepartment"],
-        location:          ["location","loc","city","office","branch"],
-        reporting_manager: ["reportingmanager","manager","reportsto","supervisorname","managername"],
-        password:          ["password","pwd","pass","defaultpassword"],
+        full_name:         ["fullname","name","employeename","empname","username","employeefullname","fullnamename","namefull"],
+        email:             ["email","emailid","emailaddress","workemail","corporateemail","officeemail","mail","emailid"],
+        role:              ["role","userrole","accessrole","designation","jobrole","rolelevel"],
+        ecode:             [
+          // exact / short
+          "ecode","ec","empcode","empid","empno","mpe","mpecode",
+          // long forms
+          "employeecode","employeeid","employeeno","employeenumber","employeeidcode","employeeidnumber",
+          // staff / hr variants
+          "staffid","staffcode","staffno","staffnumber",
+          // "code" alone (very common in simple HR exports)
+          "code","idno","id",
+          // common HR system exports
+          "personnelno","personnelnumber","hrcode","hrid","workforceid",
+          // with underscores/hyphens stripped
+          "empcodeno","empidcode","empidentifier",
+        ],
+        department:        ["department","dept","division","team","employeedepartment","businessunit","bu","costcenter","function"],
+        location:          ["location","loc","city","office","branch","worksite","worklocation","site","workcity"],
+        reporting_manager: [
+          "reportingmanager","manager","reportsto","supervisorname","managername",
+          "linemanager","reportstoname","directmanager","supervisor","reportingto","manageremail",
+        ],
+        password:          ["password","pwd","pass","defaultpassword","temppassword","temporarypassword","initialpassword"],
       };
 
       const lines = text.split(/\r?\n/).filter(l => l.trim());
@@ -233,6 +251,12 @@ export default function Users() {
       let colIndex: Record<string, number> = {};
       let dataLines: string[];
 
+      // colHeaderMap: field → the original CSV header string that matched (null if not found)
+      const colHeaderMap: Record<string, string | null> = {
+        full_name: null, email: null, role: null, ecode: null,
+        department: null, location: null, reporting_manager: null, password: null,
+      };
+
       if (looksLikeHeader) {
         // Map header names to field keys
         firstCols.forEach((h, i) => {
@@ -240,6 +264,7 @@ export default function Users() {
           for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
             if (aliases.includes(norm) && !(field in colIndex)) {
               colIndex[field] = i;
+              colHeaderMap[field] = h; // record the original header label
             }
           }
         });
@@ -247,8 +272,10 @@ export default function Users() {
       } else {
         // Positional fallback: name, email, role, ecode, dept, location, manager, password
         colIndex = { full_name: 0, email: 1, role: 2, ecode: 3, department: 4, location: 5, reporting_manager: 6, password: 7 };
+        Object.keys(colHeaderMap).forEach(k => { colHeaderMap[k] = `col ${colIndex[k] ?? "?"}`; });
         dataLines = lines;
       }
+      setImportColMap(colHeaderMap);
 
       const get = (cols: string[], field: string) => {
         const idx = colIndex[field];
@@ -1157,6 +1184,45 @@ export default function Users() {
                 <span className="text-sm text-muted-foreground">{importRows.length} row{importRows.length !== 1 ? "s" : ""} ready to import</span>
               )}
             </div>
+
+            {/* Column mapping summary — shown after a file is loaded */}
+            {Object.keys(importColMap).length > 0 && importRows.length > 0 && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                <p className="font-semibold text-muted-foreground mb-1.5">Detected CSV columns</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "full_name",         label: "Name" },
+                    { key: "email",             label: "Email" },
+                    { key: "ecode",             label: "E-Code" },
+                    { key: "department",        label: "Dept" },
+                    { key: "location",          label: "Location" },
+                    { key: "reporting_manager", label: "Manager" },
+                    { key: "role",              label: "Role" },
+                    { key: "password",          label: "Password" },
+                  ].map(({ key, label }) => {
+                    const matched = importColMap[key];
+                    return (
+                      <span
+                        key={key}
+                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono ${
+                          matched
+                            ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                            : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
+                        }`}
+                      >
+                        {matched ? "✓" : "✗"} {label}
+                        {matched ? <span className="opacity-60">← "{matched}"</span> : null}
+                      </span>
+                    );
+                  })}
+                </div>
+                {!importColMap["ecode"] && (
+                  <p className="mt-1.5 text-red-600 dark:text-red-400">
+                    ⚠ E-Code column not found — rename your CSV column to one of: <code>E-Code, Emp Code, Employee Code, Emp ID, Code, MPE Code</code>
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Preview table */}
             {importRows.length > 0 && (
