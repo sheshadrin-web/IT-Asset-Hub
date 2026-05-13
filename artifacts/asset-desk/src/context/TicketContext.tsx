@@ -12,7 +12,13 @@ function mapFromDB(row: Record<string, unknown>): Ticket {
     ticketId:       String(row.ticket_id ?? ""),
     raisedBy:       String(row.raised_by ?? ""),
     employeeEmail:  row.employee_email ? String(row.employee_email) : undefined,
-    assetId:        row.asset_id ? String(row.asset_id) : "N/A",
+    // assets(asset_id) join resolves the UUID FK back to the human-readable
+    // string ID (e.g. "MILES-LAP-627") so display code needs no changes.
+    assetId: (() => {
+      const joined = row.assets as Record<string, unknown> | null;
+      if (joined?.asset_id) return String(joined.asset_id);
+      return "N/A";
+    })(),
     category:       String(row.category ?? ""),
     subcategory:    String(row.subcategory ?? ""),
     priority:       (row.priority as TicketPriority) ?? "Medium",
@@ -68,13 +74,22 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const { data, error } = await supabase
       .from("tickets")
-      .select("*")
+      .select("*, assets(asset_id)")
       .order("created_at", { ascending: false });
     if (!error && data) setTickets(data.map(mapFromDB));
     setLoading(false);
   }, []);
 
+  // Re-fetch when auth session changes so end-users (whose RLS view depends on
+  // a valid JWT) always see their own tickets after login.
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  useEffect(() => {
+    if (!supabaseConfigured) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) fetchTickets();
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchTickets]);
 
   const getTicket = (id: string) => tickets.find(t => t.ticketId === id);
 
@@ -130,11 +145,12 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     const ticket = tickets.find(t => t.ticketId === ticketId);
     if (!ticket) return;
     const updatedComments = [...ticket.comments, comment];
-    // The `comments` column doesn't exist in the DB schema yet, so we only
-    // persist the updated_at timestamp and store comments in local React state.
+    // Persist comments as JSONB. Requires: ALTER TABLE tickets ADD COLUMN IF NOT EXISTS comments JSONB DEFAULT '[]'::jsonb;
+    // If the column doesn't exist the update returns an error which we ignore —
+    // the comments still appear in the current session via local state.
     await supabase
       .from("tickets")
-      .update({ updated_at: new Date().toISOString() })
+      .update({ comments: updatedComments, updated_at: new Date().toISOString() })
       .eq("ticket_id", ticketId);
     const today = new Date().toISOString().split("T")[0];
     setTickets(prev =>
