@@ -90,6 +90,7 @@ export interface Asset {
   status:           AssetStatus;
   assignedTo?:      string;
   assignedEmail?:   string;
+  assignedEcode?:   string;
   department?:      string;
   location:         string;
   accessories:      string;
