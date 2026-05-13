@@ -57,6 +57,12 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Strip all console.* calls and debugger statements from the production bundle.
+    // This prevents internal debug logs (user email, role, profile data) from being
+    // visible in browser DevTools on the live deployment.
+    esbuild: {
+      drop: ["console", "debugger"],
+    },
   },
   server: {
     port,
