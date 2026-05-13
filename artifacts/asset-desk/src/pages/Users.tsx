@@ -31,6 +31,7 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
 import { useUsers } from "@/context/UsersContext";
+import { useAssets } from "@/context/AssetContext";
 import { useAuth } from "@/context/AuthContext";
 import { Profile, UserRole, UserStatus, ROLE_LABELS } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
@@ -103,6 +104,7 @@ function exportUsers(users: Profile[]) {
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
   const { users, loading, refresh, updateUser, deleteUser } = useUsers();
+  const { assets } = useAssets();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
@@ -126,6 +128,13 @@ export default function Users() {
 
   // Password visibility
   const [showPw, setShowPw] = useState(false);
+
+  // Reset Password dialog
+  const [resetPassOpen,   setResetPassOpen]   = useState(false);
+  const [resetPassTarget, setResetPassTarget] = useState<Profile | null>(null);
+  const [newPassword,     setNewPassword]     = useState("");
+  const [resetPassSaving, setResetPassSaving] = useState(false);
+  const [showNewPw,       setShowNewPw]       = useState(false);
 
   // Bulk select
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
@@ -623,6 +632,46 @@ export default function Users() {
     }
   };
 
+  // ── Set new password directly (admin, uses Edge Function) ──────────────────
+  const handleSetPassword = async () => {
+    if (!resetPassTarget || newPassword.length < 8) return;
+    setResetPassSaving(true);
+    try {
+      const result = await adminUsersApi.resetPassword(resetPassTarget.id, newPassword);
+      if (!result.success) throw new Error(result.error ?? "Failed to reset password");
+      toast({ title: "Password updated", description: `Password for ${resetPassTarget.full_name} has been updated successfully.` });
+      setResetPassOpen(false);
+      setNewPassword("");
+    } catch (err) {
+      toast({
+        title: "Failed to set password",
+        description: err instanceof Error ? err.message : "Try using the reset link option instead.",
+        variant: "destructive",
+      });
+    } finally {
+      setResetPassSaving(false);
+    }
+  };
+
+  // ── Send reset link (from view dialog) ────────────────────────────────────
+  const handleSendResetLink = async () => {
+    if (!resetPassTarget) return;
+    setResetPassSaving(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetPassTarget.email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      toast({ title: "Reset link sent", description: `A password reset email has been sent to ${resetPassTarget.email}.` });
+      setResetPassOpen(false);
+      setNewPassword("");
+    } catch (err) {
+      toast({ title: "Failed to send reset email", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setResetPassSaving(false);
+    }
+  };
+
   // ── Deactivate ─────────────────────────────────────────────────────────────
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;
@@ -944,11 +993,12 @@ export default function Users() {
 
       {/* ── View User Dialog ─────────────────────────────────────────────────── */}
       <Dialog open={!!viewingUser} onOpenChange={v => !v && setViewingUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {viewingUser && (() => {
             const vu = viewingUser;
             const initials = vu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
             const isSelf = vu.id === currentUser?.userId;
+            const userAssets = assets.filter(a => a.assignedEmail === vu.email);
             return (
               <>
                 <DialogHeader>
@@ -966,6 +1016,7 @@ export default function Users() {
                   </div>
                 </DialogHeader>
 
+                {/* Profile fields */}
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {[
                     { label: "E-Code",            value: vu.ecode || "—" },
@@ -986,8 +1037,66 @@ export default function Users() {
                   ))}
                 </div>
 
-                <DialogFooter className="gap-2 sm:gap-0">
-                  <Button variant="outline" onClick={() => setViewingUser(null)}>Close</Button>
+                {/* Assigned Assets section */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center gap-2 border-b border-border pb-2">
+                    <h3 className="text-sm font-semibold text-foreground">Assigned Assets</h3>
+                    <span className={cn(
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold",
+                      userAssets.length > 0
+                        ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                        : "bg-muted text-muted-foreground border-border"
+                    )}>{userAssets.length}</span>
+                  </div>
+                  {userAssets.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-4 text-center border rounded-lg bg-muted/30">
+                      No assets currently assigned to this user.
+                    </p>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50 border-b border-border">
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Asset ID</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Device</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Warranty Until</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userAssets.map((a, i) => (
+                            <tr key={a.assetId} className={cn("border-b border-border last:border-0", i % 2 === 0 ? "" : "bg-muted/20")}>
+                              <td className="px-3 py-2 font-mono font-semibold text-primary">{a.assetId}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{a.assetType}</td>
+                              <td className="px-3 py-2 font-medium text-foreground">{a.brand} {a.model}</td>
+                              <td className="px-3 py-2">
+                                <span className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                  {a.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground">
+                                {a.warrantyEndDate ? new Date(a.warrantyEndDate).toLocaleDateString("en-IN") : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="gap-2 flex-wrap">
+                  <Button variant="outline" onClick={() => setViewingUser(null)} className="sm:mr-auto">Close</Button>
+                  {isAdmin && !isSelf && (
+                    <Button
+                      variant="outline"
+                      className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400"
+                      onClick={() => { setViewingUser(null); setResetPassTarget(vu); setNewPassword(""); setShowNewPw(false); setResetPassOpen(true); }}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" /> Reset Password
+                    </Button>
+                  )}
                   {isAdmin && (
                     <Button onClick={() => { setViewingUser(null); openEdit(vu); }} className="gap-2">
                       <Edit className="h-4 w-4" /> Edit Profile
@@ -997,6 +1106,86 @@ export default function Users() {
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Password Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={resetPassOpen} onOpenChange={v => { if (!resetPassSaving) { setResetPassOpen(v); if (!v) setNewPassword(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4" /> Reset Password
+            </DialogTitle>
+            {resetPassTarget && (
+              <DialogDescription>{resetPassTarget.full_name} · {resetPassTarget.email}</DialogDescription>
+            )}
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">New Password</label>
+              <div className="relative">
+                <Input
+                  type={showNewPw ? "text" : "password"}
+                  placeholder="Min. 8 characters"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="pr-10"
+                  disabled={resetPassSaving}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowNewPw(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showNewPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-blue-600 hover:underline"
+                onClick={() => { setNewPassword(generatePassword()); setShowNewPw(true); }}
+              >
+                Generate random password
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-100 rounded px-3 py-2">
+              Share the new password with the user securely. They should change it after next login.
+            </p>
+          </div>
+
+          <DialogFooter className="flex-col gap-2">
+            <div className="flex gap-2 w-full">
+              <Button variant="outline" onClick={() => setResetPassOpen(false)} disabled={resetPassSaving} className="flex-1">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSetPassword}
+                disabled={resetPassSaving || newPassword.length < 8}
+                className="flex-1 gap-2"
+              >
+                {resetPassSaving ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    Setting…
+                  </span>
+                ) : "Set Password"}
+              </Button>
+            </div>
+            <div className="border-t border-border pt-2 w-full">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full gap-2 text-xs text-muted-foreground hover:text-foreground"
+                onClick={handleSendResetLink}
+                disabled={resetPassSaving}
+              >
+                <KeyRound className="h-3 w-3" />
+                Or send a reset link to the user's email
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
