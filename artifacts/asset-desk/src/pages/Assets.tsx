@@ -134,6 +134,7 @@ export default function Assets() {
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
   const [assignStep,   setAssignStep]   = useState<"select" | "handover">("select");
   const [assignUser,   setAssignUser]   = useState("");
+  const [userSearch,   setUserSearch]   = useState("");
   const [handoverDate, setHandoverDate] = useState(new Date().toISOString().split("T")[0]);
   const [handoverAcc,  setHandoverAcc]  = useState("");
   const [handoverNote, setHandoverNote] = useState("");
@@ -198,14 +199,27 @@ export default function Assets() {
     }
   };
 
-  const activeUsers  = users.filter(u => u.status === "active");
-  const selectedUser = users.find(u => u.id === assignUser);
+  const activeUsers    = users.filter(u => u.status === "active");
+  const selectedUser   = users.find(u => u.id === assignUser);
   const assignAssetObj = assets.find(a => a.assetId === assignTarget);
+
+  const filteredUsers = userSearch.trim()
+    ? activeUsers.filter(u => {
+        const q = userSearch.toLowerCase();
+        return (
+          u.full_name.toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q) ||
+          (u.ecode ?? "").toLowerCase().includes(q) ||
+          (u.department ?? "").toLowerCase().includes(q)
+        );
+      })
+    : activeUsers;
 
   const openAssignDialog = (assetId: string) => {
     const a = assets.find(x => x.assetId === assetId);
     setAssignTarget(assetId);
     setAssignUser("");
+    setUserSearch("");
     setAssignStep("select");
     setHandoverDate(new Date().toISOString().split("T")[0]);
     setHandoverAcc(a?.accessories ?? "");
@@ -589,21 +603,64 @@ export default function Assets() {
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Assign To <span className="text-destructive">*</span></Label>
-                <Select value={assignUser} onValueChange={setAssignUser}>
-                  <SelectTrigger data-testid="select-assign-user">
-                    <SelectValue placeholder="Select a user…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeUsers.map(u => (
-                      <SelectItem key={u.id} value={u.id}>
-                        <div className="flex flex-col">
+
+                {assignUser && selectedUser ? (
+                  <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{selectedUser.full_name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{selectedUser.email} · {selectedUser.department}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setAssignUser(""); setUserSearch(""); }}
+                      className="ml-2 shrink-0 rounded p-0.5 hover:bg-muted"
+                      aria-label="Clear selection"
+                    >
+                      <X className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        data-testid="input-user-search"
+                        placeholder="Search by name, email, e-code, dept…"
+                        className="pl-8 pr-8 text-sm"
+                        value={userSearch}
+                        onChange={e => setUserSearch(e.target.value)}
+                        autoFocus
+                      />
+                      {userSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setUserSearch("")}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-muted"
+                        >
+                          <X className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                      )}
+                    </div>
+                    <div
+                      data-testid="select-assign-user"
+                      className="max-h-52 overflow-y-auto rounded-md border divide-y text-sm"
+                    >
+                      {filteredUsers.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-muted-foreground">No users match your search</p>
+                      ) : filteredUsers.map(u => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => { setAssignUser(u.id); setUserSearch(""); }}
+                          className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-muted/60 transition-colors"
+                        >
                           <span className="font-medium">{u.full_name}</span>
-                          <span className="text-xs text-muted-foreground">{u.email} · {u.department}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                          <span className="text-xs text-muted-foreground">{u.email}{u.department ? ` · ${u.department}` : ""}{u.ecode ? ` · ${u.ecode}` : ""}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ) : (
