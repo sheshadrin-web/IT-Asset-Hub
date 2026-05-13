@@ -240,6 +240,16 @@ Deno.serve(async (req: Request) => {
         return json({ success: true, message: "User deleted from Auth and profiles" });
       }
 
+      case "resetPassword": {
+        const { userId, newPassword } = p as { userId: string; newPassword: string };
+        if (!userId || !newPassword) return json({ error: "userId and newPassword are required" }, 400);
+        if (userId === callerUserId) return json({ error: "You cannot reset your own password from here" }, 400);
+        if ((newPassword as string).length < 8) return json({ error: "Password must be at least 8 characters" }, 400);
+        const { error: pwErr } = await adminClient.auth.admin.updateUserById(userId, { password: newPassword });
+        if (pwErr) return json({ error: pwErr.message }, 500);
+        return json({ success: true, message: "Password updated successfully" });
+      }
+
       default:
         return json({ error: `Unknown action: ${action}` }, 400);
     }
