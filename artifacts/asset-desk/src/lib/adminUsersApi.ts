@@ -128,4 +128,5 @@ export const adminUsersApi = {
   updateProfile: (payload: UpdateUserPayload)  => callEdgeFunction("updateUserProfile", { ...payload }),
   deactivateUser:(userId: string)              => callEdgeFunction("deactivateUser",    { userId }),
   deleteUser:    (userId: string)              => callEdgeFunction("deleteUser",         { userId }),
+  resetPassword: (userId: string, newPassword: string) => callEdgeFunction("resetPassword", { userId, newPassword }),
 };
