@@ -275,6 +275,18 @@ supabase functions deploy admin-users --no-verify-jwt
 
 ---
 
+## 4c. Add Missing Columns to profiles (run once if ecode / reporting_manager are missing)
+
+```sql
+-- Add ecode and reporting_manager if they don't exist yet
+alter table public.profiles add column if not exists ecode             text not null default '';
+alter table public.profiles add column if not exists reporting_manager text not null default '';
+```
+
+> Run in **Supabase Dashboard → SQL Editor**. Safe to run multiple times (`IF NOT EXISTS`).
+
+---
+
 ## 5. First Super Admin
 
 ### Step 1 — Confirm the auth user exists
