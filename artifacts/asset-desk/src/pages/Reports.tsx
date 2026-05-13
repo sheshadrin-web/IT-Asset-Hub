@@ -84,7 +84,7 @@ async function exportFullXlsx(
 ) {
   setExporting(true);
   try {
-    const XLSX = (await import("xlsx")).default;
+    const XLSX = await import("xlsx");
     const today  = new Date();
     const dateStr = today.toISOString().split("T")[0];
 
