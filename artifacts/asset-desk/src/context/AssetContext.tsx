@@ -177,9 +177,29 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department }
         : a
     ));
+    // Log assignment to history (non-fatal)
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: ecodeRow } = await supabase.from("profiles").select("ecode").eq("id", userId).single();
+      const assetObj = assets.find(a => a.assetId === assetId);
+      await supabase.from("asset_assignment_history").insert({
+        asset_id:   assetId,
+        asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
+        user_id:    userId,
+        user_name:  userName,
+        user_email: userEmail,
+        user_ecode: (ecodeRow as { ecode?: string } | null)?.ecode ?? null,
+        department: department,
+        event_type: "assigned",
+        event_by:   authUser?.id ?? null,
+        notes:      handoverNote ?? null,
+      });
+    } catch { /* non-fatal — history logging must not block the assignment */ }
   };
 
   const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
+    // Capture current assignment info before clearing
+    const assetObj = assets.find(a => a.assetId === assetId);
     const coreUpdates: Record<string, unknown> = {
       status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null,
     };
@@ -193,6 +213,21 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         ? { ...a, status: finalStatus, assignedTo: undefined, assignedEmail: undefined }
         : a
     ));
+    // Log return to history (non-fatal)
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      await supabase.from("asset_assignment_history").insert({
+        asset_id:   assetId,
+        asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
+        user_name:  assetObj?.assignedTo ?? null,
+        user_email: assetObj?.assignedEmail ?? null,
+        user_ecode: (assetObj as { assignedEcode?: string } | undefined)?.assignedEcode ?? null,
+        department: assetObj?.department ?? null,
+        event_type: "returned",
+        event_by:   authUser?.id ?? null,
+        notes:      returnNote ?? null,
+      });
+    } catch { /* non-fatal */ }
   };
 
   const updateStatus = async (assetId: string, status: AssetStatus): Promise<void> => {
