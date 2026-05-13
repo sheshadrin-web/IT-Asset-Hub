@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabaseClient";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -73,31 +75,233 @@ function exportUsersCsv(users: Profile[]) {
   downloadCsv(csv, `users_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
-function exportSummaryCsv(assets: Asset[], tickets: TicketType[], users: Profile[]) {
-  const resolved = tickets.filter((t) => t.status === "Resolved").length;
-  const resRate  = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "N/A";
-  const lines: string[] = [
-    `"Miles Education — IT Helpdesk Full Report — ${new Date().toLocaleDateString()}"`,
-    "",
-    '"=== SUMMARY ==="',
-    `"Total Assets","${assets.length}"`,
-    `"Total Tickets","${tickets.length}"`,
-    `"Total Users","${users.length}"`,
-    `"Resolution Rate","${resRate}"`,
-    "",
-    '"=== ASSETS BY STATUS ==="',
-    ...["In Procurement","Available","Assigned","Under Repair","Lost","Retired"].map((s) => `"${s}","${assets.filter((a) => a.status === s).length}"`),
-    "",
-    '"=== TICKETS BY PRIORITY ==="',
-    ...["Critical","High","Medium","Low"].map((p) => `"${p}","${tickets.filter((t) => t.priority === p).length}"`),
-    "",
-    '"=== USERS BY ROLE ==="',
-    `"Super Admin","${users.filter((u) => u.role === "super_admin").length}"`,
-    `"IT Admin","${users.filter((u) => u.role === "it_admin").length}"`,
-    `"IT Agent","${users.filter((u) => u.role === "it_agent").length}"`,
-    `"End User","${users.filter((u) => u.role === "end_user").length}"`,
-  ];
-  downloadCsv(lines.join("\n"), `full_report_${new Date().toISOString().split("T")[0]}.csv`);
+async function exportFullXlsx(
+  assets: Asset[],
+  tickets: TicketType[],
+  users: Profile[],
+  setExporting: (v: boolean) => void,
+  toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void,
+) {
+  setExporting(true);
+  try {
+    const XLSX = (await import("xlsx")).default;
+    const today  = new Date();
+    const dateStr = today.toISOString().split("T")[0];
+
+    // Fetch assignment history from Supabase
+    const { data: historyRows } = await supabase
+      .from("asset_assignment_history")
+      .select("*")
+      .order("created_at", { ascending: false });
+    const history = (historyRows ?? []) as Record<string, unknown>[];
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    const fmt = (v: unknown) => (v == null || v === "" ? "" : String(v));
+    const fmtDate = (v: unknown) => {
+      if (!v) return "";
+      const d = new Date(String(v));
+      return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("en-IN");
+    };
+    const addSheet = (wb: ReturnType<typeof XLSX.utils.book_new>, name: string, data: unknown[][], colWidths: number[]) => {
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws["!cols"] = colWidths.map((w) => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    };
+
+    const ROLE_MAP: Record<string, string> = {
+      super_admin: "Super Admin", it_admin: "IT Admin", it_agent: "IT Agent", end_user: "End User",
+    };
+
+    // ── Sheet 1: Dashboard Summary ────────────────────────────────────────────
+    const ninety = new Date(); ninety.setDate(ninety.getDate() + 90);
+    const expiringSoon = assets.filter((a) => { const d = new Date(a.warrantyEndDate); return !isNaN(d.getTime()) && d > today && d <= ninety; }).length;
+    const expired      = assets.filter((a) => { const d = new Date(a.warrantyEndDate); return !isNaN(d.getTime()) && d < today; }).length;
+    const resolved     = tickets.filter((t) => t.status === "Resolved").length;
+    const resRate      = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "N/A";
+
+    const deptMap = assets.reduce<Record<string, number>>((acc, a) => {
+      const d = a.department || "Unassigned"; acc[d] = (acc[d] || 0) + 1; return acc;
+    }, {});
+    const empAssets = assets.filter((a) => a.assignedTo).reduce<Record<string, number>>((acc, a) => {
+      const k = a.assignedTo!; acc[k] = (acc[k] || 0) + 1; return acc;
+    }, {});
+    const topEmp = Object.entries(empAssets).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    const sheet1: unknown[][] = [
+      ["Miles Education Pvt Ltd — IT Asset Management & Helpdesk — Full Report"],
+      [`Generated: ${today.toLocaleString("en-IN")}   |   Period: All Time`],
+      [],
+      ["KEY METRICS", ""],
+      ["Metric", "Value"],
+      ["Total Assets",        assets.length],
+      ["Total Users",         users.length],
+      ["Total Tickets",       tickets.length],
+      ["Assigned Assets",     assets.filter((a) => a.status === "Assigned").length],
+      ["Available Assets",    assets.filter((a) => a.status === "Available").length],
+      ["Under Repair",        assets.filter((a) => a.status === "Under Repair").length],
+      ["Lost Assets",         assets.filter((a) => a.status === "Lost").length],
+      ["Retired Assets",      assets.filter((a) => a.status === "Retired").length],
+      ["In Procurement",      assets.filter((a) => a.status === "In Procurement").length],
+      [],
+      ["TICKET ANALYTICS", ""],
+      ["Metric", "Value"],
+      ["Open Tickets",        tickets.filter((t) => t.status === "Open").length],
+      ["In Progress",         tickets.filter((t) => t.status === "In Progress").length],
+      ["Resolved Tickets",    resolved],
+      ["Closed Tickets",      tickets.filter((t) => t.status === "Closed").length],
+      ["Resolution Rate",     resRate],
+      [],
+      ["ASSET STATUS BREAKDOWN", "", ""],
+      ["Status", "Count", "% of Total"],
+      ...["In Procurement","Available","Assigned","Under Repair","Lost","Retired"].map((s) => {
+        const cnt = assets.filter((a) => a.status === s).length;
+        return [s, cnt, assets.length > 0 ? `${Math.round(cnt / assets.length * 100)}%` : "0%"];
+      }),
+      [],
+      ["WARRANTY ANALYTICS", ""],
+      ["Metric", "Count"],
+      ["Expiring Within 90 Days", expiringSoon],
+      ["Already Expired",         expired],
+      [],
+      ["ASSETS BY DEPARTMENT", ""],
+      ["Department", "Asset Count"],
+      ...Object.entries(deptMap).sort((a, b) => b[1] - a[1]),
+      [],
+      ["TOP ASSET HOLDERS (by count)", ""],
+      ["Employee Name", "Assets Held"],
+      ...topEmp,
+      [],
+      ["TICKET PRIORITY BREAKDOWN", ""],
+      ["Priority", "Count"],
+      ...["Critical","High","Medium","Low"].map((p) => [p, tickets.filter((t) => t.priority === p).length]),
+      [],
+      ["USER ROLES", ""],
+      ["Role", "Count"],
+      ["Super Admin", users.filter((u) => u.role === "super_admin").length],
+      ["IT Admin",    users.filter((u) => u.role === "it_admin").length],
+      ["IT Agent",    users.filter((u) => u.role === "it_agent").length],
+      ["End User",    users.filter((u) => u.role === "end_user").length],
+    ];
+    addSheet(XLSX.utils.book_new(), "init", [], []); // warmup
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "1 - Dashboard Summary", sheet1, [38, 22, 14]);
+
+    // ── Sheet 2: Assets Master Data ───────────────────────────────────────────
+    const assetsHeader = [
+      "Asset ID","Type","Brand","Model","Serial Number","Product No.",
+      "Processor","RAM","OS","Storage","IMEI 1","IMEI 2",
+      "Purchase Date","Warranty End","Vendor","Invoice",
+      "Status","Location","Accessories","Remarks",
+    ];
+    const assetsRows: unknown[][] = assets.map((a) => [
+      fmt(a.assetId), fmt(a.assetType), fmt(a.brand), fmt(a.model),
+      fmt(a.serialNumber), fmt(a.productNumber),
+      fmt(a.processor), fmt(a.ram),
+      fmt(a.operatingSystem), fmt(a.storage),
+      fmt(a.imeiNumber), fmt(a.imei2),
+      fmtDate(a.purchaseDate), fmtDate(a.warrantyEndDate),
+      fmt(a.vendor), fmt(a.invoice),
+      fmt(a.status), fmt(a.location), fmt(a.accessories), fmt(a.remarks),
+    ]);
+    addSheet(wb, "2 - Assets Master", [assetsHeader, ...assetsRows],
+      [14,10,12,18,18,14,16,8,14,10,16,16,14,14,16,14,14,16,20,30]);
+
+    // ── Sheet 3: Users Master Data ─────────────────────────────────────────────
+    const usersHeader = ["E-Code","Full Name","Email","Role","Department","Location","Reporting Manager","Status"];
+    const usersRows: unknown[][] = users.map((u) => [
+      fmt(u.ecode), fmt(u.full_name), fmt(u.email),
+      ROLE_MAP[u.role] ?? u.role,
+      fmt(u.department), fmt(u.location),
+      fmt(u.reporting_manager), fmt(u.status),
+    ]);
+    addSheet(wb, "3 - Users Master", [usersHeader, ...usersRows],
+      [12,22,30,14,18,16,22,10]);
+
+    // ── Sheet 4: Current Asset Assignments ────────────────────────────────────
+    const assigned4 = assets.filter((a) => a.status === "Assigned");
+    const assign4Header = [
+      "Asset ID","Type","Brand","Model","Serial Number",
+      "Assigned To","E-Code","Email","Department","Asset Status","Warranty End",
+    ];
+    const assign4Rows: unknown[][] = assigned4.map((a) => [
+      fmt(a.assetId), fmt(a.assetType), fmt(a.brand), fmt(a.model), fmt(a.serialNumber),
+      fmt(a.assignedTo), fmt(a.assignedEcode),
+      fmt(a.assignedEmail), fmt(a.department), fmt(a.status),
+      fmtDate(a.warrantyEndDate),
+    ]);
+    addSheet(wb, "4 - Current Assignments", [assign4Header, ...assign4Rows],
+      [14,10,12,18,18,22,12,28,18,12,14]);
+
+    // ── Sheet 5: Assignment History ───────────────────────────────────────────
+    const hist5Header = [
+      "Asset ID","Asset Name/Model","Event Type",
+      "User Name","User E-Code","User Email","Department",
+      "Actioned By","Notes","Date",
+    ];
+    const hist5Rows: unknown[][] = history.length > 0
+      ? history.map((h) => [
+          fmt(h.asset_id), fmt(h.asset_name), fmt(h.event_type),
+          fmt(h.user_name), fmt(h.user_ecode), fmt(h.user_email),
+          fmt(h.department), fmt(h.event_by_name ?? "—"), fmt(h.notes),
+          fmtDate(h.created_at),
+        ])
+      : [["No assignment history recorded yet. History is captured going forward from this export."]];
+    addSheet(wb, "5 - Assignment History", [hist5Header, ...hist5Rows],
+      [14,20,12,22,12,28,18,22,30,14]);
+
+    // ── Sheet 6: Tickets Summary ──────────────────────────────────────────────
+    const tickets6Header = [
+      "Ticket ID","Category","Subcategory","Priority","Status",
+      "Raised By","Employee Email","Asset ID","Assigned Agent",
+      "Created Date","Updated Date","Description",
+    ];
+    const tickets6Rows: unknown[][] = tickets.map((t) => [
+      fmt(t.ticketId), fmt(t.category), fmt(t.subcategory),
+      fmt(t.priority), fmt(t.status),
+      fmt(t.raisedBy), fmt(t.employeeEmail), fmt(t.assetId),
+      fmt(t.assignedAgent),
+      fmtDate(t.createdDate), fmtDate(t.updatedDate),
+      fmt(t.description),
+    ]);
+    addSheet(wb, "6 - Tickets", [tickets6Header, ...tickets6Rows],
+      [14,20,20,10,14,22,28,14,22,14,14,40]);
+
+    // ── Sheet 7: Procurement & Warranty Details ───────────────────────────────
+    const warranty7Header = [
+      "Asset ID","Type","Brand","Model","Serial Number",
+      "Purchase Date","Warranty End","Days Until Expiry","Warranty Status",
+      "Vendor","Location","Asset Status",
+    ];
+    const warranty7Rows: unknown[][] = assets.map((a) => {
+      const wEnd    = new Date(a.warrantyEndDate);
+      const valid   = !isNaN(wEnd.getTime());
+      const daysLeft = valid ? Math.ceil((wEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) : null;
+      const wStatus = daysLeft == null ? "Unknown" : daysLeft < 0 ? "Expired" : daysLeft <= 90 ? "Expiring Soon" : "Active";
+      return [
+        fmt(a.assetId), fmt(a.assetType), fmt(a.brand), fmt(a.model), fmt(a.serialNumber),
+        fmtDate(a.purchaseDate), fmtDate(a.warrantyEndDate),
+        daysLeft != null ? daysLeft : "",
+        wStatus,
+        fmt(a.vendor), fmt(a.location), fmt(a.status),
+      ];
+    }).sort((a, b) => {
+      const o: Record<string, number> = { "Expired": 0, "Expiring Soon": 1, "Active": 2, "Unknown": 3 };
+      return (o[String(a[8])] ?? 3) - (o[String(b[8])] ?? 3);
+    });
+    addSheet(wb, "7 - Warranty & Procurement", [warranty7Header, ...warranty7Rows],
+      [14,10,12,18,18,14,14,18,16,16,16,12]);
+
+    XLSX.writeFile(wb, `full_report_${dateStr}.xlsx`);
+    toast({ title: "Full report exported", description: `full_report_${dateStr}.xlsx — 7 sheets downloaded` });
+  } catch (err) {
+    toast({
+      title: "Export failed",
+      description: err instanceof Error ? err.message : "Please try again.",
+      variant: "destructive",
+    });
+  } finally {
+    setExporting(false);
+  }
 }
 
 function ExportCardButton({ onClick, label }: { onClick: () => void; label: string }) {
@@ -113,10 +317,11 @@ function ExportCardButton({ onClick, label }: { onClick: () => void; label: stri
 }
 
 export default function Reports() {
-  const { toast }     = useToast();
-  const { assets }    = useAssets();
-  const { tickets }   = useTickets();
-  const { users }     = useUsers();
+  const { toast }         = useToast();
+  const { assets }        = useAssets();
+  const { tickets }       = useTickets();
+  const { users }         = useUsers();
+  const [exporting, setExporting] = useState(false);
 
   const handleExport = (fn: () => void, label: string) => {
     fn();
@@ -195,8 +400,13 @@ export default function Reports() {
               <Users className="h-3.5 w-3.5 text-emerald-500" />Export Users
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="flex items-center gap-2 cursor-pointer font-medium" onClick={() => handleExport(() => exportSummaryCsv(assets, tickets, users), "Full summary report")}>
-              <FileText className="h-3.5 w-3.5 text-amber-500" />Export Full Summary
+            <DropdownMenuItem
+              className="flex items-center gap-2 cursor-pointer font-medium"
+              disabled={exporting}
+              onClick={() => exportFullXlsx(assets, tickets, users, setExporting, toast)}
+            >
+              <FileText className="h-3.5 w-3.5 text-amber-500" />
+              {exporting ? "Generating XLSX…" : "Export Full Summary (.xlsx)"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
