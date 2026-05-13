@@ -136,7 +136,7 @@ export default function Users() {
   const [importRows, setImportRows]       = useState<Array<{
     full_name: string; email: string; role: string; ecode: string;
     department: string; location: string; reporting_manager: string; password: string;
-    _status?: "pending" | "ok" | "error"; _error?: string;
+    _status?: "pending" | "ok" | "error" | "skipped"; _error?: string;
   }>>([]);
   // Tracks which app fields were matched from the CSV headers
   const [importColMap, setImportColMap]   = useState<Record<string, string | null>>({});
@@ -338,11 +338,18 @@ export default function Users() {
     );
 
     for (let i = 0; i < updated.length; i++) {
-      if (updated[i]._status === "ok") continue;
+      if (updated[i]._status === "ok" || updated[i]._status === "skipped") continue;
       const row = updated[i];
       const cleanEmail = row.email?.toLowerCase().trim();
 
       let userId: string | null = emailToId.get(cleanEmail) ?? null;
+
+      // ── Skip users that already exist in the system ───────────────────────
+      if (userId) {
+        updated[i] = { ...row, _status: "skipped", _error: "Already exists — skipped" };
+        setImportRows([...updated]);
+        continue;
+      }
 
       if (!userId) {
         // ── Create auth user via signUp ─────────────────────────────────────
@@ -1181,7 +1188,9 @@ export default function Users() {
                 <Upload className="h-4 w-4" /> Choose CSV File
               </Button>
               {importRows.length > 0 && (
-                <span className="text-sm text-muted-foreground">{importRows.length} row{importRows.length !== 1 ? "s" : ""} ready to import</span>
+                <span className="text-sm text-muted-foreground">
+                  {importRows.length} row{importRows.length !== 1 ? "s" : ""} detected
+                </span>
               )}
             </div>
 
@@ -1239,7 +1248,8 @@ export default function Users() {
                     {importRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
                         <td className="px-3 py-2 min-w-[120px]">
-                          {row._status === "ok"    && <span className="text-emerald-600 font-medium">✓ Done</span>}
+                          {row._status === "ok"      && <span className="text-emerald-600 font-medium">✓ Done</span>}
+                          {row._status === "skipped" && <span className="text-amber-500 font-medium">⟳ Skipped (exists)</span>}
                           {row._status === "error" && (
                             <div>
                               <span className="text-destructive font-medium">✗ Error</span>
@@ -1273,13 +1283,13 @@ export default function Users() {
             <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importLoading}>Cancel</Button>
             <Button
               onClick={handleImportSubmit}
-              disabled={importRows.length === 0 || importLoading || importRows.every(r => r._status === "ok")}
+              disabled={importRows.length === 0 || importLoading || importRows.every(r => r._status === "ok" || r._status === "skipped")}
             >
               {importLoading
-                ? `Importing… ${importRows.filter(r => r._status === "ok").length}/${importRows.length}`
-                : importRows.every(r => r._status === "ok")
-                  ? "All Imported"
-                  : `Import ${importRows.filter(r => r._status !== "ok").length} Users`}
+                ? `Importing… ${importRows.filter(r => r._status === "ok").length}/${importRows.filter(r => r._status !== "skipped").length}`
+                : importRows.every(r => r._status === "ok" || r._status === "skipped")
+                  ? `Done — ${importRows.filter(r => r._status === "ok").length} imported, ${importRows.filter(r => r._status === "skipped").length} skipped`
+                  : `Import ${importRows.filter(r => r._status !== "ok" && r._status !== "skipped").length} New Users`}
             </Button>
           </DialogFooter>
         </DialogContent>
