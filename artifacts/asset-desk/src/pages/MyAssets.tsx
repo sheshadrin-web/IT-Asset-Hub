@@ -19,10 +19,18 @@ export default function MyAssets() {
   const { currentUser }  = useAuth();
   const { assets, loading } = useAssets();
 
-  const myAssets = assets.filter(a =>
-    (a.assignedTo && a.assignedTo === currentUser?.name) ||
-    (a.assignedEmail && a.assignedEmail === currentUser?.email)
-  );
+  // Supabase RLS already restricts end-users to only their own assets,
+  // so for end-users the full 'assets' array IS their assets.
+  // For other roles (admins/agents viewing /my-assets — shouldn't normally
+  // happen but handled gracefully), fall back to email matching.
+  const myAssets = currentUser?.role === "end_user"
+    ? assets
+    : assets.filter(a =>
+        (a.assignedEmail && currentUser?.email &&
+          a.assignedEmail.toLowerCase() === currentUser.email.toLowerCase()) ||
+        (a.assignedTo && currentUser?.name &&
+          a.assignedTo.toLowerCase() === currentUser.name.toLowerCase())
+      );
 
   return (
     <div className="space-y-5">
