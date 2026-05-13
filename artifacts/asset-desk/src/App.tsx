@@ -87,9 +87,9 @@ function Router() {
 
   return (
     <Switch>
-      {/* Public — diagnostic page, no auth required */}
+      {/* Diagnostic page — requires login to prevent public exposure of system info */}
       <Route path="/supabase-check">
-        <SupabaseCheck />
+        <ProtectedRoute component={SupabaseCheck} />
       </Route>
 
       {/* Public */}
