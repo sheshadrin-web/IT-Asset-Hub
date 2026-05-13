@@ -31,8 +31,19 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     vendor:          row.vendor           ? String(row.vendor)           : undefined,
     invoice:         row.invoice          ? String(row.invoice)          : undefined,
     status:          (row.status as AssetStatus) ?? "Available",
-    assignedTo:    row.assigned_to_name ? String(row.assigned_to_name) : undefined,
-    assignedEmail: row.assigned_email   ? String(row.assigned_email)  : undefined,
+    assignedTo:    row.assigned_to_name
+      ? String(row.assigned_to_name)
+      : (row.profiles as Record<string, unknown> | null)?.full_name
+        ? String((row.profiles as Record<string, unknown>).full_name)
+        : undefined,
+    assignedEmail: row.assigned_email
+      ? String(row.assigned_email)
+      : (row.profiles as Record<string, unknown> | null)?.email
+        ? String((row.profiles as Record<string, unknown>).email)
+        : undefined,
+    assignedEcode: (row.profiles as Record<string, unknown> | null)?.ecode
+      ? String((row.profiles as Record<string, unknown>).ecode)
+      : undefined,
     department:      row.department       ? String(row.department)       : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
@@ -68,8 +79,10 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
     vendor:            data.vendor           ?? null,
     invoice:           data.invoice          ?? null,
     status:            data.status,
-    assigned_to:    null,
-    assigned_email: data.assignedEmail ?? null,
+    // NOTE: assigned_to / assigned_email / assigned_to_name are intentionally
+    // excluded here. Assignment state is managed exclusively by assignAsset,
+    // unassignAsset, and returnAsset. Sending assigned_to: null from every
+    // edit would silently clear the assignment.
     department:        data.department       ?? null,
     location:          data.location,
     accessories:       data.accessories      ?? "",
@@ -103,7 +116,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const { data, error } = await supabase
       .from("assets")
-      .select("*")
+      .select("*, profiles!assets_assigned_to_fkey(full_name, email, ecode)")
       .order("created_at", { ascending: false });
     if (!error && data) setAssets(data.map(mapFromDB));
     setLoading(false);
@@ -124,16 +137,12 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const addAssets = async (dataList: Omit<Asset, "id">[]): Promise<Asset[]> => {
-    const created: Asset[] = [];
-    for (const data of dataList) {
-      const row = mapToDB(data);
-      const { data: inserted, error } = await supabase
-        .from("assets").insert(row).select().single();
-      if (!error && inserted) {
-        const a = mapFromDB(inserted as Record<string, unknown>);
-        created.push(a);
-      }
-    }
+    if (dataList.length === 0) return [];
+    const rows = dataList.map(mapToDB);
+    const { data: inserted, error } = await supabase
+      .from("assets").insert(rows).select();
+    if (error) throw new Error(error.message);
+    const created = (inserted ?? []).map(r => mapFromDB(r as Record<string, unknown>));
     await fetchAssets();
     return created;
   };
@@ -157,7 +166,9 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
-    // Update remarks separately — non-fatal if column doesn't exist yet
+    // Persist display name — non-fatal if column doesn't exist yet in the DB.
+    // Run: ALTER TABLE assets ADD COLUMN IF NOT EXISTS assigned_to_name TEXT;
+    await supabase.from("assets").update({ assigned_to_name: userName }).eq("asset_id", assetId);
     if (handoverNote) {
       await supabase.from("assets").update({ remarks: handoverNote }).eq("asset_id", assetId);
     }
@@ -170,7 +181,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
 
   const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
     const coreUpdates: Record<string, unknown> = {
-      status: finalStatus, assigned_to: null, assigned_email: null,
+      status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -193,7 +204,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const unassignAsset = async (assetId: string): Promise<void> => {
     const { error } = await supabase
       .from("assets")
-      .update({ status: "Available", assigned_to: null, assigned_email: null, department: null })
+      .update({ status: "Available", assigned_to: null, assigned_email: null, assigned_to_name: null, department: null })
       .eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a =>
