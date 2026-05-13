@@ -122,7 +122,17 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Fetch once on mount, then re-fetch whenever auth session changes (so end
+  // users — whose RLS-filtered view depends on having a valid JWT — always see
+  // their own assets even if the session was not yet hydrated on first render.
   useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  useEffect(() => {
+    if (!supabaseConfigured) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) fetchAssets();
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchAssets]);
 
   const getAsset = (id: string) => assets.find(a => a.assetId === id);
 
