@@ -49,13 +49,16 @@ export default function RaiseTicket() {
   const [subcategories, setSubcategories] = useState<string[]>([]);
   const [submitting, setSubmitting]       = useState(false);
 
-  const isEndUser      = currentUser?.role === "end_user";
+  const isEndUser = currentUser?.role === "end_user";
+  // For end-users, Supabase RLS already restricts the assets context to only
+  // their own assigned assets, so no client-side filtering is needed.
+  // For admins/agents raising a ticket on behalf of themselves, match by email.
   const availableAssets = isEndUser
-    ? assets.filter(a =>
-        (a.assignedTo && a.assignedTo === currentUser?.name) ||
-        (a.assignedEmail && a.assignedEmail === currentUser?.email)
-      )
-    : assets;
+    ? assets
+    : assets.filter(a =>
+        (a.assignedEmail && currentUser?.email &&
+          a.assignedEmail.toLowerCase() === currentUser.email.toLowerCase())
+      );
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
