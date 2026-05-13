@@ -244,3 +244,38 @@ ALTER TABLE profiles ADD CONSTRAINT profiles_status_check
 --
 -- 3. Redeploy on Render after the code changes are pushed to GitHub.
 -- ──────────────────────────────────────────────────────────
+
+
+-- ──────────────────────────────────────────────────────────
+-- SECTION X — Asset Assignment History Table
+-- Run once in Supabase SQL editor to enable history tracking.
+-- ──────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.asset_assignment_history (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  asset_id      TEXT NOT NULL,
+  asset_name    TEXT,
+  user_id       UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  user_name     TEXT,
+  user_email    TEXT,
+  user_ecode    TEXT,
+  department    TEXT,
+  event_type    TEXT NOT NULL CHECK (event_type IN ('assigned', 'returned', 'unassigned')),
+  event_by      UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  event_by_name TEXT,
+  notes         TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.asset_assignment_history ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "assignment_history_select" ON public.asset_assignment_history;
+DROP POLICY IF EXISTS "assignment_history_insert" ON public.asset_assignment_history;
+
+CREATE POLICY "assignment_history_select" ON public.asset_assignment_history
+  FOR SELECT TO authenticated
+  USING (current_user_role() IN ('super_admin', 'it_admin', 'it_agent'));
+
+CREATE POLICY "assignment_history_insert" ON public.asset_assignment_history
+  FOR INSERT TO authenticated
+  WITH CHECK (current_user_role() IN ('super_admin', 'it_admin'));
