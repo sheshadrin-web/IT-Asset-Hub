@@ -41,7 +41,7 @@ const PRIORITY_OPTIONS: {
 ];
 
 export default function RaiseTicket() {
-  const { currentUser }  = useAuth();
+  const { currentUser, supabaseUser } = useAuth();
   const { assets }       = useAssets();
   const { addTicket }    = useTickets();
   const [, setLocation]  = useLocation();
@@ -72,12 +72,13 @@ export default function RaiseTicket() {
   };
 
   const onSubmit = async (values: FormValues) => {
-    if (!currentUser) return;
+    if (!currentUser || !supabaseUser) return;
     setSubmitting(true);
     try {
       const ticket = await addTicket({
-        raisedBy:      currentUser.name,
-        employeeEmail: currentUser.email,
+        raisedBy:       currentUser.name,
+        raisedByUserId: supabaseUser.id,   // UUID FK for raised_by column
+        employeeEmail:  currentUser.email,
         assetId:       values.assetId,
         category:      values.category,
         subcategory:   values.subcategory,
