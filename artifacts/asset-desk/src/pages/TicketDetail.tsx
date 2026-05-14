@@ -85,6 +85,17 @@ export default function TicketDetail() {
   const agents = users.filter(u => u.role === "it_agent" || u.role === "super_admin" || u.role === "it_admin");
   const linkedAsset = ticket?.assetId && ticket.assetId !== "N/A" ? getAsset(ticket.assetId) : null;
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const resolveAgentDisplay = (): string => {
+    const raw = ticket?.assignedAgentId ?? ticket?.assignedAgent ?? "";
+    if (UUID_RE.test(raw)) {
+      const u = users.find(x => x.id === raw);
+      if (u) return [u.ecode, u.full_name].filter(Boolean).join(" · ");
+      return "";
+    }
+    return raw;
+  };
+
   const effectiveStatus     = (draftStatus     || ticket?.status)     as TicketStatus;
   const effectivePriority   = (draftPriority   || ticket?.priority)   as TicketPriority;
   const effectiveAgent      = draftAgent !== "" ? draftAgent : (ticket?.assignedAgentId ?? "");
@@ -506,10 +517,10 @@ export default function TicketDetail() {
                   <span className="text-muted-foreground">Priority</span>
                   <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[ticket.priority])}>{ticket.priority}</span>
                 </div>
-                {ticket.assignedAgent && (
+                {resolveAgentDisplay() && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Agent</span>
-                    <span className="font-medium text-foreground">{ticket.assignedAgent}</span>
+                    <span className="font-medium text-foreground">{resolveAgentDisplay()}</span>
                   </div>
                 )}
                 {ticket.resolutionNote && (
