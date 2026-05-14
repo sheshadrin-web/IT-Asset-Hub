@@ -110,21 +110,22 @@ export interface TicketComment {
 }
 
 export interface Ticket {
-  id?:            string;
-  ticketId:       string;
-  raisedBy:       string;
-  employeeEmail?: string;
-  assetId:        string;
-  category:       string;
-  subcategory:    string;
-  priority:       TicketPriority;
-  status:         TicketStatus;
-  assignedAgent:  string;
-  description:    string;
-  createdDate:    string;
-  updatedDate:    string;
-  resolutionNote: string;
-  comments:       TicketComment[];
+  id?:              string;
+  ticketId:         string;
+  raisedBy:         string;
+  employeeEmail?:   string;
+  assetId:          string;
+  category:         string;
+  subcategory:      string;
+  priority:         TicketPriority;
+  status:           TicketStatus;
+  assignedAgent:    string;   // display name (resolved from profiles join)
+  assignedAgentId?: string;   // UUID FK — used for DB writes
+  description:      string;
+  createdDate:      string;
+  updatedDate:      string;
+  resolutionNote:   string;
+  comments:         TicketComment[];
 }
 
 // ─── Ticket categories ────────────────────────────────────────────────────────
