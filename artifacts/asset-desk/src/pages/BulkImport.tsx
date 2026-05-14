@@ -99,10 +99,16 @@ function findCol(headers: string[], field: string): string | undefined {
 }
 
 // ─── Value mapping ────────────────────────────────────────────────────────────
-function mapAssetType(raw: string): AssetType {
+function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
   const v = raw.toLowerCase().trim();
   if (v.includes("desk")) return "Desktop";
   if (v.includes("mob") || v.includes("phone") || v.includes("tab")) return "Mobile";
+  if (v && !v.includes("lap")) return "Laptop"; // explicit non-empty type that didn't match above
+
+  // Infer from asset ID prefix when type column is missing or ambiguous
+  const aid = assetIdFallback.toUpperCase();
+  if (/-MOB-|-PHN-|-TAB-/.test(aid)) return "Mobile";
+  if (/-DES-|-DSK-/.test(aid)) return "Desktop";
   return "Laptop";
 }
 
@@ -313,7 +319,7 @@ export default function BulkImport() {
         return {
           rowNum:          idx + 2,
           assetId,
-          assetType:       mapAssetType(get(row, "assetType")),
+          assetType:       mapAssetType(get(row, "assetType"), assetId),
           brand,
           model:           model || brand,
           serialNumber:    get(row, "serialNumber"),
