@@ -7,10 +7,14 @@ import { Ticket, TicketComment, TicketPriority, TicketStatus } from "@/data/mock
 function mapFromDB(row: Record<string, unknown>): Ticket {
   const createdAt = String(row.created_at ?? "");
   const updatedAt = String(row.updated_at ?? "");
+  // raised_by is a UUID FK — join profiles!tickets_raised_by_fkey to get name.
+  const raisedByProfile = row.profiles as Record<string, unknown> | null;
   return {
     id:             String(row.id ?? ""),
     ticketId:       String(row.ticket_id ?? ""),
-    raisedBy:       String(row.raised_by ?? ""),
+    raisedBy:       raisedByProfile?.full_name
+                      ? String(raisedByProfile.full_name)
+                      : String(row.raised_by ?? ""),
     employeeEmail:  row.employee_email ? String(row.employee_email) : undefined,
     // assets(asset_id) join resolves the UUID FK back to the human-readable
     // string ID (e.g. "MILES-LAP-627") so display code needs no changes.
@@ -42,7 +46,8 @@ function nextTicketId(existing: Ticket[]): string {
 
 // ─── Context shape ────────────────────────────────────────────────────────────
 interface AddTicketInput {
-  raisedBy:      string;
+  raisedBy:       string;   // display name (stored client-side only)
+  raisedByUserId: string;   // Supabase auth UUID — sent to raised_by UUID FK column
   employeeEmail?: string;
   assetId:       string;
   category:      string;
@@ -74,7 +79,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const { data, error } = await supabase
       .from("tickets")
-      .select("*, assets(asset_id)")
+      .select("*, assets(asset_id), profiles!tickets_raised_by_fkey(full_name)")
       .order("created_at", { ascending: false });
     if (!error && data) setTickets(data.map(mapFromDB));
     setLoading(false);
@@ -98,7 +103,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const row = {
       ticket_id:      ticketId,
-      raised_by:      data.raisedBy,
+      raised_by:      data.raisedByUserId,   // UUID FK to profiles
       employee_email: data.employeeEmail ?? null,
       asset_id:       (data.assetId === "N/A" || !data.assetId) ? null : data.assetId,
       category:       data.category,
