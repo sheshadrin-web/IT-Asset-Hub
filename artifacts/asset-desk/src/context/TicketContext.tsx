@@ -2,6 +2,22 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Ticket, TicketComment, TicketPriority, TicketStatus } from "@/data/mockData";
 
+// ─── Case normalizers (DB stores lowercase, app uses title-case) ──────────────
+const PRIORITY_MAP: Record<string, TicketPriority> = {
+  low: "Low", medium: "Medium", high: "High", critical: "Critical",
+};
+const STATUS_MAP: Record<string, TicketStatus> = {
+  open: "Open", assigned: "Assigned", "in progress": "In Progress",
+  "waiting for user": "Waiting for User", resolved: "Resolved",
+  closed: "Closed", rejected: "Rejected",
+};
+function normPriority(v: unknown): TicketPriority {
+  return PRIORITY_MAP[String(v ?? "").toLowerCase()] ?? "Medium";
+}
+function normStatus(v: unknown): TicketStatus {
+  return STATUS_MAP[String(v ?? "").toLowerCase()] ?? "Open";
+}
+
 // ─── DB row → App model ───────────────────────────────────────────────────────
 // RLS policies on the "tickets" table control who can read/write rows.
 function mapFromDB(row: Record<string, unknown>): Ticket {
@@ -25,8 +41,8 @@ function mapFromDB(row: Record<string, unknown>): Ticket {
     })(),
     category:       String(row.category ?? ""),
     subcategory:    String(row.subcategory ?? ""),
-    priority:       (row.priority as TicketPriority) ?? "Medium",
-    status:         (row.status as TicketStatus) ?? "Open",
+    priority:       normPriority(row.priority),
+    status:         normStatus(row.status),
     assignedAgent:  String(row.assigned_agent ?? ""),
     description:    String(row.description ?? ""),
     createdDate:    createdAt ? createdAt.split("T")[0] : new Date().toISOString().split("T")[0],
@@ -108,8 +124,8 @@ export function TicketProvider({ children }: { children: ReactNode }) {
       asset_id:       (data.assetId === "N/A" || !data.assetId) ? null : data.assetId,
       category:       data.category,
       subcategory:    data.subcategory,
-      priority:       data.priority,
-      status:         "Open",
+      priority:       data.priority.toLowerCase(),
+      status:         "open",
       // assigned_agent and resolution_note: omit from INSERT so the DB default is used.
       // Do NOT send "" — if the live column is UUID type, an empty string causes:
       //   "invalid input syntax for type uuid: """
@@ -130,8 +146,8 @@ export function TicketProvider({ children }: { children: ReactNode }) {
 
   const updateTicket = async (ticketId: string, updates: Partial<Ticket>): Promise<void> => {
     const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (updates.status         !== undefined) dbUpdates.status          = updates.status;
-    if (updates.priority       !== undefined) dbUpdates.priority        = updates.priority;
+    if (updates.status         !== undefined) dbUpdates.status          = updates.status.toLowerCase().replace(/ /g, " ");
+    if (updates.priority       !== undefined) dbUpdates.priority        = updates.priority.toLowerCase();
     if (updates.assignedAgent  !== undefined) dbUpdates.assigned_agent  = updates.assignedAgent;
     if (updates.resolutionNote !== undefined) dbUpdates.resolution_note = updates.resolutionNote;
 
