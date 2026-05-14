@@ -78,6 +78,8 @@ const COL_ALIASES: Record<string, string[]> = {
   brand:           ["brand","brandmodel","make","brandname","manufacturer"],
   model:           ["model","modelname","modelno","modelversion","modelnum"],
   serialNumber:    ["serialnumber","serialno","serial","srnumber","serialnum","serialid","sn","snno"],
+  imei1:           ["imei1","imei","imeinumber","imeino","imei1number","imei1no","imeinumber1","phoneid"],
+  imei2:           ["imei2","imei2number","imei2no","imeinumber2","imei2id"],
   operatingSystem: ["os","operatingsystem","ostype","osname","operatingsystemos"],
   processor:       ["config","processor","configuration","cpu","processorconfig","proc","processortype","specification"],
   ram:             ["ram","memory","ramgb","ramsize"],
@@ -100,15 +102,17 @@ function findCol(headers: string[], field: string): string | undefined {
 
 // ─── Value mapping ────────────────────────────────────────────────────────────
 function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
-  const v = raw.toLowerCase().trim();
-  if (v.includes("desk")) return "Desktop";
-  if (v.includes("mob") || v.includes("phone") || v.includes("tab")) return "Mobile";
-  if (v && !v.includes("lap")) return "Laptop"; // explicit non-empty type that didn't match above
-
-  // Infer from asset ID prefix when type column is missing or ambiguous
+  // Asset ID prefix is the most reliable signal — always check it first.
+  // This prevents a wrong or missing "Type" column from overriding the tag.
   const aid = assetIdFallback.toUpperCase();
   if (/-MOB-|-PHN-|-TAB-/.test(aid)) return "Mobile";
-  if (/-DES-|-DSK-/.test(aid)) return "Desktop";
+  if (/-DES-|-DSK-/.test(aid))        return "Desktop";
+  if (/-LAP-/.test(aid))              return "Laptop";
+
+  // Fall back to whatever the type column says
+  const v = raw.toLowerCase().trim();
+  if (v.includes("desk"))                                  return "Desktop";
+  if (v.includes("mob") || v.includes("phone") || v.includes("tab")) return "Mobile";
   return "Laptop";
 }
 
@@ -188,6 +192,8 @@ interface MappedRow {
   brand:           string;
   model:           string;
   serialNumber:    string;
+  imei1:           string;
+  imei2:           string;
   operatingSystem: string;
   processor:       string;
   ram:             string;
@@ -307,10 +313,19 @@ export default function BulkImport() {
         const errors: string[] = [];
         const warnings: string[] = [];
 
-        const assetId = get(row, "assetId");
+        const assetId   = get(row, "assetId");
+        const assetType = mapAssetType(get(row, "assetType"), assetId);
+        const isMobile  = assetType === "Mobile";
+
+        // For mobile/phone: use IMEI columns; for laptop/desktop: use serial number
+        const rawImei1  = get(row, "imei1") || (isMobile ? get(row, "serialNumber") : "");
+        const rawImei2  = get(row, "imei2");
+        const serialNumber = isMobile ? rawImei1 : get(row, "serialNumber");
+
         if (!assetId) errors.push("Asset ID / Tag is required");
         if (!brand)   errors.push("Brand is required");
-        if (!get(row, "serialNumber") && !get(row, "model")) warnings.push("Serial number missing");
+        if (isMobile && !rawImei1)     warnings.push("IMEI 1 missing");
+        else if (!isMobile && !serialNumber && !get(row, "model")) warnings.push("Serial number missing");
         if (!purchaseDate) warnings.push("Could not parse purchase date");
         if (status === "Assigned" && !matchedUser && (empCode || empName))
           warnings.push(`Employee "${empCode || empName}" not found in system — will store name only`);
@@ -319,10 +334,12 @@ export default function BulkImport() {
         return {
           rowNum:          idx + 2,
           assetId,
-          assetType:       mapAssetType(get(row, "assetType"), assetId),
+          assetType,
           brand,
           model:           model || brand,
-          serialNumber:    get(row, "serialNumber"),
+          serialNumber,
+          imei1:           rawImei1,
+          imei2:           rawImei2,
           operatingSystem: get(row, "operatingSystem"),
           processor:       get(row, "processor"),
           ram:             normSize(get(row, "ram")),
@@ -375,6 +392,7 @@ export default function BulkImport() {
         brand:             r.brand,
         model:             r.model,
         serial_number:     r.serialNumber || "",
+        notes:             (r.assetType === "Mobile" && r.imei2) ? `IMEI 2: ${r.imei2}` : null,
         processor:         r.processor   || null,
         ram:               r.ram         || null,
         operating_system:  r.operatingSystem || null,
@@ -570,7 +588,7 @@ export default function BulkImport() {
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Asset Tag</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Type</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Brand / Model</th>
-                      <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Serial</th>
+                      <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Serial / IMEI</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Location</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Status</th>
                       <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground">Assigned To</th>
@@ -593,7 +611,16 @@ export default function BulkImport() {
                           <span className="font-medium">{row.brand}</span>
                           {row.model && row.model !== row.brand && <span className="text-muted-foreground"> {row.model}</span>}
                         </td>
-                        <td className="px-3 py-2 font-mono text-muted-foreground">{row.serialNumber || "—"}</td>
+                        <td className="px-3 py-2 font-mono text-muted-foreground text-xs">
+                          {row.assetType === "Mobile" ? (
+                            <div className="space-y-0.5">
+                              {row.imei1
+                                ? <div><span className="text-foreground/50">1:</span> {row.imei1}</div>
+                                : <span className="text-amber-500 not-italic font-sans">IMEI missing</span>}
+                              {row.imei2 && <div className="opacity-60"><span className="text-foreground/50">2:</span> {row.imei2}</div>}
+                            </div>
+                          ) : (row.serialNumber || "—")}
+                        </td>
                         <td className="px-3 py-2">{row.location}</td>
                         <td className="px-3 py-2">
                           <Badge variant="outline" className={cn("text-[10px] border font-medium", {
