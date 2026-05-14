@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
@@ -8,6 +8,8 @@ import {
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -52,12 +54,35 @@ const roleBadgeColors: Record<UserRole, string> = {
   end_user:    "bg-emerald-100 text-emerald-700 border-emerald-200",
 };
 
+function playBellSound() {
+  try {
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+    // Warm bell tone — two harmonics fading out
+    [880, 1320].forEach((freq, i) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.95, now + 1.2);
+      gain.gain.setValueAtTime(i === 0 ? 0.45 : 0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+      osc.start(now);
+      osc.stop(now + 1.8);
+    });
+  } catch { /* AudioContext blocked in some environments */ }
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen,       setSidebarOpen]       = useState(false);
   const [profileOpen,       setProfileOpen]       = useState(false);
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
+  const [notifCount,        setNotifCount]        = useState(0);
   const [location]                                = useLocation();
   const { currentUser, signOut }                  = useAuth();
+  const { toast }                                 = useToast();
   const profileRef                                = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -69,6 +94,31 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Real-time new-ticket notification — admins only
+  const isAdmin = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+  const handleNewTicket = useCallback((payload: Record<string, unknown>) => {
+    const row = payload.new as Record<string, string> | undefined;
+    playBellSound();
+    setNotifCount(n => n + 1);
+    toast({
+      title: "New ticket raised",
+      description: `${row?.ticket_id ?? "A new ticket"} — ${row?.category ?? ""}`,
+    });
+  }, [toast]);
+
+  useEffect(() => {
+    if (!isAdmin || !supabaseConfigured) return;
+    const channel = supabase
+      .channel("layout-new-tickets")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "tickets" },
+        handleNewTicket,
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isAdmin, handleNewTicket]);
 
   if (!currentUser) return null;
 
@@ -163,8 +213,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="relative" data-testid="button-notifications">
+            <Button
+              variant="ghost" size="icon" className="relative"
+              data-testid="button-notifications"
+              onClick={() => setNotifCount(0)}
+            >
               <Bell className="h-4 w-4" />
+              {notifCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white leading-none">
+                  {notifCount > 9 ? "9+" : notifCount}
+                </span>
+              )}
             </Button>
 
             {/* Profile dropdown */}
