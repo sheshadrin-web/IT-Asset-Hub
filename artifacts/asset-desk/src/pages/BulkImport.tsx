@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import {
   ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle,
   AlertCircle, Download, Info, Loader2, X, UserCheck,
+  Monitor, Smartphone, Server,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -213,41 +214,73 @@ interface MappedRow {
   errors:          string[];
 }
 
-// ─── Google Sheet template ─────────────────────────────────────────────────────
-const GS_TEMPLATE_HEADERS = [
-  "Asset Tag","Type","Brand","Model","Serial Number","Location",
-  "OS","Config","RAM","ROM","Purchase Year","Warranty",
-  "Asset Condition","Asset Status","Ownership",
-  "Employee Name","Employee Code","Employee Department",
-].join(",");
-const GS_TEMPLATE_ROWS = [
-  "MILES-R-LAP-001,Laptop,Lenovo,ThinkPad T16,SN12345,Mumbai,Windows,i7,32,512,2025,Under Warranty,Good,Assigned,C Prompt Solutions,John Doe,MPE1234,Miles GCC Tax",
-  "MILES-R-LAP-002,Laptop,Dell,Latitude 5540,SN12346,Mumbai,Windows,i5,16,256,2024,Under Warranty,Good,Available,C Prompt Solutions,,,",
-  "MILES-R-DSK-001,Desktop,Dell,OptiPlex 7090,SN12347,Bangalore,Windows,i7,32,512,2023,Expired,Fair,Under Repair,All Time Support,,,",
-];
-function downloadTemplate() {
-  const csv = [GS_TEMPLATE_HEADERS, ...GS_TEMPLATE_ROWS].join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = "asset_import_template.csv";
+// ─── Type-specific templates ──────────────────────────────────────────────────
+const TEMPLATES: Record<AssetType, { headers: string[]; rows: string[]; filename: string }> = {
+  Laptop: {
+    filename: "laptop_import_template.csv",
+    headers: ["Asset Tag","Brand","Model","Serial Number","Location","OS","Config","RAM","ROM","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"],
+    rows: [
+      "MILES-LAP-001,Lenovo,ThinkPad T16,SN12345,Mumbai,Windows,Intel i7 13th Gen,32,512,2025,Under Warranty,Good,Assigned,C Prompt Solutions,John Doe,MPE1234,Miles GCC Tax",
+      "MILES-LAP-002,Dell,Latitude 5540,SN12346,Bangalore,Windows,Intel i5 12th Gen,16,256,2024,Under Warranty,Good,Available,,,,",
+      "MILES-LAP-003,HP,EliteBook 845 G9,SN12347,Hyderabad,Windows,AMD Ryzen 5,16,512,2023,Expired,Fair,Under Repair,,,,",
+    ],
+  },
+  Mobile: {
+    filename: "mobile_import_template.csv",
+    headers: ["Asset Tag","Brand","Model","IMEI 1","IMEI 2","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"],
+    rows: [
+      "MILES-MOB-001,Samsung,Galaxy S24,354812345678901,354812345678902,Mumbai,2024,Under Warranty,Assigned,John Doe,MPE1234,Miles GCC Tax",
+      "MILES-MOB-002,Apple,iPhone 15,356789012345678,,Bangalore,2025,Under Warranty,Available,,,,",
+      "MILES-MOB-003,OnePlus,12R,352345678901234,,Hyderabad,2023,Expired,Available,,,,",
+    ],
+  },
+  Desktop: {
+    filename: "desktop_import_template.csv",
+    headers: ["Asset Tag","Brand","Model","Serial Number","Location","OS","Config","RAM","ROM","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"],
+    rows: [
+      "MILES-DES-001,Dell,OptiPlex 7090,SN22345,Mumbai,Windows,Intel i7 11th Gen,32,512,2023,Under Warranty,Good,Assigned,C Prompt Solutions,Jane Smith,MPE5678,Finance",
+      "MILES-DES-002,HP,EliteDesk 800 G9,SN22346,Bangalore,Windows,Intel i5 12th Gen,16,256,2024,Under Warranty,Good,Available,,,,",
+      "MILES-DES-003,Lenovo,ThinkCentre M90q,SN22347,Hyderabad,Windows,Intel i9 12th Gen,64,1024,2022,Expired,Fair,Under Repair,,,,",
+    ],
+  },
+};
+function downloadTemplate(type: AssetType) {
+  const t   = TEMPLATES[type];
+  const csv = [t.headers.join(","), ...t.rows].join("\n");
+  const a   = document.createElement("a");
+  a.href    = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = t.filename;
   a.click();
 }
 
+// ─── Asset type selection cards ───────────────────────────────────────────────
+const TYPE_CARDS: { type: AssetType; Icon: React.ElementType; color: string; ring: string; desc: string }[] = [
+  { type: "Laptop",  Icon: Monitor,    color: "bg-blue-50 text-blue-600 border-blue-200",    ring: "ring-blue-400",   desc: "Laptops & notebooks — MILES-LAP-* tags" },
+  { type: "Mobile",  Icon: Smartphone, color: "bg-purple-50 text-purple-600 border-purple-200", ring: "ring-purple-400", desc: "Phones & tablets — MILES-MOB-* tags, IMEI columns" },
+  { type: "Desktop", Icon: Server,     color: "bg-amber-50 text-amber-600 border-amber-200",  ring: "ring-amber-400",  desc: "Desktops & workstations — MILES-DES-* tags" },
+];
+
 // ─── Component ────────────────────────────────────────────────────────────────
-type Step = "upload" | "preview" | "importing" | "done";
+type Step = "select" | "upload" | "preview" | "importing" | "done";
 
 export default function BulkImport() {
   const { refresh } = useAssets();
   const { users }   = useUsers();
   const { toast }   = useToast();
 
-  const [step,        setStep]        = useState<Step>("upload");
-  const [file,        setFile]        = useState<File | null>(null);
-  const [dragOver,    setDragOver]    = useState(false);
-  const [mappedRows,  setMappedRows]  = useState<MappedRow[]>([]);
-  const [progress,    setProgress]    = useState(0);
-  const [results,     setResults]     = useState({ success: 0, failed: 0, skipped: 0 });
+  const [step,             setStep]            = useState<Step>("select");
+  const [assetTypeFilter,  setAssetTypeFilter] = useState<AssetType | null>(null);
+  const [file,             setFile]            = useState<File | null>(null);
+  const [dragOver,         setDragOver]        = useState(false);
+  const [mappedRows,       setMappedRows]      = useState<MappedRow[]>([]);
+  const [progress,         setProgress]        = useState(0);
+  const [results,          setResults]         = useState({ success: 0, failed: 0, skipped: 0 });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const resetToSelect = () => {
+    setStep("select"); setAssetTypeFilter(null);
+    setFile(null); setMappedRows([]);
+  };
 
   // ── Parse file ──────────────────────────────────────────────────────────────
   const processFile = useCallback((f: File) => {
@@ -324,6 +357,8 @@ export default function BulkImport() {
 
         if (!assetId) errors.push("Asset ID / Tag is required");
         if (!brand)   errors.push("Brand is required");
+        if (assetTypeFilter && assetType !== assetTypeFilter)
+          errors.push(`Wrong type: this is a ${assetType}, not a ${assetTypeFilter} — will be skipped`);
         if (isMobile && !rawImei1)     warnings.push("IMEI 1 missing");
         else if (!isMobile && !serialNumber && !get(row, "model")) warnings.push("Serial number missing");
         if (!purchaseDate) warnings.push("Could not parse purchase date");
@@ -363,7 +398,7 @@ export default function BulkImport() {
       setStep("preview");
     };
     reader.readAsText(f);
-  }, [users, toast]);
+  }, [users, toast, assetTypeFilter]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
@@ -450,27 +485,85 @@ export default function BulkImport() {
       </div>
 
       {/* Step progress */}
-      <div className="flex items-center gap-2 text-sm">
-        {(["upload","preview","done"] as const).map((s, idx) => (
-          <div key={s} className="flex items-center gap-2">
-            {idx > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-            <span className={cn("font-medium capitalize",
-              step === s || (step === "importing" && s === "preview")
-                ? "text-primary"
-                : step === "done" || (step !== "upload" && idx === 0)
-                  ? "text-muted-foreground line-through"
-                  : "text-muted-foreground"
-            )}>
-              {idx + 1}. {s === "done" ? "Done" : s === "preview" ? "Review" : "Upload"}
-            </span>
-          </div>
-        ))}
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        {([
+          { key: "select",  label: "Select Type" },
+          { key: "upload",  label: "Upload" },
+          { key: "preview", label: "Review" },
+          { key: "done",    label: "Done" },
+        ] as const).map(({ key, label }, idx) => {
+          const stepOrder = { select: 0, upload: 1, preview: 2, importing: 2, done: 3 };
+          const current   = stepOrder[step];
+          const mine      = stepOrder[key];
+          const active    = current === mine;
+          const past      = current > mine;
+          return (
+            <div key={key} className="flex items-center gap-2">
+              {idx > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+              <span className={cn("font-medium",
+                active ? "text-primary" : past ? "text-muted-foreground line-through" : "text-muted-foreground"
+              )}>
+                {idx + 1}. {label}
+              </span>
+            </div>
+          );
+        })}
       </div>
+
+      {/* ── STEP 0: Select Type ───────────────────────────────────────────────── */}
+      {step === "select" && (
+        <div className="space-y-5">
+          <p className="text-sm text-muted-foreground">Choose the type of assets you want to import in this batch. Each batch is for one asset type only.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {TYPE_CARDS.map(({ type, Icon, color, ring, desc }) => (
+              <button
+                key={type}
+                className={cn(
+                  "group relative flex flex-col items-start gap-4 rounded-xl border-2 bg-card p-5 text-left transition-all hover:border-primary hover:shadow-md focus:outline-none focus-visible:ring-2",
+                  ring
+                )}
+                onClick={() => { setAssetTypeFilter(type); setStep("upload"); }}
+              >
+                <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl border", color)}>
+                  <Icon className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-base font-semibold text-foreground">{type}s</p>
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{desc}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-1.5 mt-auto text-xs"
+                  onClick={e => { e.stopPropagation(); downloadTemplate(type); }}
+                >
+                  <Download className="h-3.5 w-3.5" /> Download template
+                </Button>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── STEP 1: Upload ────────────────────────────────────────────────────── */}
       {step === "upload" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2 space-y-4">
+            {/* Selected type banner */}
+            {assetTypeFilter && (() => {
+              const card = TYPE_CARDS.find(c => c.type === assetTypeFilter)!;
+              return (
+                <div className={cn("flex items-center justify-between rounded-lg border px-4 py-3", card.color)}>
+                  <div className="flex items-center gap-2">
+                    <card.Icon className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Importing: {assetTypeFilter}s only</span>
+                  </div>
+                  <button className="text-xs underline opacity-70 hover:opacity-100" onClick={resetToSelect}>
+                    Change type
+                  </button>
+                </div>
+              );
+            })()}
             {/* Drop zone */}
             <Card
               className={cn("border-2 border-dashed transition-colors cursor-pointer",
@@ -496,9 +589,11 @@ export default function BulkImport() {
               </CardContent>
             </Card>
 
-            <Button variant="outline" className="gap-2 w-full sm:w-auto" onClick={downloadTemplate}>
-              <Download className="h-4 w-4" /> Download sample template
-            </Button>
+            {assetTypeFilter && (
+              <Button variant="outline" className="gap-2 w-full sm:w-auto" onClick={() => downloadTemplate(assetTypeFilter)}>
+                <Download className="h-4 w-4" /> Download {assetTypeFilter} template
+              </Button>
+            )}
           </div>
 
           {/* Column guide */}
@@ -567,11 +662,21 @@ export default function BulkImport() {
             )}
           </div>
 
-          {/* File info */}
+          {/* File info + selected-type badge */}
           <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <FileText className="h-4 w-4" /> {file?.name}
-            </p>
+            <div className="flex items-center gap-3">
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <FileText className="h-4 w-4" /> {file?.name}
+              </p>
+              {assetTypeFilter && (() => {
+                const card = TYPE_CARDS.find(c => c.type === assetTypeFilter)!;
+                return (
+                  <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", card.color)}>
+                    <card.Icon className="h-3 w-3" /> {assetTypeFilter}s
+                  </span>
+                );
+              })()}
+            </div>
             <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={() => { setStep("upload"); setMappedRows([]); setFile(null); }}>
               <X className="h-3.5 w-3.5" /> Change file
             </Button>
@@ -674,7 +779,7 @@ export default function BulkImport() {
                 Back
               </Button>
               <Button onClick={handleImport} disabled={validRows.length === 0} className="gap-2">
-                Import {validRows.length} Asset{validRows.length !== 1 ? "s" : ""}
+                Import {validRows.length} {assetTypeFilter ?? ""} Asset{validRows.length !== 1 ? "s" : ""}
               </Button>
             </div>
           </div>
@@ -727,8 +832,8 @@ export default function BulkImport() {
               )}
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" onClick={() => { setStep("upload"); setFile(null); setMappedRows([]); }}>
-                Import another file
+              <Button variant="outline" onClick={resetToSelect}>
+                Import another type
               </Button>
               <Link href="/assets">
                 <Button>View all assets</Button>
