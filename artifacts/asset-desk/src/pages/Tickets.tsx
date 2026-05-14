@@ -22,7 +22,8 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTickets } from "@/context/TicketContext";
 import { useAuth } from "@/context/AuthContext";
-import { TicketStatus, TicketPriority } from "@/data/mockData";
+import { useUsers } from "@/context/UsersContext";
+import { TicketStatus, TicketPriority, Ticket } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -48,10 +49,25 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
   Rejected:           "bg-red-500/15 text-red-500 border-red-500/20",
 };
 
+// UUID pattern — used to detect when assignedAgent field still holds a raw UUID
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default function Tickets() {
   const { tickets, updateTicket, deleteTicket, deleteTickets } = useTickets();
-  const { currentUser } = useAuth();
+  const { currentUser, supabaseUser } = useAuth();
+  const { users } = useUsers();
   const { toast } = useToast();
+
+  // Resolve assigned agent UUID → "ECODE · Full Name" for display
+  const resolveAgent = (ticket: Ticket): string => {
+    const raw = ticket.assignedAgent || ticket.assignedAgentId || "";
+    if (!raw) return "";
+    if (UUID_RE.test(raw)) {
+      const u = users.find(x => x.id === raw);
+      return u ? [u.ecode, u.full_name].filter(Boolean).join(" · ") : raw;
+    }
+    return raw;
+  };
 
   const [search, setSearch]               = useState("");
   const [statusFilter, setStatusFilter]   = useState("all");
@@ -65,8 +81,13 @@ export default function Tickets() {
   const isAdmin   = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
   const isAgent   = currentUser?.role === "it_agent";
 
+  // For end users: match by email (authoritative) OR by display name (legacy).
+  // Using email prevents wrong results when two users share a name.
   const base = isEndUser
-    ? tickets.filter((t) => t.raisedBy === currentUser?.name)
+    ? tickets.filter((t) =>
+        (currentUser?.email && t.employeeEmail === currentUser.email) ||
+        t.raisedBy === currentUser?.name
+      )
     : tickets;
 
   const filtered = base.filter((t) => {
@@ -77,7 +98,7 @@ export default function Tickets() {
       t.raisedBy.toLowerCase().includes(q) ||
       t.category.toLowerCase().includes(q) ||
       t.assetId.toLowerCase().includes(q) ||
-      t.assignedAgent.toLowerCase().includes(q);
+      resolveAgent(t).toLowerCase().includes(q);
     const matchStatus   = statusFilter   === "all" || t.status   === statusFilter;
     const matchPriority = priorityFilter === "all" || t.priority === priorityFilter;
     return matchSearch && matchStatus && matchPriority;
@@ -109,7 +130,7 @@ export default function Tickets() {
   const handleAssignToSelf = async (ticketId: string) => {
     if (!currentUser) return;
     try {
-      await updateTicket(ticketId, { assignedAgent: currentUser.name, status: "Assigned" });
+      await updateTicket(ticketId, { assignedAgentId: supabaseUser?.id, status: "Assigned" });
       toast({ title: "Ticket assigned to you", description: ticketId });
     } catch {
       toast({ title: "Failed to assign", variant: "destructive" });
@@ -323,8 +344,8 @@ export default function Tickets() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {ticket.assignedAgent
-                          ? <span className="text-foreground">{ticket.assignedAgent}</span>
+                        {resolveAgent(ticket)
+                          ? <span className="text-foreground">{resolveAgent(ticket)}</span>
                           : <span className="text-muted-foreground/60 text-xs">Unassigned</span>}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{ticket.createdDate}</td>
@@ -341,7 +362,7 @@ export default function Tickets() {
                                 <Eye className="h-3.5 w-3.5 text-muted-foreground" /> View Details
                               </Link>
                             </DropdownMenuItem>
-                            {(isAgent || isAdmin) && !ticket.assignedAgent && (
+                            {(isAgent || isAdmin) && !ticket.assignedAgentId && !ticket.assignedAgent && (
                               <DropdownMenuItem onClick={() => handleAssignToSelf(ticket.ticketId)} className="flex items-center gap-2 cursor-pointer">
                                 <UserCheck className="h-3.5 w-3.5 text-blue-500" /> Assign to Me
                               </DropdownMenuItem>
