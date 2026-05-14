@@ -43,7 +43,11 @@ function mapFromDB(row: Record<string, unknown>): Ticket {
     subcategory:    String(row.subcategory ?? ""),
     priority:       normPriority(row.priority),
     status:         normStatus(row.status),
-    assignedAgent:  String(row.assigned_agent ?? ""),
+    assignedAgentId: String(row.assigned_agent ?? "") || undefined,
+    assignedAgent:  (() => {
+      const p = row.agent_profile as Record<string, unknown> | null;
+      return p?.full_name ? String(p.full_name) : "";
+    })(),
     description:    String(row.description ?? ""),
     createdDate:    createdAt ? createdAt.split("T")[0] : new Date().toISOString().split("T")[0],
     updatedDate:    updatedAt ? updatedAt.split("T")[0] : new Date().toISOString().split("T")[0],
@@ -62,14 +66,15 @@ function nextTicketId(existing: Ticket[]): string {
 
 // ─── Context shape ────────────────────────────────────────────────────────────
 interface AddTicketInput {
-  raisedBy:       string;   // display name (stored client-side only)
-  raisedByUserId: string;   // Supabase auth UUID — sent to raised_by UUID FK column
-  employeeEmail?: string;
-  assetId:       string;
-  category:      string;
-  subcategory:   string;
-  priority:      TicketPriority;
-  description:   string;
+  raisedBy:        string;   // display name (stored client-side only)
+  raisedByUserId:  string;   // Supabase auth UUID — sent to raised_by UUID FK column
+  employeeEmail?:  string;
+  assetId:         string;
+  category:        string;
+  subcategory:     string;
+  priority:        TicketPriority;
+  description:     string;
+  assignedAgentId?: string;  // UUID to pre-assign (e.g. Superadmin) at creation
 }
 
 interface TicketContextType {
@@ -95,7 +100,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const { data, error } = await supabase
       .from("tickets")
-      .select("*, assets(asset_id), profiles!tickets_raised_by_fkey(full_name)")
+      .select("*, assets(asset_id), profiles!tickets_raised_by_fkey(full_name), agent_profile:profiles!tickets_assigned_agent_fkey(full_name)")
       .order("created_at", { ascending: false });
     if (!error && data) setTickets(data.map(mapFromDB));
     setLoading(false);
@@ -125,9 +130,9 @@ export function TicketProvider({ children }: { children: ReactNode }) {
       category:       data.category,
       subcategory:    data.subcategory,
       priority:       data.priority.toLowerCase(),
-      status:         "open",
-      // assigned_agent and resolution_note: omit from INSERT so the DB default is used.
-      // Do NOT send "" — if the live column is UUID type, an empty string causes:
+      status:         data.assignedAgentId ? "assigned" : "open",
+      assigned_agent: data.assignedAgentId ?? null,
+      // Do NOT send "" for UUID columns — empty string causes:
       //   "invalid input syntax for type uuid: """
       description:    data.description,
       created_at:     now,
@@ -146,9 +151,9 @@ export function TicketProvider({ children }: { children: ReactNode }) {
 
   const updateTicket = async (ticketId: string, updates: Partial<Ticket>): Promise<void> => {
     const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (updates.status         !== undefined) dbUpdates.status          = updates.status.toLowerCase().replace(/ /g, " ");
-    if (updates.priority       !== undefined) dbUpdates.priority        = updates.priority.toLowerCase();
-    if (updates.assignedAgent  !== undefined) dbUpdates.assigned_agent  = updates.assignedAgent;
+    if (updates.status          !== undefined) dbUpdates.status          = updates.status.toLowerCase().replace(/ /g, " ");
+    if (updates.priority        !== undefined) dbUpdates.priority        = updates.priority.toLowerCase();
+    if (updates.assignedAgentId !== undefined) dbUpdates.assigned_agent  = updates.assignedAgentId || null;
     if (updates.resolutionNote !== undefined) dbUpdates.resolution_note = updates.resolutionNote;
 
     const { error } = await supabase
