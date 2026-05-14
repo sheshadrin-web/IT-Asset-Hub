@@ -5,7 +5,7 @@ import {
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
   ShoppingCart, PackageCheck, ClipboardCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,19 @@ import { useAuth } from "@/context/AuthContext";
 import { AssetStatus } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+
+interface HistoryRow {
+  id:           string;
+  user_name:    string | null;
+  user_email:   string | null;
+  user_ecode:   string | null;
+  department:   string | null;
+  event_type:   "assigned" | "returned" | "unassigned";
+  event_by_name:string | null;
+  notes:        string | null;
+  created_at:   string;
+}
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
@@ -75,6 +88,22 @@ export default function AssetDetail() {
 
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assignUserId,     setAssignUserId]      = useState("");
+  const [history,          setHistory]           = useState<HistoryRow[]>([]);
+  const [historyLoading,   setHistoryLoading]    = useState(false);
+
+  useEffect(() => {
+    if (!id || !supabaseConfigured) return;
+    setHistoryLoading(true);
+    supabase
+      .from("asset_assignment_history")
+      .select("id,user_name,user_email,user_ecode,department,event_type,event_by_name,notes,created_at")
+      .eq("asset_id", id)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        setHistory((data ?? []) as HistoryRow[]);
+        setHistoryLoading(false);
+      });
+  }, [id]);
 
   const asset          = getAsset(id);
   const relatedTickets = tickets.filter(t => t.assetId === id);
@@ -363,6 +392,63 @@ export default function AssetDetail() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Purchased</span><span className="font-medium">{asset.purchaseDate}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Expires</span><span className="font-medium">{asset.warrantyEndDate}</span></div>
+            </CardContent>
+          </Card>
+
+          {/* ── User History ──────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                User History
+                {history.length > 0 && (
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">{history.length} event{history.length !== 1 ? "s" : ""}</span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {historyLoading ? (
+                <p className="px-4 py-5 text-center text-xs text-muted-foreground">Loading…</p>
+              ) : history.length === 0 ? (
+                <p className="px-4 py-5 text-center text-xs text-muted-foreground">No assignment history yet.</p>
+              ) : (
+                <ol className="relative ml-4 border-l border-border pb-2">
+                  {history.map((row, i) => {
+                    const isAssigned  = row.event_type === "assigned";
+                    const isReturned  = row.event_type === "returned" || row.event_type === "unassigned";
+                    const dotClass    = isAssigned
+                      ? "bg-blue-500 ring-blue-100"
+                      : isReturned
+                      ? "bg-emerald-500 ring-emerald-100"
+                      : "bg-gray-400 ring-gray-100";
+                    const label       = isAssigned ? "Assigned" : isReturned ? "Returned" : row.event_type;
+                    const labelClass  = isAssigned
+                      ? "text-blue-600 bg-blue-50 border-blue-200"
+                      : isReturned
+                      ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+                      : "text-gray-500 bg-gray-50 border-gray-200";
+                    const displayName = [row.user_ecode, row.user_name].filter(Boolean).join(" · ") || row.user_email || "Unknown user";
+                    const date        = row.created_at
+                      ? new Date(row.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                      : "";
+                    return (
+                      <li key={row.id ?? i} className="ml-4 mb-4 last:mb-0">
+                        <span className={cn("absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full ring-4", dotClass)} />
+                        <div className="pl-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold", labelClass)}>{label}</span>
+                            <span className="text-xs text-muted-foreground">{date}</span>
+                          </div>
+                          <p className="mt-0.5 text-sm font-medium text-foreground leading-snug">{displayName}</p>
+                          {row.department && <p className="text-xs text-muted-foreground">{row.department}</p>}
+                          {row.user_email && row.user_name && <p className="text-xs text-muted-foreground">{row.user_email}</p>}
+                          {row.notes && <p className="mt-1 text-xs italic text-muted-foreground">"{row.notes}"</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
             </CardContent>
           </Card>
         </div>
