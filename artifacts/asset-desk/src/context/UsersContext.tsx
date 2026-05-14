@@ -38,6 +38,13 @@ export function UsersProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => {
+    if (!supabaseConfigured) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) fetchUsers();
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchUsers]);
 
   const updateUser = async (id: string, data: UpdateProfileInput): Promise<void> => {
     const { error } = await supabase
