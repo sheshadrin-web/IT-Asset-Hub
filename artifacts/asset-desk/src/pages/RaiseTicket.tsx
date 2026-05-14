@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
+import { useUsers } from "@/context/UsersContext";
 import { TICKET_CATEGORIES, TicketPriority } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ const PRIORITY_OPTIONS: {
 
 export default function RaiseTicket() {
   const { currentUser, supabaseUser } = useAuth();
+  const { users }                     = useUsers();
   const { assets }       = useAssets();
   const { addTicket }    = useTickets();
   const [, setLocation]  = useLocation();
@@ -75,15 +77,17 @@ export default function RaiseTicket() {
     if (!currentUser || !supabaseUser) return;
     setSubmitting(true);
     try {
+      const superAdmin = users.find(u => u.role === "super_admin");
       const ticket = await addTicket({
-        raisedBy:       currentUser.name,
-        raisedByUserId: supabaseUser.id,   // UUID FK for raised_by column
-        employeeEmail:  currentUser.email,
-        assetId:       values.assetId,
-        category:      values.category,
-        subcategory:   values.subcategory,
-        priority:      values.priority,
-        description:   values.description,
+        raisedBy:        currentUser.name,
+        raisedByUserId:  supabaseUser.id,   // UUID FK for raised_by column
+        employeeEmail:   currentUser.email,
+        assetId:         values.assetId,
+        category:        values.category,
+        subcategory:     values.subcategory,
+        priority:        values.priority,
+        description:     values.description,
+        assignedAgentId: superAdmin?.id,    // auto-assign to Superadmin on creation
       });
       toast({
         title:       "Ticket submitted",
