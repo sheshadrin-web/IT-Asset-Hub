@@ -62,7 +62,7 @@ export default function TicketDetail() {
   const { getTicket, updateTicket, addComment, deleteTicket } = useTickets();
   const { getAsset }    = useAssets();
   const { users }       = useUsers();
-  const { currentUser } = useAuth();
+  const { currentUser, supabaseUser } = useAuth();
   const { toast }       = useToast();
   const [, setLocation] = useLocation();
 
@@ -87,7 +87,7 @@ export default function TicketDetail() {
 
   const effectiveStatus     = (draftStatus     || ticket?.status)     as TicketStatus;
   const effectivePriority   = (draftPriority   || ticket?.priority)   as TicketPriority;
-  const effectiveAgent      = draftAgent !== "" ? draftAgent : (ticket?.assignedAgent ?? "");
+  const effectiveAgent      = draftAgent !== "" ? draftAgent : (ticket?.assignedAgentId ?? "");
   const effectiveResolution = draftResolution !== "" ? draftResolution : (ticket?.resolutionNote ?? "");
 
   // Agent status options — agents can only progress forward, not close/reject
@@ -98,10 +98,10 @@ export default function TicketDetail() {
     if (!ticket) return;
     try {
       await updateTicket(ticket.ticketId, {
-        status:         effectiveStatus,
-        priority:       effectivePriority,
-        assignedAgent:  effectiveAgent,
-        resolutionNote: effectiveResolution,
+        status:          effectiveStatus,
+        priority:        effectivePriority,
+        assignedAgentId: effectiveAgent || undefined,
+        resolutionNote:  effectiveResolution,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -124,6 +124,25 @@ export default function TicketDetail() {
       await addComment(ticket.ticketId, comment);
       setNewComment("");
       toast({ title: "Comment added" });
+
+      // Auto-reassign: if an IT Admin or IT Agent comments and the ticket is
+      // unassigned, OR assigned to Superadmin who hasn't commented yet,
+      // automatically transfer ownership to the responding agent.
+      const commenterIsAgent     = currentUser.role === "it_admin" || currentUser.role === "it_agent";
+      const superAdmin           = users.find(u => u.role === "super_admin");
+      const assignedToSuperadmin = ticket.assignedAgentId === superAdmin?.id;
+      const superadminCommented  = ticket.comments.some(c => c.role === "super_admin");
+      const shouldReassign       = commenterIsAgent && (
+        !ticket.assignedAgentId ||
+        (assignedToSuperadmin && !superadminCommented)
+      );
+      if (shouldReassign && supabaseUser?.id) {
+        await updateTicket(ticket.ticketId, {
+          assignedAgentId: supabaseUser.id,
+          status: (ticket.status === "Open" || ticket.status === "Assigned") ? "Assigned" : ticket.status,
+        });
+        setDraftAgent(supabaseUser.id);
+      }
     } catch (err) {
       toast({ title: "Failed to add comment", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     }
@@ -132,8 +151,8 @@ export default function TicketDetail() {
   const handleAssignToSelf = async () => {
     if (!ticket || !currentUser) return;
     try {
-      await updateTicket(ticket.ticketId, { assignedAgent: currentUser.name, status: "Assigned" });
-      setDraftAgent(currentUser.name);
+      await updateTicket(ticket.ticketId, { assignedAgentId: supabaseUser?.id, status: "Assigned" });
+      setDraftAgent(supabaseUser?.id ?? "");
       setDraftStatus("Assigned");
       toast({ title: "Assigned to you", description: ticket.ticketId });
     } catch (err) {
@@ -188,7 +207,16 @@ export default function TicketDetail() {
     );
   }
 
-  const isOwnTicket = ticket.raisedBy === currentUser?.name;
+  // Match by email (authoritative) or name (legacy) — same logic as the ticket list filter.
+  const isOwnTicket =
+    (currentUser?.email && ticket.employeeEmail === currentUser.email) ||
+    ticket.raisedBy === currentUser?.name;
+
+  // Security: end users may only view their own tickets.
+  if (isEndUser && !isOwnTicket) {
+    setLocation("/tickets");
+    return null;
+  }
 
   return (
     <div className="space-y-6">
@@ -207,7 +235,7 @@ export default function TicketDetail() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {isAgent && !ticket.assignedAgent && (
+          {isAgent && !ticket.assignedAgentId && (
             <Button variant="outline" size="sm" className="gap-2" onClick={handleAssignToSelf} data-testid="button-assign-self">
               <UserCheck className="h-4 w-4" /> Assign to Me
             </Button>
@@ -442,7 +470,7 @@ export default function TicketDetail() {
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
                         {agents.map(agent => (
-                          <SelectItem key={agent.id} value={agent.full_name}>{agent.full_name}</SelectItem>
+                          <SelectItem key={agent.id} value={agent.id}>{agent.full_name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
