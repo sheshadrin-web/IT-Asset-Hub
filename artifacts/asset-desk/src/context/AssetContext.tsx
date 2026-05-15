@@ -211,10 +211,10 @@ export function AssetProvider({ children }: { children: ReactNode }) {
           }
         } catch { /* non-fatal */ }
 
-        await fetch("/api/email/assign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        // Call Supabase Edge Function — works from both dev (Replit) and
+        // production (Render static site) since it's server-side.
+        await supabase.functions.invoke("send-assignment-email", {
+          body: {
             toEmail:         userEmail,
             toName:          userName,
             assetId:         assetObjForEmail.assetId,
@@ -236,7 +236,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
             monitorSize:     assetObjForEmail.monitorSize,
             accessories:     assetObjForEmail.accessories,
             managerEmail,
-          }),
+          },
         });
       }
     } catch { /* non-fatal — email must not block the assignment */ }
