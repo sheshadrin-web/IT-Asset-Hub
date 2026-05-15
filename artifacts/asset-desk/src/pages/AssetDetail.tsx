@@ -3,7 +3,7 @@ import {
   ArrowLeft, Monitor, Smartphone, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
-  ShoppingCart, PackageCheck, ClipboardCheck,
+  ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,10 +11,9 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
@@ -88,6 +87,7 @@ export default function AssetDetail() {
 
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assignUserId,     setAssignUserId]      = useState("");
+  const [assignSearch,     setAssignSearch]      = useState("");
   const [history,          setHistory]           = useState<HistoryRow[]>([]);
   const [historyLoading,   setHistoryLoading]    = useState(false);
 
@@ -112,17 +112,31 @@ export default function AssetDetail() {
   const activeUsers    = users.filter(u => u.status === "active");
   const selectedUser   = users.find(u => u.id === assignUserId);
 
+  const closeAssignDialog = () => {
+    setAssignDialogOpen(false);
+    setAssignUserId("");
+    setAssignSearch("");
+  };
+
   const handleAssignConfirm = async () => {
     if (!asset || !selectedUser) return;
     try {
       await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "");
       toast({ title: "Asset assigned", description: `Assigned to ${selectedUser.full_name}` });
-      setAssignDialogOpen(false);
-      setAssignUserId("");
+      closeAssignDialog();
     } catch (err) {
       toast({ title: "Failed to assign asset", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     }
   };
+
+  // Search-filtered users: match ecode prefix OR name contains query
+  const nk = (s: string) => s.toLowerCase().trim();
+  const searchedUsers = assignSearch.trim().length === 0
+    ? activeUsers
+    : activeUsers.filter(u => {
+        const q = nk(assignSearch);
+        return nk(u.ecode ?? "").startsWith(q) || nk(u.full_name).includes(q);
+      });
 
   const handleUpdateStatus = async (status: AssetStatus) => {
     if (!asset) return;
@@ -454,33 +468,105 @@ export default function AssetDetail() {
         </div>
       </div>
 
-      <Dialog open={assignDialogOpen} onOpenChange={v => !v && setAssignDialogOpen(false)}>
+      <Dialog open={assignDialogOpen} onOpenChange={v => !v && closeAssignDialog()}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Assign {asset.assetId}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 py-1">
+
+            {/* Search box */}
             <div>
-              <label className="text-sm font-medium text-foreground block mb-1.5">Select User <span className="text-destructive">*</span></label>
-              <Select value={assignUserId} onValueChange={setAssignUserId}>
-                <SelectTrigger data-testid="select-assign-user-detail"><SelectValue placeholder="Choose a user…" /></SelectTrigger>
-                <SelectContent>
-                  {activeUsers.map(u => (
-                    <SelectItem key={u.id} value={u.id}>
-                      <span>{u.full_name} <span className="text-muted-foreground text-xs">— {u.department}</span></span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <label className="text-sm font-medium text-foreground block mb-1.5">
+                Search by Ecode or Name <span className="text-destructive">*</span>
+              </label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  data-testid="input-assign-search"
+                  className="pl-8 pr-8"
+                  placeholder="e.g. MPE1234 or Anjali…"
+                  value={assignSearch}
+                  onChange={e => { setAssignSearch(e.target.value); setAssignUserId(""); }}
+                  autoFocus
+                />
+                {assignSearch && (
+                  <button
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => { setAssignSearch(""); setAssignUserId(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Results list — only show when no user selected yet */}
+            {!selectedUser && (
+              <ScrollArea className="max-h-52 rounded-lg border border-border">
+                {searchedUsers.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">No users found</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {searchedUsers.map(u => (
+                      <li key={u.id}>
+                        <button
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                          onClick={() => { setAssignUserId(u.id); setAssignSearch(""); }}
+                          data-testid={`user-result-${u.id}`}
+                        >
+                          <Avatar className="h-7 w-7 flex-shrink-0">
+                            <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
+                              {u.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{u.full_name}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {u.ecode && <span className="font-mono mr-1.5">{u.ecode}</span>}
+                              {u.department}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
+            )}
+
+            {/* Selected user confirmation card */}
             {selectedUser && (
-              <div className="rounded-lg bg-muted/50 border border-border px-4 py-3 text-sm space-y-1">
-                <div className="flex justify-between"><span className="text-muted-foreground">Department</span><span className="font-medium">{selectedUser.department}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span className="text-xs font-medium">{selectedUser.email}</span></div>
+              <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-9 w-9 flex-shrink-0">
+                    <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
+                      {selectedUser.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">{selectedUser.full_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedUser.ecode && <span className="font-mono mr-1.5">{selectedUser.ecode}</span>}
+                      {selectedUser.department}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{selectedUser.email}</p>
+                  </div>
+                  <button
+                    className="text-muted-foreground hover:text-foreground flex-shrink-0"
+                    title="Change user"
+                    onClick={() => { setAssignUserId(""); setAssignSearch(""); }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             )}
+
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAssignConfirm} disabled={!assignUserId} data-testid="button-confirm-assign-detail">Assign</Button>
+            <Button variant="outline" onClick={closeAssignDialog}>Cancel</Button>
+            <Button onClick={handleAssignConfirm} disabled={!assignUserId} data-testid="button-confirm-assign-detail">
+              Assign
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
