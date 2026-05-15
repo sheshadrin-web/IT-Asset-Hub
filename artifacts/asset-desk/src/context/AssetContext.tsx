@@ -187,6 +187,39 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department }
         : a
     ));
+    // Send assignment email (non-fatal)
+    try {
+      const assetObjForEmail = assets.find(a => a.assetId === assetId);
+      if (assetObjForEmail && userEmail) {
+        await fetch("/api/email/assign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail:         userEmail,
+            toName:          userName,
+            assetId:         assetObjForEmail.assetId,
+            assetType:       assetObjForEmail.assetType,
+            brand:           assetObjForEmail.brand,
+            model:           assetObjForEmail.model,
+            serialNumber:    assetObjForEmail.serialNumber,
+            processor:       assetObjForEmail.processor,
+            ram:             assetObjForEmail.ram,
+            storage:         assetObjForEmail.storage,
+            operatingSystem: assetObjForEmail.operatingSystem,
+            imei1:           assetObjForEmail.imeiNumber,
+            imei2:           assetObjForEmail.imei2,
+            phoneNumber:     assetObjForEmail.phoneNumber,
+            keyboard:        assetObjForEmail.keyboard,
+            mouse:           assetObjForEmail.mouse,
+            monitorBrand:    assetObjForEmail.monitorBrand,
+            monitorModel:    assetObjForEmail.monitorModel,
+            monitorSize:     assetObjForEmail.monitorSize,
+            accessories:     assetObjForEmail.accessories,
+          }),
+        });
+      }
+    } catch { /* non-fatal — email must not block the assignment */ }
+
     // Log assignment to history (non-fatal)
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
