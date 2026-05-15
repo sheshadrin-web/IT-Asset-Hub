@@ -397,6 +397,14 @@ export default function AssetDetail() {
                     <p className="text-sm font-semibold text-foreground">{asset.assignedTo ?? asset.assignedEmail}</p>
                     <p className="text-xs text-muted-foreground">{asset.department}</p>
                     {asset.assignedEmail && <p className="text-xs text-muted-foreground">{asset.assignedEmail}</p>}
+                    {asset.assignedAt && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Assigned on{" "}
+                        <span className="font-medium text-blue-600">
+                          {new Date(asset.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 </div>
                 {(() => {
