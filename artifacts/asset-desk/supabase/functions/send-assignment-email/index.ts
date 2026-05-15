@@ -9,26 +9,55 @@ const corsHeaders = {
 
 const FIXED_CC = ["sheshadri.n@mileseducation.com", "bharat.raj@mileseducation.com"];
 
+type Reason = "New Joiner" | "Replacement" | "Additional Asset" | "";
+
+function getSubject(reason: Reason, assetType: string): string {
+  if (reason === "New Joiner") return `Welcome to Miles Education — ${assetType} Asset Details`;
+  if (reason === "Replacement") return `${assetType} Replacement — Asset Details`;
+  if (reason === "Additional Asset") return `Additional ${assetType} Assigned — Asset Details`;
+  return `Company Asset Details — Miles Education`;
+}
+
+function getIntro(firstName: string, reason: Reason, assetType: string): string {
+  if (reason === "New Joiner") {
+    return `<p>Hi ${firstName},</p>
+<p>Welcome to Miles Education! We're excited to have you on board. As part of your onboarding, the following ${assetType.toLowerCase()} has been assigned to you. Kindly review the details below:</p>`;
+  }
+  if (reason === "Replacement") {
+    return `<p>Hi ${firstName},</p>
+<p>As per your replacement request, a new ${assetType.toLowerCase()} has been issued to you in place of your previous device. Kindly review the details of your newly assigned asset below:</p>`;
+  }
+  if (reason === "Additional Asset") {
+    return `<p>Hi ${firstName},</p>
+<p>An additional ${assetType.toLowerCase()} has been assigned to you. Kindly review the details below:</p>`;
+  }
+  return `<p>Hi ${firstName},</p>
+<p>As per the information received from HR, the following company assets have been assigned to you. Kindly review the details below:</p>`;
+}
+
 function buildHtml(p: Record<string, string | undefined>, senderName: string): string {
   const firstName = (p.toName ?? "").split(" ")[0];
+  const reason = (p.reason ?? "") as Reason;
+  const assetType = p.assetType ?? "Asset";
+
   const row = (label: string, value?: string) =>
     value ? `<li style="margin-bottom:6px"><strong>${label}:</strong> ${value}</li>` : "";
 
   let details = "";
-  if (p.assetType === "Laptop") {
+  if (assetType === "Laptop") {
     details = [
       row("Serial No", p.serialNumber), row("OS", p.operatingSystem),
       row("Processor", p.processor), row("RAM", p.ram),
       row("Storage", p.storage), row("Asset Tag", p.assetId),
     ].join("");
-  } else if (p.assetType === "Mobile") {
+  } else if (assetType === "Mobile") {
     details = [
       row("IMEI 1", p.imei1), row("IMEI 2", p.imei2),
       row("OS", p.operatingSystem), row("RAM", p.ram),
       row("Storage", p.storage), row("Asset Tag", p.assetId),
       row("Official Mobile No", p.phoneNumber),
     ].join("");
-  } else if (p.assetType === "Desktop") {
+  } else if (assetType === "Desktop") {
     const monitor = p.monitorBrand && p.monitorModel
       ? `${p.monitorBrand} ${p.monitorModel}${p.monitorSize ? ` (${p.monitorSize})` : ""}`
       : undefined;
@@ -48,15 +77,22 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string): s
         .map((a: string) => `<li style="margin-bottom:4px">${a}</li>`).join("")
     : "";
 
+  const intro = getIntro(firstName, reason, assetType);
+
+  // Replacement gets an extra note about returning old device
+  const replacementNote = reason === "Replacement"
+    ? `<p><strong>Note:</strong> Kindly ensure your previous device is returned to the IT team at the earliest.</p>`
+    : "";
+
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head>
 <body style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:680px;margin:0 auto;padding:24px;">
-<h2 style="font-size:18px;margin-bottom:20px;">Company Asset Details</h2>
-<p>Hi ${firstName},</p>
-<p>As per the information received from HR, the following company assets have been assigned to you. Kindly review the details below:</p>
-<p><strong>Assigned Assets:</strong></p>
-<p><strong>1. ${p.assetType}: ${p.brand} ${p.model}</strong></p>
+<h2 style="font-size:18px;margin-bottom:20px;">${getSubject(reason, assetType)}</h2>
+${intro}
+<p><strong>Assigned Asset:</strong></p>
+<p><strong>${assetType}: ${p.brand} ${p.model}</strong></p>
 <ul style="line-height:1.7;">${details}</ul>
 ${accList ? `<p><strong>Accessories:</strong></p><ul style="line-height:1.7;">${accList}</ul>` : ""}
+${replacementNote}
 <p>Kindly do the following:</p>
 <ul style="line-height:1.7;">
   <li>Verify the above asset details</li>
@@ -108,6 +144,7 @@ serve(async (req: Request) => {
       .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
     const html = buildHtml(body, senderName);
+    const subject = getSubject((body.reason ?? "") as Reason, body.assetType ?? "Asset");
 
     const ccList = [...FIXED_CC];
     if (managerEmail && !ccList.includes(managerEmail)) ccList.push(managerEmail);
@@ -121,7 +158,7 @@ serve(async (req: Request) => {
       from: `"Miles Education IT" <${gmailUser}>`,
       to: toEmail,
       cc: ccList.join(", "),
-      subject: "Company Asset Details — Miles Education",
+      subject,
       html,
     });
 
