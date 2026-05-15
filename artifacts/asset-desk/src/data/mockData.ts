@@ -11,17 +11,18 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 // ─── Supabase Profile ────────────────────────────────────────────────────────
 export interface Profile {
-  id:                string;
-  full_name:         string;
-  email:             string;
-  role:              UserRole;
-  ecode:             string;
-  department:        string;
-  location:          string;
-  reporting_manager: string;
-  status:            UserStatus;
-  created_at:        string;
-  updated_at:        string;
+  id:                 string;
+  full_name:          string;
+  email:              string;
+  role:               UserRole;
+  ecode:              string;
+  department:         string;
+  location:           string;
+  reporting_manager:  string;
+  status:             UserStatus;
+  created_at:         string;
+  updated_at:         string;
+  profile_photo_url?: string;
 }
 
 export interface CurrentUser {
@@ -35,6 +36,7 @@ export interface CurrentUser {
   reportingManager: string;
   status:           UserStatus;
   assignedAssets:   number;
+  avatarUrl?:       string;
 }
 
 export function profileToCurrentUser(p: Profile): CurrentUser {
@@ -49,6 +51,7 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
     reportingManager: p.reporting_manager ?? "",
     status:           p.status,
     assignedAssets:   0,
+    avatarUrl:        p.profile_photo_url ?? undefined,
   };
 }
 
