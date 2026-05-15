@@ -35,7 +35,7 @@ function getIntro(firstName: string, reason: Reason, assetType: string): string 
 <p>As per the information received from HR, the following company assets have been assigned to you. Kindly review the details below:</p>`;
 }
 
-function buildHtml(p: Record<string, string | undefined>, senderName: string): string {
+function buildHtml(p: Record<string, string | undefined>, senderName: string, gmailUser: string): string {
   const firstName = (p.toName ?? "").split(" ")[0];
   const reason = (p.reason ?? "") as Reason;
   const assetType = p.assetType ?? "Asset";
@@ -104,12 +104,11 @@ ${replacementNote}
 <p>Please ensure this is completed at the earliest.</p>
 <p>If you notice any discrepancies, kindly report them immediately.</p>
 <br/>
-<p style="margin-bottom:2px;">Best Regards,</p>
-<p style="margin-bottom:2px;color:#1a56db;"><strong>${senderName}</strong></p>
-<p style="margin-bottom:2px;"><strong>Associate - Asset Management</strong></p>
-<p style="margin-bottom:2px;"><strong>Information Technology</strong></p>
-<p style="margin-bottom:2px;"><strong>Miles Education</strong></p>
-<p style="margin-bottom:2px;">Bangalore, India</p>
+<p style="margin-bottom:2px;">Regards,</p>
+<p style="margin-bottom:8px;color:#1a3a7a;"><strong>IT Help Desk</strong></p>
+<p style="margin-bottom:2px;">Miles Education | Bangalore</p>
+<p style="margin-bottom:2px;">E: <a href="mailto:${gmailUser}" style="color:#1a56db;text-decoration:none;">${gmailUser}</a></p>
+<p style="margin-bottom:2px;"><a href="https://www.mileseducation.com" style="color:#1a56db;text-decoration:none;">www.mileseducation.com</a></p>
 </body></html>`;
 }
 
@@ -143,7 +142,7 @@ serve(async (req: Request) => {
       .replace(/[._]/g, " ")
       .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
-    const html = buildHtml(body, senderName);
+    const html = buildHtml(body, senderName, gmailUser);
     const subject = getSubject((body.reason ?? "") as Reason, body.assetType ?? "Asset");
 
     const ccList = [...FIXED_CC];
