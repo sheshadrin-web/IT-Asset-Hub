@@ -191,6 +191,26 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     try {
       const assetObjForEmail = assets.find(a => a.assetId === assetId);
       if (assetObjForEmail && userEmail) {
+        // Resolve manager email: fetch assigned user's reporting_manager name,
+        // then look up that manager's email from profiles
+        let managerEmail: string | undefined;
+        try {
+          const { data: userProfile } = await supabase
+            .from("profiles")
+            .select("reporting_manager")
+            .eq("id", userId)
+            .single();
+          const managerName = (userProfile as { reporting_manager?: string } | null)?.reporting_manager;
+          if (managerName) {
+            const { data: managerProfile } = await supabase
+              .from("profiles")
+              .select("email")
+              .ilike("full_name", managerName)
+              .single();
+            managerEmail = (managerProfile as { email?: string } | null)?.email ?? undefined;
+          }
+        } catch { /* non-fatal */ }
+
         await fetch("/api/email/assign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -215,6 +235,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
             monitorModel:    assetObjForEmail.monitorModel,
             monitorSize:     assetObjForEmail.monitorSize,
             accessories:     assetObjForEmail.accessories,
+            managerEmail,
           }),
         });
       }
