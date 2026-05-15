@@ -221,16 +221,17 @@ async function exportFullXlsx(
     const assigned4 = assets.filter((a) => a.status === "Assigned");
     const assign4Header = [
       "Asset ID","Type","Brand","Model","Serial Number",
-      "Assigned To","E-Code","Email","Department","Asset Status","Warranty End",
+      "Assigned To","E-Code","Email","Department","Asset Status","Assigned Date","Warranty End",
     ];
     const assign4Rows: unknown[][] = assigned4.map((a) => [
       fmt(a.assetId), fmt(a.assetType), fmt(a.brand), fmt(a.model), fmt(a.serialNumber),
       fmt(a.assignedTo), fmt(a.assignedEcode),
       fmt(a.assignedEmail), fmt(a.department), fmt(a.status),
+      a.assignedAt ? fmtDate(a.assignedAt) : "",
       fmtDate(a.warrantyEndDate),
     ]);
     addSheet(wb, "4 - Current Assignments", [assign4Header, ...assign4Rows],
-      [14,10,12,18,18,22,12,28,18,12,14]);
+      [14,10,12,18,18,22,12,28,18,12,14,14]);
 
     // ── Sheet 5: Assignment History ───────────────────────────────────────────
     const hist5Header = [
