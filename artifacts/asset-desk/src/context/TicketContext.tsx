@@ -56,11 +56,18 @@ function mapFromDB(row: Record<string, unknown>): Ticket {
   };
 }
 
-function nextTicketId(existing: Ticket[]): string {
-  const nums = existing
-    .map(t => parseInt(t.ticketId.replace("TKT-", ""), 10))
-    .filter(n => !isNaN(n));
-  const n = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+// Generates the next ticket ID by querying the DB for the current max,
+// so concurrent submissions never collide on stale in-memory state.
+async function nextTicketIdFromDB(): Promise<string> {
+  const { data } = await supabase
+    .from("tickets")
+    .select("ticket_id")
+    .like("ticket_id", "TKT-%")
+    .order("ticket_id", { ascending: false })
+    .limit(1)
+    .single();
+  const last = (data as { ticket_id?: string } | null)?.ticket_id;
+  const n = last ? parseInt(last.replace("TKT-", ""), 10) + 1 : 1;
   return `TKT-${String(n).padStart(4, "0")}`;
 }
 
@@ -120,31 +127,39 @@ export function TicketProvider({ children }: { children: ReactNode }) {
   const getTicket = (id: string) => tickets.find(t => t.ticketId === id);
 
   const addTicket = async (data: AddTicketInput): Promise<Ticket> => {
-    const ticketId = nextTicketId(tickets);
     const now = new Date().toISOString();
-    const row = {
-      ticket_id:      ticketId,
-      raised_by:      data.raisedByUserId,   // UUID FK to profiles
-      employee_email: data.employeeEmail ?? null,
-      asset_id:       (data.assetId === "N/A" || !data.assetId) ? null : data.assetId,
-      category:       data.category,
-      subcategory:    data.subcategory,
-      priority:       data.priority.toLowerCase(),
-      status:         data.assignedAgentId ? "assigned" : "open",
-      assigned_agent: data.assignedAgentId ?? null,
-      // Do NOT send "" for UUID columns — empty string causes:
-      //   "invalid input syntax for type uuid: """
-      description:    data.description,
-      created_at:     now,
-      updated_at:     now,
-    };
-    const { data: inserted, error } = await supabase
-      .from("tickets")
-      .insert(row)
-      .select()
-      .single();
-    if (error || !inserted) throw new Error(error?.message ?? "Failed to raise ticket");
-    const newTicket = mapFromDB(inserted as Record<string, unknown>);
+
+    // Retry up to 5 times in case of a concurrent collision on ticket_id
+    let inserted: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const ticketId = await nextTicketIdFromDB();
+      const row = {
+        ticket_id:      ticketId,
+        raised_by:      data.raisedByUserId,
+        employee_email: data.employeeEmail ?? null,
+        asset_id:       (data.assetId === "N/A" || !data.assetId) ? null : data.assetId,
+        category:       data.category,
+        subcategory:    data.subcategory,
+        priority:       data.priority.toLowerCase(),
+        status:         data.assignedAgentId ? "assigned" : "open",
+        assigned_agent: data.assignedAgentId ?? null,
+        description:    data.description,
+        created_at:     now,
+        updated_at:     now,
+      };
+      const { data: result, error } = await supabase
+        .from("tickets")
+        .insert(row)
+        .select()
+        .single();
+      if (result && !error) { inserted = result as Record<string, unknown>; break; }
+      // Only retry on unique constraint violations; surface all other errors immediately
+      if (!error?.message?.includes("unique constraint")) {
+        throw new Error(error?.message ?? "Failed to raise ticket");
+      }
+    }
+    if (!inserted) throw new Error("Failed to raise ticket after retries. Please try again.");
+    const newTicket = mapFromDB(inserted);
     setTickets(prev => [newTicket, ...prev]);
     return newTicket;
   };
