@@ -122,9 +122,10 @@ export default function Assets() {
   const { toast } = useToast();
 
   const [search, setSearch]           = useState("");
-  const [typeFilter, setTypeFilter]   = useState("all");
+  const [typeFilter, setTypeFilter]     = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [userFilter, setUserFilter]   = useState("all");
+  const [userFilter, setUserFilter]     = useState("all");
+  const [deptFilter, setDeptFilter]     = useState("all");
 
   const [selected, setSelected]         = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -164,7 +165,8 @@ export default function Assets() {
     const matchType   = typeFilter   === "all" || a.assetType === typeFilter;
     const matchStatus = statusFilter === "all" || a.status    === statusFilter;
     const matchUser   = userFilter   === "all" || a.assignedEmail === userFilter || a.assignedEcode === userFilter;
-    return matchSearch && matchType && matchStatus && matchUser;
+    const matchDept   = deptFilter   === "all" || (a.department ?? "") === deptFilter;
+    return matchSearch && matchType && matchStatus && matchUser && matchDept;
   });
 
   const allFilteredIds = filtered.map(a => a.assetId);
@@ -392,6 +394,20 @@ export default function Assets() {
                         {u.ecode && <span className="text-xs text-muted-foreground font-mono">{u.ecode}</span>}
                       </span>
                     </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {/* Department filter — only shows departments that have ≥1 asset */}
+            <Select value={deptFilter} onValueChange={setDeptFilter}>
+              <SelectTrigger className="w-full sm:w-48" data-testid="select-dept-filter">
+                <SelectValue placeholder="Department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {[...new Set(assets.map(a => a.department).filter(Boolean))]
+                  .sort()
+                  .map(dept => (
+                    <SelectItem key={dept} value={dept!}>{dept}</SelectItem>
                   ))}
               </SelectContent>
             </Select>
