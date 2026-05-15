@@ -107,7 +107,7 @@ ${replacementNote}
 <p style="margin-bottom:2px;">Regards,</p>
 <p style="margin-bottom:8px;color:#1a3a7a;"><strong>IT Help Desk</strong></p>
 <p style="margin-bottom:2px;">Miles Education | Bangalore</p>
-<p style="margin-bottom:2px;">E: <a href="mailto:${gmailUser}" style="color:#1a56db;text-decoration:none;">${gmailUser}</a></p>
+<p style="margin-bottom:2px;">E: <a href="mailto:help.desk@mileseducation.com" style="color:#1a56db;text-decoration:none;">help.desk@mileseducation.com</a></p>
 <p style="margin-bottom:2px;"><a href="https://www.mileseducation.com" style="color:#1a56db;text-decoration:none;">www.mileseducation.com</a></p>
 </body></html>`;
 }
