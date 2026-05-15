@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,12 +10,12 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
-import { Shield, UserCheck, User } from "lucide-react";
+import { Shield, UserCheck, User, Camera, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
@@ -45,7 +45,10 @@ interface Props {
 export default function ProfileSettingsModal({ open, onClose }: Props) {
   const { currentUser, refreshProfile } = useAuth();
   const { toast }                        = useToast();
-  const [saving, setSaving]              = useState(false);
+  const [saving,      setSaving]         = useState(false);
+  const [uploading,   setUploading]      = useState(false);
+  const [previewUrl,  setPreviewUrl]     = useState<string | undefined>();
+  const fileInputRef                     = useRef<HTMLInputElement>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -67,8 +70,54 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
         location:          currentUser.location          ?? "",
         reporting_manager: currentUser.reportingManager  ?? "",
       });
+      setPreviewUrl(currentUser.avatarUrl);
     }
   }, [open, currentUser]);
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Please choose an image under 2 MB.", variant: "destructive" });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext  = file.name.split(".").pop() ?? "jpg";
+      const path = `${currentUser.userId}/avatar.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(path);
+
+      // Force cache-bust so the new image loads immediately
+      const bustUrl = `${publicUrl}?t=${Date.now()}`;
+
+      await supabase.from("profiles")
+        .update({ profile_photo_url: bustUrl, updated_at: new Date().toISOString() })
+        .eq("id", currentUser.userId);
+
+      setPreviewUrl(bustUrl);
+      await refreshProfile();
+      toast({ title: "Photo updated", description: "Your profile photo has been saved." });
+    } catch (err) {
+      toast({
+        title:       "Upload failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant:     "destructive",
+      });
+    } finally {
+      setUploading(false);
+      // Reset the input so the same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const onSubmit = async (values: FormValues) => {
     if (!currentUser) return;
@@ -107,6 +156,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
   const initials  = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
   const RoleIcon  = roleIconMap[currentUser.role];
   const roleLabel = ROLE_LABELS[currentUser.role];
+  const photoUrl  = previewUrl ?? currentUser.avatarUrl;
 
   return (
     <Dialog open={open} onOpenChange={v => !saving && !v && onClose()}>
@@ -116,11 +166,34 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
           <DialogDescription>Update your personal profile information.</DialogDescription>
         </DialogHeader>
 
-        {/* Avatar + role — not editable */}
-        <div className="flex items-center gap-3 py-2">
-          <Avatar className="h-14 w-14">
-            <AvatarFallback className="bg-primary text-white text-lg font-bold">{initials}</AvatarFallback>
-          </Avatar>
+        {/* Avatar with upload button */}
+        <div className="flex items-center gap-4 py-2">
+          <div className="relative flex-shrink-0">
+            <Avatar className="h-16 w-16">
+              {photoUrl && <AvatarImage src={photoUrl} alt={currentUser.name} className="object-cover" />}
+              <AvatarFallback className="bg-primary text-white text-xl font-bold">{initials}</AvatarFallback>
+            </Avatar>
+            {/* Camera overlay button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 hover:opacity-100 transition-opacity"
+              title="Upload photo"
+            >
+              {uploading
+                ? <Loader2 className="h-5 w-5 text-white animate-spin" />
+                : <Camera className="h-5 w-5 text-white" />
+              }
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePhotoChange}
+            />
+          </div>
           <div>
             <p className="font-semibold text-foreground">{currentUser.name}</p>
             <p className="text-xs text-muted-foreground mb-1">{currentUser.email}</p>
@@ -131,6 +204,9 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
               <RoleIcon className="h-3 w-3" />
               {roleLabel}
             </span>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Hover over photo to change · Max 2 MB
+            </p>
           </div>
         </div>
 
@@ -187,7 +263,7 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-              <Button type="submit" disabled={saving} data-testid="button-save-profile">
+              <Button type="submit" disabled={saving || uploading} data-testid="button-save-profile">
                 {saving ? "Saving…" : "Save Changes"}
               </Button>
             </DialogFooter>
