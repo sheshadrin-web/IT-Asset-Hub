@@ -56,19 +56,14 @@ function mapFromDB(row: Record<string, unknown>): Ticket {
   };
 }
 
-// Generates the next ticket ID by querying the DB for the current max,
-// so concurrent submissions never collide on stale in-memory state.
+// Generates the next ticket ID by calling a SECURITY DEFINER RPC function
+// that bypasses RLS, so every user always gets the true global max — not
+// just the max of the tickets they are allowed to see.
 async function nextTicketIdFromDB(): Promise<string> {
-  const { data } = await supabase
-    .from("tickets")
-    .select("ticket_id")
-    .like("ticket_id", "TKT-%")
-    .order("ticket_id", { ascending: false })
-    .limit(1)
-    .single();
-  const last = (data as { ticket_id?: string } | null)?.ticket_id;
-  const n = last ? parseInt(last.replace("TKT-", ""), 10) + 1 : 1;
-  return `TKT-${String(n).padStart(4, "0")}`;
+  const { data, error } = await supabase.rpc("get_next_ticket_id");
+  if (!error && typeof data === "string" && data.startsWith("TKT-")) return data;
+  // Fallback: timestamp-based ID to guarantee uniqueness if RPC fails
+  return `TKT-${Date.now().toString(36).toUpperCase().slice(-6)}`;
 }
 
 // ─── Context shape ────────────────────────────────────────────────────────────
