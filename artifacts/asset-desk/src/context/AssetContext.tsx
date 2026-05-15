@@ -98,7 +98,7 @@ interface AssetContextType {
   addAsset:      (data: Omit<Asset, "id">) => Promise<Asset>;
   addAssets:     (dataList: Omit<Asset, "id">[]) => Promise<Asset[]>;
   updateAsset:   (asset: Asset) => Promise<void>;
-  assignAsset:   (assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string) => Promise<void>;
+  assignAsset:   (assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string) => Promise<void>;
   returnAsset:   (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
   updateStatus:  (assetId: string, status: AssetStatus) => Promise<void>;
   unassignAsset: (assetId: string) => Promise<void>;
@@ -166,7 +166,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const assignAsset = async (
-    assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string
+    assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string
   ): Promise<void> => {
     const coreUpdates: Record<string, unknown> = {
       status:         "Assigned",
@@ -236,6 +236,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
             monitorSize:     assetObjForEmail.monitorSize,
             accessories:     assetObjForEmail.accessories,
             managerEmail,
+            reason:          reason ?? "",
           },
         });
       }
