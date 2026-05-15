@@ -91,6 +91,7 @@ export interface Asset {
   assignedTo?:      string;
   assignedEmail?:   string;
   assignedEcode?:   string;
+  assignedAt?:      string;
   department?:      string;
   location:         string;
   accessories:      string;
