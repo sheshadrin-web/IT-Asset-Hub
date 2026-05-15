@@ -430,7 +430,7 @@ export default function Assets() {
                       />
                     </th>
                   )}
-                  {["Asset ID","Type","Brand / Model","Serial Number","Assigned To","Department","Status","Warranty End","Actions"].map(h => (
+                  {["Asset ID","Type","Brand / Model","Serial Number","Assigned To","Department","Status","Assigned Date","Warranty End","Actions"].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -508,6 +508,11 @@ export default function Assets() {
                           <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[asset.status])} />
                           {asset.status}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {asset.assignedAt
+                          ? new Date(asset.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                          : "—"}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
                       <td className="px-4 py-3">
