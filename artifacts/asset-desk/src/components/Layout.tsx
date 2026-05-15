@@ -11,7 +11,7 @@ import { UserRole, ROLE_LABELS } from "@/data/mockData";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import ProfileSettingsModal from "@/components/ProfileSettingsModal";
 
@@ -234,6 +234,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 data-testid="button-profile"
               >
                 <Avatar className="h-8 w-8">
+                  {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
                   <AvatarFallback className="bg-primary text-white text-xs font-semibold">{initials}</AvatarFallback>
                 </Avatar>
                 <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", profileOpen && "rotate-180")} />
@@ -245,6 +246,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <div className="px-4 pt-4 pb-3 border-b border-border">
                     <div className="flex items-center gap-3 mb-3">
                       <Avatar className="h-12 w-12 flex-shrink-0">
+                        {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
                         <AvatarFallback className="bg-primary text-white text-base font-bold">{initials}</AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">
