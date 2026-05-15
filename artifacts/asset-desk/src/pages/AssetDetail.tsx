@@ -88,6 +88,7 @@ export default function AssetDetail() {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assignUserId,     setAssignUserId]      = useState("");
   const [assignSearch,     setAssignSearch]      = useState("");
+  const [assignReason,     setAssignReason]      = useState("");
   const [history,          setHistory]           = useState<HistoryRow[]>([]);
   const [historyLoading,   setHistoryLoading]    = useState(false);
 
@@ -116,12 +117,13 @@ export default function AssetDetail() {
     setAssignDialogOpen(false);
     setAssignUserId("");
     setAssignSearch("");
+    setAssignReason("");
   };
 
   const handleAssignConfirm = async () => {
     if (!asset || !selectedUser) return;
     try {
-      await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "");
+      await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "", undefined, assignReason);
       toast({ title: "Asset assigned", description: `Assigned to ${selectedUser.full_name}` });
       closeAssignDialog();
     } catch (err) {
@@ -494,6 +496,29 @@ export default function AssetDetail() {
           <DialogHeader><DialogTitle>Assign {asset.assetId}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-1">
 
+            {/* Reason for assignment */}
+            <div>
+              <label className="text-sm font-medium text-foreground block mb-1.5">
+                Reason for Assignment <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["New Joiner", "Replacement", "Additional Asset"] as const).map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setAssignReason(r)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors text-center ${
+                      assignReason === r
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-muted/30 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Search box */}
             <div>
               <label className="text-sm font-medium text-foreground block mb-1.5">
@@ -585,7 +610,7 @@ export default function AssetDetail() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeAssignDialog}>Cancel</Button>
-            <Button onClick={handleAssignConfirm} disabled={!assignUserId} data-testid="button-confirm-assign-detail">
+            <Button onClick={handleAssignConfirm} disabled={!assignUserId || !assignReason} data-testid="button-confirm-assign-detail">
               Assign
             </Button>
           </DialogFooter>
