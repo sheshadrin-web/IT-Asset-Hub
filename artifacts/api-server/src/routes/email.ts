@@ -3,6 +3,12 @@ import nodemailer from "nodemailer";
 
 const router = Router();
 
+// Fixed CC recipients always included on every assignment email
+const FIXED_CC = [
+  "sheshadri.n@mileseducation.com",
+  "bharat.raj@mileseducation.com",
+];
+
 function buildAssignEmailHtml(params: {
   userName: string;
   assetId: string;
@@ -131,6 +137,7 @@ router.post("/email/assign", async (req, res) => {
     imei1, imei2, phoneNumber,
     keyboard, mouse, monitorBrand, monitorModel, monitorSize,
     accessories,
+    managerEmail,   // optional — resolved from profiles on the frontend
   } = req.body as Record<string, string | undefined>;
 
   if (!toEmail || !toName || !assetId) {
@@ -167,15 +174,22 @@ router.post("/email/assign", async (req, res) => {
     senderName: senderDisplayName,
   });
 
+  // Build CC list: always include fixed recipients, plus manager if resolved
+  const ccList = [...FIXED_CC];
+  if (managerEmail && managerEmail.trim() && !ccList.includes(managerEmail.trim())) {
+    ccList.push(managerEmail.trim());
+  }
+
   try {
     await transporter.sendMail({
       from: `"Miles Education IT" <${gmailUser}>`,
       to: toEmail,
+      cc: ccList.join(", "),
       subject: "Company Asset Details — Miles Education",
       html,
     });
-    req.log.info({ toEmail, assetId }, "Asset assignment email sent");
-    res.json({ success: true });
+    req.log.info({ toEmail, assetId, cc: ccList }, "Asset assignment email sent");
+    res.json({ success: true, cc: ccList });
   } catch (err) {
     req.log.error({ err }, "Failed to send assignment email");
     res.status(500).json({ error: "Failed to send email", detail: err instanceof Error ? err.message : String(err) });
