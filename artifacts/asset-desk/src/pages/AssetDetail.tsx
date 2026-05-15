@@ -397,6 +397,27 @@ export default function AssetDetail() {
                     {asset.assignedEmail && <p className="text-xs text-muted-foreground">{asset.assignedEmail}</p>}
                   </div>
                 </div>
+                {(() => {
+                  const assignedRow  = [...history].find(r => r.event_type === "assigned");
+                  const returnedRow  = [...history].find(r => r.event_type === "returned" || r.event_type === "unassigned");
+                  const fmt = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                  return (
+                    <div className="border-t border-border pt-3 space-y-2 text-sm">
+                      {assignedRow && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Assigned On</span>
+                          <span className="font-medium text-blue-600">{fmt(assignedRow.created_at)}</span>
+                        </div>
+                      )}
+                      {returnedRow && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Returned On</span>
+                          <span className="font-medium text-emerald-600">{fmt(returnedRow.created_at)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           )}
