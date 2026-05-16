@@ -45,6 +45,9 @@ function mapFromDB(row: Record<string, unknown>): Asset {
       ? String((row.profiles as Record<string, unknown>).ecode)
       : undefined,
     assignedAt:      row.assigned_at      ? String(row.assigned_at)      : undefined,
+    ackToken:        row.ack_token        ? String(row.ack_token)        : undefined,
+    acknowledged:    row.acknowledged     ? Boolean(row.acknowledged)    : false,
+    acknowledgedAt:  row.acknowledged_at  ? String(row.acknowledged_at) : undefined,
     department:      row.department       ? String(row.department)       : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
@@ -169,12 +172,16 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const assignAsset = async (
     assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string
   ): Promise<void> => {
+    const ackToken = crypto.randomUUID();
     const coreUpdates: Record<string, unknown> = {
       status:         "Assigned",
       assigned_to:    userId,     // UUID FK to profiles
       assigned_email: userEmail,  // TEXT — used as display fallback
       department,
       assigned_at:    new Date().toISOString(),
+      ack_token:      ackToken,
+      acknowledged:   false,
+      acknowledged_at: null,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -187,7 +194,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     const assignedAt = new Date().toISOString();
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
-        ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department, assignedAt }
+        ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department, assignedAt, ackToken, acknowledged: false, acknowledgedAt: undefined }
         : a
     ));
     // Send assignment email (non-fatal)
@@ -240,6 +247,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
             accessories:     assetObjForEmail.accessories,
             managerEmail,
             reason:          reason ?? "",
+            ackToken,
           },
         });
       }
@@ -269,7 +277,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     // Capture current assignment info before clearing
     const assetObj = assets.find(a => a.assetId === assetId);
     const coreUpdates: Record<string, unknown> = {
-      status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null,
+      status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, ack_token: null, acknowledged: false, acknowledged_at: null,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -307,7 +315,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const unassignAsset = async (assetId: string): Promise<void> => {
     const { error } = await supabase
       .from("assets")
-      .update({ status: "Available", assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, department: null })
+      .update({ status: "Available", assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, department: null, ack_token: null, acknowledged: false, acknowledged_at: null })
       .eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a =>
