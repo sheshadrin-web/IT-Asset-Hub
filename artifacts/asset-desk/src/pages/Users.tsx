@@ -5,7 +5,9 @@ import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
   Upload, CheckSquare, User, KeyRound,
+  ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
+import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +57,35 @@ const statusLabel: Record<UserStatus, string> = {
   active:   "Active",
   inactive: "Inactive",
 };
+
+// ─── Column filter helpers ─────────────────────────────────────────────────────
+type UserColKey = "ecode" | "name" | "role" | "department" | "location" | "status";
+
+const USER_COL_DEFS: { label: string; key: UserColKey }[] = [
+  { label: "E-Code",     key: "ecode"      },
+  { label: "Employee",   key: "name"       },
+  { label: "Role",       key: "role"       },
+  { label: "Department", key: "department" },
+  { label: "Location",   key: "location"   },
+  { label: "Status",     key: "status"     },
+];
+
+function getUserColValue(u: import("@/data/mockData").Profile, col: UserColKey): string {
+  switch (col) {
+    case "ecode":      return u.ecode ?? "";
+    case "name":       return u.full_name;
+    case "role":       return ROLE_LABELS[u.role] ?? u.role;
+    case "department": return u.department;
+    case "location":   return u.location;
+    case "status":     return statusLabel[u.status] ?? u.status;
+  }
+}
+
+function makeEmptyUserColFilters(): Record<UserColKey, Set<string>> {
+  const o = {} as Record<UserColKey, Set<string>>;
+  USER_COL_DEFS.forEach(c => { o[c.key] = new Set(); });
+  return o;
+}
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 const addSchema = z.object({
@@ -111,6 +142,21 @@ export default function Users() {
   const [search,       setSearch]       = useState("");
   const [roleFilter,   setRoleFilter]   = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [colFilters,   setColFilters]   = useState<Record<UserColKey, Set<string>>>(makeEmptyUserColFilters);
+  const [sortCol,      setSortCol]      = useState<UserColKey>("ecode");
+  const [sortDir,      setSortDir]      = useState<"asc" | "desc">("asc");
+
+  const setColFilter = (col: UserColKey, vals: Set<string>) =>
+    setColFilters(prev => ({ ...prev, [col]: vals }));
+
+  const anyColFilter = Object.values(colFilters).some(s => s.size > 0);
+
+  const clearAllColFilters = () => setColFilters(makeEmptyUserColFilters());
+
+  const handleSort = (col: UserColKey) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
 
   // Dialogs
   const [addOpen,          setAddOpen]          = useState(false);
@@ -508,12 +554,31 @@ export default function Users() {
   });
 
   // ── Filtered list ──────────────────────────────────────────────────────────
-  const filtered = users.filter(u => {
+  const baseFiltered = users.filter(u => {
     const q = search.toLowerCase();
     const matchSearch = !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.department.toLowerCase().includes(q) || (u.ecode ?? "").toLowerCase().includes(q);
     const matchRole   = roleFilter   === "all" || u.role   === roleFilter;
     const matchStatus = statusFilter === "all" || u.status === statusFilter;
     return matchSearch && matchRole && matchStatus;
+  });
+
+  const filtered = baseFiltered.filter(u =>
+    USER_COL_DEFS.every(({ key }) => {
+      const vals = colFilters[key];
+      return vals.size === 0 || vals.has(getUserColValue(u, key));
+    })
+  );
+
+  const getColAllValues = (col: UserColKey) =>
+    [...new Set(baseFiltered.map(u => getUserColValue(u, col)))]
+      .filter(v => v !== "")
+      .sort((a, b) => a.localeCompare(b));
+
+  const sorted = [...filtered].sort((a, b) => {
+    const av = getUserColValue(a, sortCol);
+    const bv = getUserColValue(b, sortCol);
+    const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+    return sortDir === "asc" ? cmp : -cmp;
   });
 
   const selectableIds  = filtered.filter(u => u.id !== currentUser?.userId).map(u => u.id);
@@ -537,12 +602,12 @@ export default function Users() {
   };
 
   const roleCounts = {
-    superAdmins: users.filter(u => u.role === "super_admin").length,
-    itAdmins:    users.filter(u => u.role === "it_admin").length,
-    itAgents:    users.filter(u => u.role === "it_agent").length,
-    endUsers:    users.filter(u => u.role === "end_user").length,
-    active:      users.filter(u => u.status === "active").length,
-    inactive:    users.filter(u => u.status === "inactive").length,
+    superAdmins: filtered.filter(u => u.role === "super_admin").length,
+    itAdmins:    filtered.filter(u => u.role === "it_admin").length,
+    itAgents:    filtered.filter(u => u.role === "it_agent").length,
+    endUsers:    filtered.filter(u => u.role === "end_user").length,
+    active:      filtered.filter(u => u.status === "active").length,
+    inactive:    filtered.filter(u => u.status === "inactive").length,
   };
 
   // ── Add user ───────────────────────────────────────────────────────────────
@@ -814,6 +879,15 @@ export default function Users() {
                 <SelectItem value="inactive">Inactive</SelectItem>
               </SelectContent>
             </Select>
+            {anyColFilter && (
+              <Button
+                variant="outline" size="sm"
+                className="gap-1.5 border-primary/40 text-primary hover:bg-primary/5 whitespace-nowrap"
+                onClick={clearAllColFilters}
+              >
+                <X className="h-3.5 w-3.5" /> Clear Column Filters
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -855,9 +929,36 @@ export default function Users() {
                       />
                     )}
                   </th>
-                  {["E-Code", "Employee", "Role", "Department", "Location", "Status", ""].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+                  {USER_COL_DEFS.map(col => (
+                    <th key={col.key} className="px-4 py-3 text-left whitespace-nowrap">
+                      <div className="flex items-center gap-0.5">
+                        <ColumnFilterDropdown
+                          label={col.label}
+                          allValues={getColAllValues(col.key)}
+                          selected={colFilters[col.key]}
+                          onApply={vals => setColFilter(col.key, vals)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSort(col.key)}
+                          className={cn(
+                            "ml-0.5 rounded p-0.5 transition-colors",
+                            sortCol === col.key
+                              ? "text-primary"
+                              : "text-muted-foreground/30 hover:text-muted-foreground"
+                          )}
+                          title={`Sort by ${col.label}`}
+                        >
+                          {sortCol === col.key
+                            ? (sortDir === "asc"
+                                ? <ChevronUp   className="h-3 w-3" />
+                                : <ChevronDown className="h-3 w-3" />)
+                            : <ChevronsUpDown className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    </th>
                   ))}
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -869,7 +970,7 @@ export default function Users() {
                       {users.length === 0 ? "No users found. Add your first user above." : "No users match the current filters."}
                     </td>
                   </tr>
-                ) : filtered.map(user => {
+                ) : sorted.map(user => {
                   const initials = user.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
                   const isSelf   = user.id === currentUser?.userId;
                   const busy     = actionSaving === user.id;
