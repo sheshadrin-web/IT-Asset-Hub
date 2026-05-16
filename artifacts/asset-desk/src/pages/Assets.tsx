@@ -4,7 +4,7 @@ import {
   Plus, Search, Monitor, Smartphone, Tablet, Eye, Edit,
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
-  RotateCcw,
+  RotateCcw, ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -167,6 +167,13 @@ export default function Assets() {
   const [userFilter, setUserFilter]     = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
+  const [sortCol, setSortCol]           = useState<ColKey>("assetId");
+  const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
+
+  const handleSort = (col: ColKey) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
 
   const setColFilter = (col: ColKey, vals: Set<string>) =>
     setColFilters(prev => ({ ...prev, [col]: vals }));
@@ -234,6 +241,13 @@ export default function Assets() {
     [...new Set(baseFiltered.map(a => getColValue(a, col)))]
       .filter(v => v !== "")
       .sort((a, b) => a.localeCompare(b));
+
+  const sorted = [...filtered].sort((a, b) => {
+    const av = getColValue(a, sortCol);
+    const bv = getColValue(b, sortCol);
+    const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+    return sortDir === "asc" ? cmp : -cmp;
+  });
 
   const allFilteredIds = filtered.map(a => a.assetId);
   const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.has(id));
@@ -514,19 +528,40 @@ export default function Assets() {
                   )}
                   {COL_DEFS.map(col => (
                     <th key={col.label} className="px-4 py-3 text-left whitespace-nowrap">
-                      {col.key ? (
-                        <ColumnFilterDropdown
-                          label={col.label}
-                          allValues={getColAllValues(col.key)}
-                          selected={colFilters[col.key]}
-                          onApply={vals => setColFilter(col.key!, vals)}
-                          align={col.align}
-                        />
-                      ) : (
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          {col.label}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-0.5">
+                        {col.key ? (
+                          <ColumnFilterDropdown
+                            label={col.label}
+                            allValues={getColAllValues(col.key)}
+                            selected={colFilters[col.key]}
+                            onApply={vals => setColFilter(col.key!, vals)}
+                            align={col.align}
+                          />
+                        ) : (
+                          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            {col.label}
+                          </span>
+                        )}
+                        {col.key && (
+                          <button
+                            type="button"
+                            onClick={() => handleSort(col.key!)}
+                            className={cn(
+                              "ml-0.5 rounded p-0.5 transition-colors",
+                              sortCol === col.key
+                                ? "text-primary"
+                                : "text-muted-foreground/30 hover:text-muted-foreground"
+                            )}
+                            title={`Sort by ${col.label}`}
+                          >
+                            {sortCol === col.key
+                              ? (sortDir === "asc"
+                                  ? <ChevronUp   className="h-3 w-3" />
+                                  : <ChevronDown className="h-3 w-3" />)
+                              : <ChevronsUpDown className="h-3 w-3" />}
+                          </button>
+                        )}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -545,7 +580,7 @@ export default function Assets() {
                     </td>
                   </tr>
                 )}
-                {filtered.map(asset => {
+                {sorted.map(asset => {
                   const isSelected = selected.has(asset.assetId);
                   return (
                     <tr key={asset.assetId}
