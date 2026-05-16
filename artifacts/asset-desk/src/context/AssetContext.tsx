@@ -48,6 +48,7 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     ackToken:        row.ack_token        ? String(row.ack_token)        : undefined,
     acknowledged:    row.acknowledged     ? Boolean(row.acknowledged)    : false,
     acknowledgedAt:  row.acknowledged_at  ? String(row.acknowledged_at) : undefined,
+    assetPhotos:     Array.isArray(row.asset_photos) ? (row.asset_photos as string[]) : undefined,
     department:      row.department       ? String(row.department)       : undefined,
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
