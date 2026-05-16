@@ -332,7 +332,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
                   <AvatarFallback className="bg-primary text-white text-[10px] font-bold">{initials}</AvatarFallback>
                 </Avatar>
-                <span className="hidden sm:block text-sm font-medium text-foreground max-w-[100px] truncate">{currentUser.name.split(" ")[0]}</span>
                 <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", profileOpen && "rotate-180")} />
               </button>
 
