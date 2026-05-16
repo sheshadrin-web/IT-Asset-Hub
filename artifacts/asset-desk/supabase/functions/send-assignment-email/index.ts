@@ -8,6 +8,7 @@ const corsHeaders = {
 };
 
 const FIXED_CC = ["sheshadri.n@mileseducation.com", "bharat.raj@mileseducation.com"];
+const APP_URL  = "https://it-asset-hub-a7rf.onrender.com";
 
 type Reason = "New Joiner" | "Replacement" | "Additional Asset" | "";
 
@@ -39,6 +40,8 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
   const firstName = (p.toName ?? "").split(" ")[0];
   const reason = (p.reason ?? "") as Reason;
   const assetType = p.assetType ?? "Asset";
+  const ackToken  = p.ackToken ?? "";
+  const ackUrl    = ackToken ? `${APP_URL}/ack/${ackToken}` : "";
 
   const row = (label: string, value?: string) =>
     value ? `<li style="margin-bottom:6px"><strong>${label}:</strong> ${value}</li>` : "";
@@ -79,10 +82,21 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
 
   const intro = getIntro(firstName, reason, assetType);
 
-  // Replacement gets an extra note about returning old device
   const replacementNote = reason === "Replacement"
     ? `<p><strong>Note:</strong> Kindly ensure your previous device is returned to the IT team at the earliest.</p>`
     : "";
+
+  const ackButton = ackUrl ? `
+<div style="margin:28px 0;text-align:center;">
+  <a href="${ackUrl}"
+     style="display:inline-block;background-color:#1a56db;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;padding:14px 32px;border-radius:8px;letter-spacing:0.3px;">
+    ✓ &nbsp;Acknowledge Receipt
+  </a>
+  <p style="margin-top:10px;font-size:12px;color:#666;">
+    Click the button above to confirm you have received this asset.<br/>
+    This records your acknowledgement in the IT system.
+  </p>
+</div>` : "";
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head>
 <body style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:680px;margin:0 auto;padding:24px;">
@@ -97,11 +111,11 @@ ${replacementNote}
 <ul style="line-height:1.7;">
   <li>Verify the above asset details</li>
   <li>Attach clear pictures of all assigned assets</li>
-  <li>Confirm receipt and acknowledge the same</li>
+  <li>Confirm receipt by clicking the button below</li>
   <li>Kindly handle these assets with care. As per company policy, any damage beyond normal wear and tear may result in recovery charges</li>
   <li>If you encounter any technical issues, please raise a ticket via the IT Help Desk</li>
 </ul>
-<p>Please ensure this is completed at the earliest.</p>
+${ackButton}
 <p>If you notice any discrepancies, kindly report them immediately.</p>
 <br/>
 <p style="margin-bottom:2px;">Regards,</p>
