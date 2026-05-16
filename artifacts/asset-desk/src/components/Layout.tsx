@@ -148,8 +148,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Logo area */}
         <div className="relative flex h-16 items-center gap-3 px-4 overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-900/40 to-transparent pointer-events-none" />
-          <div className="relative h-10 w-10 rounded-xl overflow-hidden flex-shrink-0 ring-2 ring-white/15 bg-[#111] flex items-center justify-center shadow-lg">
-            <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain p-0.5" />
+          <div className="relative h-10 w-10 rounded-xl overflow-hidden flex-shrink-0 bg-white shadow-md flex items-center justify-center">
+            <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain" />
           </div>
           <div className="relative min-w-0 flex-1">
             <div className="text-[11px] font-bold text-white leading-tight tracking-wide truncate">Miles Education Pvt Ltd</div>
