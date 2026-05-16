@@ -1245,7 +1245,7 @@ export default function Assets() {
                       <SelectItem value="New Joiner">New Joiner</SelectItem>
                       <SelectItem value="Replacement">Replacement</SelectItem>
                       <SelectItem value="Additional Asset">Additional Asset</SelectItem>
-                      <SelectItem value="">Other</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
