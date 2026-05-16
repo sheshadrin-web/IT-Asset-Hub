@@ -405,6 +405,22 @@ export default function AssetDetail() {
                         </span>
                       </p>
                     )}
+                    {asset.acknowledged ? (
+                      <span className="inline-flex items-center gap-1 mt-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                        Acknowledged
+                        {asset.acknowledgedAt && (
+                          <span className="font-normal text-emerald-600 ml-0.5">
+                            · {new Date(asset.acknowledgedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 mt-1 rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                        Pending Acknowledgement
+                      </span>
+                    )}
                   </div>
                 </div>
                 {(() => {
