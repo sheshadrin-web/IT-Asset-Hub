@@ -302,35 +302,154 @@ export default function AssetDetail() {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold">Device Information</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
-                {[
-                  { icon: <Tag />,     label: "Asset ID",      value: asset.assetId },
-                  { icon: asset.assetType === "Laptop"  ? <Monitor />    :
-                          asset.assetType === "Desktop" ? <Monitor />    :
-                          asset.assetType === "Tab"     ? <Tablet />     : <Smartphone />, label: "Type", value: asset.assetType },
-                  { icon: <Package />, label: "Brand",         value: asset.brand },
-                  { icon: <Package />, label: "Model",         value: asset.model },
-                  { icon: <Tag />,     label: "Serial Number", value: asset.serialNumber },
-                  ...((asset.assetType === "Mobile" || asset.assetType === "Tab") ? [{ icon: <Tag />, label: "IMEI", value: asset.imeiNumber ?? "—" }] : []),
-                  { icon: <Calendar />, label: "Purchase Date",  value: asset.purchaseDate },
-                  { icon: <Calendar />, label: "Warranty Ends",  value: asset.warrantyEndDate },
-                  { icon: <MapPin />,   label: "Location",       value: asset.location },
-                  { icon: <Package />,  label: "Accessories",    value: asset.accessories || "—" },
-                ].map(f => (
-                  <div key={f.label} className="flex items-start gap-3">
-                    <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
-                      <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+            <CardContent className="space-y-5">
+              {/* ── Identity ─────────────────────────────── */}
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Identity</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  {[
+                    { icon: <Tag />,      label: "Asset ID",       value: asset.assetId },
+                    { icon: asset.assetType === "Laptop" || asset.assetType === "Desktop" ? <Monitor /> : asset.assetType === "Tab" ? <Tablet /> : <Smartphone />, label: "Type", value: asset.assetType },
+                    { icon: <Package />,  label: "Brand",          value: asset.brand },
+                    { icon: <Package />,  label: "Model",          value: asset.model },
+                    { icon: <Tag />,      label: "Serial Number",  value: asset.serialNumber },
+                    ...(asset.productNumber ? [{ icon: <Tag />, label: "Product Number", value: asset.productNumber }] : []),
+                  ].map(f => (
+                    <div key={f.label} className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium break-all">{f.value}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-              {asset.remarks && (
-                <div className="mt-5 pt-4 border-t border-border">
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Remarks</p>
-                  <p className="text-sm text-foreground">{asset.remarks}</p>
+
+              {/* ── Specs (Laptop / Desktop / Tab) ───────── */}
+              {(asset.processor || asset.ram || asset.storage || asset.operatingSystem) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Specifications</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "Processor",        value: asset.processor },
+                      { label: "RAM",               value: asset.ram },
+                      { label: "Storage",           value: asset.storage },
+                      { label: "Operating System",  value: asset.operatingSystem },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Mobile / Tab specific ────────────────── */}
+              {(asset.assetType === "Mobile" || asset.assetType === "Tab") &&
+               (asset.imeiNumber || asset.imei2 || asset.simNumber || asset.phoneNumber) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Mobile Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "IMEI 1",        value: asset.imeiNumber },
+                      { label: "IMEI 2",        value: asset.imei2 },
+                      { label: "SIM Number",    value: asset.simNumber },
+                      { label: "Phone Number",  value: asset.phoneNumber },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium font-mono">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Desktop peripherals ──────────────────── */}
+              {asset.assetType === "Desktop" &&
+               (asset.cpu || asset.monitorBrand || asset.monitorModel || asset.monitorSize || asset.keyboard || asset.mouse) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Peripherals</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "CPU",           value: asset.cpu },
+                      { label: "Monitor Brand", value: asset.monitorBrand },
+                      { label: "Monitor Model", value: asset.monitorModel },
+                      { label: "Monitor Size",  value: asset.monitorSize },
+                      { label: "Keyboard",      value: asset.keyboard },
+                      { label: "Mouse",         value: asset.mouse },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Monitor /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Purchase & Location ──────────────────── */}
+              <div className="border-t border-border pt-4">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Purchase & Location</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  {[
+                    { icon: <Calendar />, label: "Purchase Date", value: asset.purchaseDate },
+                    { icon: <MapPin />,   label: "Location",      value: asset.location },
+                    ...(asset.vendor   ? [{ icon: <Building />, label: "Vendor",      value: asset.vendor }]  : []),
+                    ...(asset.invoice  ? [{ icon: <Tag />,      label: "Invoice No.", value: asset.invoice }] : []),
+                  ].map(f => (
+                    <div key={f.label} className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Accessories / Others / Remarks ───────── */}
+              {(asset.accessories || asset.others || asset.remarks) && (
+                <div className="border-t border-border pt-4 space-y-3">
+                  {asset.accessories && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Package /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Accessories</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium">{asset.accessories}</p>
+                      </div>
+                    </div>
+                  )}
+                  {asset.others && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Others</p>
+                        <p className="text-sm text-foreground mt-0.5">{asset.others}</p>
+                      </div>
+                    </div>
+                  )}
+                  {asset.remarks && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Remarks</p>
+                        <p className="text-sm text-foreground mt-0.5">{asset.remarks}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
