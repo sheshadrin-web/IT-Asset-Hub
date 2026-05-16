@@ -106,14 +106,16 @@ function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
   // Asset ID prefix is the most reliable signal — always check it first.
   // This prevents a wrong or missing "Type" column from overriding the tag.
   const aid = assetIdFallback.toUpperCase();
-  if (/-MOB-|-PHN-|-TAB-/.test(aid)) return "Mobile";
+  if (/-MOB-|-PHN-/.test(aid))        return "Mobile";
+  if (/-TAB-/.test(aid))              return "Tab";
   if (/-DES-|-DSK-/.test(aid))        return "Desktop";
   if (/-LAP-/.test(aid))              return "Laptop";
 
   // Fall back to whatever the type column says
   const v = raw.toLowerCase().trim();
-  if (v.includes("desk"))                                  return "Desktop";
-  if (v.includes("mob") || v.includes("phone") || v.includes("tab")) return "Mobile";
+  if (v.includes("desk"))                         return "Desktop";
+  if (v === "tab" || v.includes("tablet"))        return "Tab";
+  if (v.includes("mob") || v.includes("phone"))   return "Mobile";
   return "Laptop";
 }
 
@@ -241,6 +243,15 @@ const TEMPLATES: Record<AssetType, { headers: string[]; rows: string[]; filename
       "MILES-DES-001,Dell,OptiPlex 7090,SN22345,Mumbai,Windows,Intel i7 11th Gen,32,512,2023,Under Warranty,Good,Assigned,C Prompt Solutions,Jane Smith,MPE5678,Finance",
       "MILES-DES-002,HP,EliteDesk 800 G9,SN22346,Bangalore,Windows,Intel i5 12th Gen,16,256,2024,Under Warranty,Good,Available,,,,",
       "MILES-DES-003,Lenovo,ThinkCentre M90q,SN22347,Hyderabad,Windows,Intel i9 12th Gen,64,1024,2022,Expired,Fair,Under Repair,,,,",
+    ],
+  },
+  Tab: {
+    filename: "tab_import_template.csv",
+    headers: ["Asset Tag","Brand","Model","Serial Number","Location","OS","RAM","ROM","IMEI","Purchase Year","Warranty","Asset Condition","Asset Status","Employee Name","Employee Code","Employee Department"],
+    rows: [
+      "MILES-TAB-001,Apple,iPad Air 5th Gen,SN33101,Mumbai,iOS,8,256,,2023,Under Warranty,Good,Assigned,John Smith,MPE1234,Sales",
+      "MILES-TAB-002,Samsung,Galaxy Tab S9,SN33102,Bangalore,Android,12,128,358765432109876,2024,Under Warranty,Good,Available,,,,",
+      "MILES-TAB-003,Lenovo,Tab P12,SN33103,Hyderabad,Android,8,128,,2022,Expired,Fair,Under Repair,,,,",
     ],
   },
 };
