@@ -31,7 +31,7 @@ import { Asset } from "@/data/mockData";
 
 const schema = z.object({
   assetId: z.string().min(1, "Required"),
-  assetType: z.enum(["Laptop", "Mobile", "Desktop"]),
+  assetType: z.enum(["Laptop", "Mobile", "Desktop", "Tab"]),
   brand: z.string().min(1, "Required"),
   model: z.string().min(1, "Required"),
   serialNumber: z.string().min(1, "Required"),
