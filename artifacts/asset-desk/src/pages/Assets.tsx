@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "wouter";
 import {
-  Plus, Search, Monitor, Smartphone, Eye, Edit,
+  Plus, Search, Monitor, Smartphone, Tablet, Eye, Edit,
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
   RotateCcw,
@@ -79,7 +79,7 @@ function parseCsvText(text: string): ParsedRow[] {
     headers.forEach((h, j) => { row[h] = values[j] ?? ""; });
     const errors: string[] = [];
     if (!row.assetId) errors.push("assetId is required");
-    if (!["Laptop", "Mobile", "Desktop"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop, Mobile, or Desktop");
+    if (!["Laptop", "Mobile", "Desktop", "Tab"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop, Mobile, Desktop, or Tab");
     if (!row.brand) errors.push("brand is required");
     if (!row.model) errors.push("model is required");
     if (!row.serialNumber) errors.push("serialNumber is required");
@@ -90,7 +90,7 @@ function parseCsvText(text: string): ParsedRow[] {
       index: i + 1,
       data: {
         assetId:         row.assetId,
-        assetType:       (row.assetType as "Laptop" | "Mobile" | "Desktop") || "Laptop",
+        assetType:       (row.assetType as "Laptop" | "Mobile" | "Desktop" | "Tab") || "Laptop",
         brand:           row.brand,
         model:           row.model,
         serialNumber:    row.serialNumber,
@@ -364,6 +364,7 @@ export default function Assets() {
                 <SelectItem value="Laptop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Laptop</span></SelectItem>
                 <SelectItem value="Mobile"><span className="flex items-center gap-2"><Smartphone className="h-3.5 w-3.5" /> Mobile</span></SelectItem>
                 <SelectItem value="Desktop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Desktop</span></SelectItem>
+                <SelectItem value="Tab"><span className="flex items-center gap-2"><Tablet className="h-3.5 w-3.5" /> Tab</span></SelectItem>
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -472,6 +473,7 @@ export default function Assets() {
                         <div className="flex items-center gap-1.5">
                           {asset.assetType === "Laptop"  ? <Monitor    className="h-3.5 w-3.5 text-blue-500"   /> :
                            asset.assetType === "Desktop" ? <Monitor    className="h-3.5 w-3.5 text-violet-500" /> :
+                           asset.assetType === "Tab"     ? <Tablet     className="h-3.5 w-3.5 text-teal-500"   /> :
                                                            <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
                           <span className="text-xs font-medium text-foreground">{asset.assetType}</span>
                         </div>
