@@ -277,7 +277,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     // Capture current assignment info before clearing
     const assetObj = assets.find(a => a.assetId === assetId);
     const coreUpdates: Record<string, unknown> = {
-      status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, ack_token: null, acknowledged: false, acknowledged_at: null,
+      status: finalStatus, assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, department: null, ack_token: null, acknowledged: false, acknowledged_at: null,
     };
     const { error } = await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
@@ -286,7 +286,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     }
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
-        ? { ...a, status: finalStatus, assignedTo: undefined, assignedEmail: undefined }
+        ? { ...a, status: finalStatus, assignedTo: undefined, assignedEmail: undefined, department: undefined }
         : a
     ));
     // Log return to history (non-fatal)
