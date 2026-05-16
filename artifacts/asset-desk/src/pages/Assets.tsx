@@ -31,6 +31,7 @@ import { useAssets } from "@/context/AssetContext";
 import { useUsers } from "@/context/UsersContext";
 import { useAuth } from "@/context/AuthContext";
 import { AssetStatus, Asset } from "@/data/mockData";
+import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +51,45 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   Lost:             "bg-red-500",
   Retired:          "bg-gray-400",
 };
+
+type ColKey = "assetId" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate";
+
+function getColValue(a: Asset, col: ColKey): string {
+  switch (col) {
+    case "assetId":         return a.assetId || "";
+    case "assetType":       return a.assetType || "";
+    case "brand":           return a.brand ? `${a.brand} – ${a.model}` : "";
+    case "serialNumber":    return a.serialNumber || "";
+    case "assignedTo":      return a.assignedTo || "—";
+    case "department":      return a.department || "—";
+    case "status":          return a.status || "";
+    case "assignedAt":      return a.assignedAt
+      ? new Date(a.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      : "—";
+    case "warrantyEndDate": return a.warrantyEndDate || "—";
+  }
+}
+
+function makeEmptyColFilters(): Record<ColKey, Set<string>> {
+  return {
+    assetId: new Set(), assetType: new Set(), brand: new Set(),
+    serialNumber: new Set(), assignedTo: new Set(), department: new Set(),
+    status: new Set(), assignedAt: new Set(), warrantyEndDate: new Set(),
+  };
+}
+
+const COL_DEFS: { label: string; key?: ColKey; align?: "left" | "right" }[] = [
+  { label: "Asset ID",      key: "assetId" },
+  { label: "Type",          key: "assetType" },
+  { label: "Brand / Model", key: "brand" },
+  { label: "Serial Number", key: "serialNumber" },
+  { label: "Assigned To",   key: "assignedTo" },
+  { label: "Department",    key: "department" },
+  { label: "Status",        key: "status" },
+  { label: "Assigned Date", key: "assignedAt",      align: "right" },
+  { label: "Warranty End",  key: "warrantyEndDate", align: "right" },
+  { label: "Actions" },
+];
 
 const CSV_HEADERS = [
   "assetId","assetType","brand","model","serialNumber","imeiNumber",
@@ -126,6 +166,20 @@ export default function Assets() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [userFilter, setUserFilter]     = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
+  const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
+
+  const setColFilter = (col: ColKey, vals: Set<string>) =>
+    setColFilters(prev => ({ ...prev, [col]: vals }));
+
+  const hasColFilters = Object.values(colFilters).some(s => s.size > 0);
+  const hasAnyFilter  = search !== "" || typeFilter !== "all" || statusFilter !== "all"
+    || userFilter !== "all" || deptFilter !== "all" || hasColFilters;
+
+  const clearAllFilters = () => {
+    setSearch(""); setTypeFilter("all"); setStatusFilter("all");
+    setUserFilter("all"); setDeptFilter("all");
+    setColFilters(makeEmptyColFilters());
+  };
 
   const [selected, setSelected]         = useState<Set<string>>(new Set());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -152,7 +206,7 @@ export default function Assets() {
   const isAdmin = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
   const canEdit = isAdmin || currentUser?.role === "it_agent";
 
-  const filtered = assets.filter(a => {
+  const baseFiltered = assets.filter(a => {
     const q = search.toLowerCase();
     const matchSearch = !q
       || a.assetId.toLowerCase().includes(q)
@@ -168,6 +222,18 @@ export default function Assets() {
     const matchDept   = deptFilter   === "all" || (a.department ?? "") === deptFilter;
     return matchSearch && matchType && matchStatus && matchUser && matchDept;
   });
+
+  const filtered = baseFiltered.filter(a =>
+    (Object.keys(colFilters) as ColKey[]).every(col => {
+      const vals = colFilters[col];
+      return vals.size === 0 || vals.has(getColValue(a, col));
+    })
+  );
+
+  const getColAllValues = (col: ColKey) =>
+    [...new Set(baseFiltered.map(a => getColValue(a, col)))]
+      .filter(v => v !== "")
+      .sort((a, b) => a.localeCompare(b));
 
   const allFilteredIds = filtered.map(a => a.assetId);
   const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.has(id));
@@ -295,10 +361,10 @@ export default function Assets() {
   };
 
   const counts = {
-    total:     assets.length,
-    available: assets.filter(a => a.status === "Available").length,
-    assigned:  assets.filter(a => a.status === "Assigned").length,
-    repair:    assets.filter(a => a.status === "Under Repair").length,
+    total:     filtered.length,
+    available: filtered.filter(a => a.status === "Available").length,
+    assigned:  filtered.filter(a => a.status === "Assigned").length,
+    repair:    filtered.filter(a => a.status === "Under Repair").length,
   };
 
   return (
@@ -413,6 +479,21 @@ export default function Assets() {
               </SelectContent>
             </Select>
           </div>
+
+          {hasAnyFilter && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {filtered.length} of {assets.length} assets match active filters
+              </span>
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium underline-offset-2 hover:underline"
+              >
+                <X className="h-3 w-3" /> Clear all filters
+              </button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -431,8 +512,22 @@ export default function Assets() {
                       />
                     </th>
                   )}
-                  {["Asset ID","Type","Brand / Model","Serial Number","Assigned To","Department","Status","Assigned Date","Warranty End","Actions"].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  {COL_DEFS.map(col => (
+                    <th key={col.label} className="px-4 py-3 text-left whitespace-nowrap">
+                      {col.key ? (
+                        <ColumnFilterDropdown
+                          label={col.label}
+                          allValues={getColAllValues(col.key)}
+                          selected={colFilters[col.key]}
+                          onApply={vals => setColFilter(col.key!, vals)}
+                          align={col.align}
+                        />
+                      ) : (
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {col.label}
+                        </span>
+                      )}
+                    </th>
                   ))}
                 </tr>
               </thead>
