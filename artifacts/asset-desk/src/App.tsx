@@ -15,6 +15,7 @@ import { TicketProvider } from "@/context/TicketContext";
 import { UsersProvider } from "@/context/UsersContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
+import AcknowledgePage from "@/pages/AcknowledgePage";
 import Forbidden from "@/pages/Forbidden";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
@@ -201,6 +202,11 @@ function Router() {
       {/* Diagnostic page — requires login to prevent public exposure of system info */}
       <Route path="/supabase-check">
         <ProtectedRoute component={SupabaseCheck} />
+      </Route>
+
+      {/* Public — acknowledgement link (no login required) */}
+      <Route path="/ack/:token">
+        {() => <AcknowledgePage />}
       </Route>
 
       {/* Public */}
