@@ -73,7 +73,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const RAM_OPTIONS     = ["2 GB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB"];
 const STORAGE_OPTIONS = ["64 GB", "128 GB", "256 GB", "512 GB", "1 TB", "2 TB"];
-const OS_OPTIONS      = ["Windows 10", "Windows 11", "macOS Ventura", "macOS Sonoma", "Ubuntu 22.04", "Other"];
+const OS_OPTIONS      = ["Windows 10", "Windows 11", "macOS", "Ubuntu 22.04", "Other"];
 const MONITOR_SIZES   = ['17"', '19"', '21"', '22"', '24"', '27"', '32"', 'Other'];
 
 function SelectField({
