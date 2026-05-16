@@ -1,8 +1,7 @@
 import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
-  TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon,
-  ArrowRight,
+  TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -260,13 +259,6 @@ export default function Dashboard() {
           <p className="text-xs text-muted-foreground font-medium">{todayLabel()}</p>
           <h1 className="text-xl font-bold text-foreground mt-0.5">{greeting()}, {currentUser?.name.split(" ")[0]} 👋</h1>
           <p className="text-sm text-muted-foreground mt-0.5">IT Asset Management Overview</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/assets/add">
-            <Button variant="outline" size="sm" className="gap-2 text-xs hidden sm:flex">
-              <Plus className="h-3.5 w-3.5" />Add Asset
-            </Button>
-          </Link>
         </div>
       </div>
 
