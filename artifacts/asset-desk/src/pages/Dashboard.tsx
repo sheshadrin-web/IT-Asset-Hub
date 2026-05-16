@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
   TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon,
+  ArrowRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,17 @@ const STATUS_COLORS: Record<string, string> = {
   Rejected:           "bg-red-500/15 text-red-500 border-red-500/20",
 };
 
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function todayLabel(): string {
+  return new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+
 function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; message: string; sub?: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-[220px] gap-2 text-center">
@@ -39,12 +51,36 @@ function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; mes
   );
 }
 
+function StatCard({
+  label, value, icon: Icon, color, bg, border, href,
+}: {
+  label: string; value: number; icon: React.ElementType;
+  color: string; bg: string; border: string; href: string;
+}) {
+  return (
+    <Link href={href}>
+      <Card className="cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 overflow-hidden group">
+        <div className={`h-0.5 ${border} w-full`} />
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between mb-3">
+            <div className={`inline-flex rounded-xl p-2.5 ${bg}`}>
+              <Icon className={`h-4 w-4 ${color}`} />
+            </div>
+            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+          </div>
+          <div className={`text-2xl font-bold text-foreground`}>{value}</div>
+          <div className="text-xs text-muted-foreground mt-0.5 leading-tight font-medium">{label}</div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
 function EndUserDashboard({ userName }: { userName: string }) {
   const { assets }      = useAssets();
   const { tickets }     = useTickets();
   const { currentUser } = useAuth();
 
-  // Match by email (authoritative) or by display name (legacy fallback).
   const myTickets     = tickets.filter((t) =>
     (currentUser?.email && t.employeeEmail === currentUser.email) ||
     t.raisedBy === userName
@@ -59,68 +95,57 @@ function EndUserDashboard({ userName }: { userName: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-foreground">My Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Welcome back, {userName.split(" ")[0]}</p>
+          <p className="text-xs text-muted-foreground font-medium">{todayLabel()}</p>
+          <h1 className="text-xl font-bold text-foreground mt-0.5">{greeting()}, {userName.split(" ")[0]} 👋</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Here's your helpdesk overview</p>
         </div>
         <Link href="/tickets/new">
-          <Button className="gap-2"><Plus className="h-4 w-4" />Raise a Ticket</Button>
+          <Button className="gap-2 shadow-sm"><Plus className="h-4 w-4" />Raise a Ticket</Button>
         </Link>
       </div>
 
+      {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "My Tickets",  value: myTickets.length,  icon: Ticket,       color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/tickets" },
-          { label: "Open",        value: openCount,          icon: AlertTriangle, color: "text-amber-500",  bg: "bg-amber-500/10",   href: "/tickets" },
-          { label: "Resolved",    value: resolvedCount,      icon: CheckCircle,  color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets" },
-          { label: "My Assets",   value: myAssets.length,   icon: Monitor,      color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/my-assets" },
-        ].map((card) => {
-          const Icon = card.icon;
-          return (
-            <Link key={card.label} href={card.href}>
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className={`inline-flex rounded-lg p-2 ${card.bg} mb-3`}>
-                    <Icon className={`h-4 w-4 ${card.color}`} />
-                  </div>
-                  <div className="text-2xl font-bold text-foreground">{card.value}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{card.label}</div>
-                </CardContent>
-              </Card>
-            </Link>
-          );
-        })}
+          { label: "My Tickets",  value: myTickets.length,  icon: Ticket,       color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
+          { label: "Open",        value: openCount,          icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50",   border: "bg-amber-500",   href: "/tickets" },
+          { label: "Resolved",    value: resolvedCount,      icon: CheckCircle,  color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
+          { label: "My Assets",   value: myAssets.length,   icon: Monitor,      color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/my-assets" },
+        ].map((c) => <StatCard key={c.label} {...c} />)}
       </div>
 
+      {/* Assigned Assets */}
       {myAssets.length > 0 && (
         <Card>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Monitor className="h-4 w-4 text-muted-foreground" />My Assigned Assets
             </CardTitle>
-            <Link href="/my-assets" className="text-xs text-primary hover:underline">View all</Link>
+            <Link href="/my-assets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border">
+                  <tr className="border-b border-border bg-muted/30">
                     {["Asset ID","Device","Status","Warranty"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{h}</th>
+                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {myAssets.map((a) => (
-                    <tr key={a.assetId} className="border-b border-border last:border-0 hover:bg-muted/40">
-                      <td className="px-4 py-3 font-mono text-xs text-primary">{a.assetId}</td>
+                    <tr key={a.assetId} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{a.assetId}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{a.brand} {a.model}</div>
                         <div className="text-xs text-muted-foreground">{a.assetType}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium bg-blue-500/15 text-blue-600 border-blue-500/20">{a.status}</span>
+                        <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-blue-500/15 text-blue-600 border-blue-500/20">{a.status}</span>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{a.warrantyEndDate}</td>
                     </tr>
@@ -132,12 +157,13 @@ function EndUserDashboard({ userName }: { userName: string }) {
         </Card>
       )}
 
+      {/* Recent Tickets */}
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />My Recent Tickets
           </CardTitle>
-          <Link href="/tickets" className="text-xs text-primary hover:underline">View all</Link>
+          <Link href="/tickets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
         </CardHeader>
         <CardContent className="p-0">
           {recentTickets.length === 0 ? (
@@ -149,24 +175,24 @@ function EndUserDashboard({ userName }: { userName: string }) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border">
+                  <tr className="border-b border-border bg-muted/30">
                     {["Ticket ID","Category","Priority","Status","Date"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{h}</th>
+                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {recentTickets.map((t) => (
-                    <tr key={t.ticketId} className="border-b border-border last:border-0 hover:bg-muted/40">
+                    <tr key={t.ticketId} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                       <td className="px-4 py-3">
-                        <Link href={`/tickets/${t.ticketId}`} className="text-primary font-medium hover:underline">{t.ticketId}</Link>
+                        <Link href={`/tickets/${t.ticketId}`} className="text-primary font-semibold hover:underline">{t.ticketId}</Link>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.category}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[t.status]}`}>{t.status}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[t.status]}`}>{t.status}</span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{t.createdDate}</td>
                     </tr>
@@ -190,7 +216,6 @@ export default function Dashboard() {
     return <EndUserDashboard userName={currentUser.name} />;
   }
 
-  // ── Derived stats ──────────────────────────────────────────────────────────
   const assetStatusData = [
     { name: "In Procurement", value: assets.filter((a) => a.status === "In Procurement").length, color: "#f97316" },
     { name: "Available",      value: assets.filter((a) => a.status === "Available").length,      color: "#22c55e" },
@@ -214,48 +239,63 @@ export default function Dashboard() {
     .filter((t) => !["Resolved", "Closed"].includes(t.status))
     .slice(0, 5);
 
+  const pendingAck = assets.filter(a => a.status === "Assigned" && !a.acknowledged).length;
+
   const statCards = [
-    { label: "Total Assets",        value: assets.length,                                                                                             icon: Package,       color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/assets" },
-    { label: "Assigned Assets",     value: assets.filter((a) => a.status === "Assigned").length,                                                      icon: Monitor,       color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/assets" },
-    { label: "Available Assets",    value: assets.filter((a) => a.status === "Available").length,                                                     icon: CheckCircle,   color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/assets" },
-    { label: "Under Repair",        value: assets.filter((a) => a.status === "Under Repair").length,                                                  icon: Wrench,        color: "text-amber-500",   bg: "bg-amber-500/10",   href: "/assets" },
-    { label: "Open Tickets",        value: tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length,                      icon: Ticket,        color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/tickets" },
-    { label: "Critical Tickets",    value: tickets.filter((t) => t.priority === "Critical" && !["Resolved", "Closed", "Rejected"].includes(t.status)).length, icon: AlertTriangle, color: "text-red-500",     bg: "bg-red-500/10",     href: "/tickets" },
-    { label: "Resolved This Month", value: tickets.filter((t) => t.status === "Resolved").length,                                                     icon: TrendingUp,    color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets" },
+    { label: "Total Assets",        value: assets.length,                                                                                                          icon: Package,       color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/assets" },
+    { label: "Assigned",            value: assets.filter((a) => a.status === "Assigned").length,                                                                   icon: Monitor,       color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/assets" },
+    { label: "Available",           value: assets.filter((a) => a.status === "Available").length,                                                                  icon: CheckCircle,   color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/assets" },
+    { label: "Under Repair",        value: assets.filter((a) => a.status === "Under Repair").length,                                                               icon: Wrench,        color: "text-amber-600",   bg: "bg-amber-50",   border: "bg-amber-500",   href: "/assets" },
+    { label: "Open Tickets",        value: tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length,                                   icon: Ticket,        color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
+    { label: "Critical Tickets",    value: tickets.filter((t) => t.priority === "Critical" && !["Resolved", "Closed", "Rejected"].includes(t.status)).length,      icon: AlertTriangle, color: "text-red-600",     bg: "bg-red-50",     border: "bg-red-500",     href: "/tickets" },
+    { label: "Resolved This Month", value: tickets.filter((t) => t.status === "Resolved").length,                                                                  icon: TrendingUp,    color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
+    { label: "Pending Ack.",        value: pendingAck,                                                                                                             icon: Clock,         color: "text-orange-600",  bg: "bg-orange-50",  border: "bg-orange-500",  href: "/assets" },
   ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">IT Asset Management Overview</p>
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-xs text-muted-foreground font-medium">{todayLabel()}</p>
+          <h1 className="text-xl font-bold text-foreground mt-0.5">{greeting()}, {currentUser?.name.split(" ")[0]} 👋</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">IT Asset Management Overview</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="/assets/add">
+            <Button variant="outline" size="sm" className="gap-2 text-xs hidden sm:flex">
+              <Plus className="h-3.5 w-3.5" />Add Asset
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Link key={card.label} href={card.href}>
-              <Card className="cursor-pointer hover:shadow-md transition-shadow" data-testid={`card-stat-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
-                <CardContent className="p-4">
-                  <div className={`inline-flex rounded-lg p-2 ${card.bg} mb-3`}>
-                    <Icon className={`h-4 w-4 ${card.color}`} />
-                  </div>
-                  <div className="text-2xl font-bold text-foreground">{card.value}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5 leading-tight">{card.label}</div>
-                </CardContent>
-              </Card>
-            </Link>
-          );
-        })}
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+        {statCards.map((card) => (
+          <StatCard key={card.label} {...card} />
+        ))}
       </div>
+
+      {/* Pending acknowledgement alert */}
+      {pendingAck > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+          <Clock className="h-4 w-4 text-orange-500 flex-shrink-0" />
+          <p className="text-sm text-orange-700">
+            <strong>{pendingAck} asset{pendingAck > 1 ? "s" : ""}</strong> {pendingAck > 1 ? "are" : "is"} awaiting acknowledgement from assigned users.
+          </p>
+          <Link href="/assets" className="ml-auto text-xs font-semibold text-orange-600 hover:underline whitespace-nowrap">View assets →</Link>
+        </div>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">Asset Status Distribution</CardTitle>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <PieChartIcon className="h-4 w-4 text-muted-foreground" />
+              Asset Status Distribution
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {assetChartData.length === 0 ? (
@@ -278,7 +318,10 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">Tickets by Category</CardTitle>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <BarChartIcon className="h-4 w-4 text-muted-foreground" />
+              Tickets by Category
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {ticketCategoryData.length === 0 ? (
@@ -303,22 +346,22 @@ export default function Dashboard() {
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />Active Tickets
           </CardTitle>
-          <Link href="/tickets" className="text-xs text-primary hover:underline">View all</Link>
+          <Link href="/tickets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
         </CardHeader>
         <CardContent className="p-0">
           {recentTickets.length === 0 ? (
             <div className="px-4 py-12 text-center">
               <Clock className="h-8 w-8 mx-auto text-muted-foreground/25 mb-3" />
               <p className="text-sm text-muted-foreground">No active tickets.</p>
-              <p className="text-xs text-muted-foreground/60 mt-1">Open and in-progress tickets raised by users will appear here.</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Open and in-progress tickets will appear here.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border">
+                  <tr className="border-b border-border bg-muted/30">
                     {["Ticket ID","Raised By","Category","Priority","Status","Date"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{h}</th>
+                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -326,15 +369,15 @@ export default function Dashboard() {
                   {recentTickets.map((ticket) => (
                     <tr key={ticket.ticketId} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                       <td className="px-4 py-3">
-                        <Link href={`/tickets/${ticket.ticketId}`} className="text-primary font-medium hover:underline">{ticket.ticketId}</Link>
+                        <Link href={`/tickets/${ticket.ticketId}`} className="text-primary font-semibold hover:underline">{ticket.ticketId}</Link>
                       </td>
-                      <td className="px-4 py-3 text-foreground">{ticket.raisedBy}</td>
+                      <td className="px-4 py-3 text-foreground font-medium">{ticket.raisedBy}</td>
                       <td className="px-4 py-3 text-muted-foreground">{ticket.category}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[ticket.priority]}`}>{ticket.priority}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${PRIORITY_COLORS[ticket.priority]}`}>{ticket.priority}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[ticket.status]}`}>{ticket.status}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[ticket.status]}`}>{ticket.status}</span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{ticket.createdDate}</td>
                     </tr>
