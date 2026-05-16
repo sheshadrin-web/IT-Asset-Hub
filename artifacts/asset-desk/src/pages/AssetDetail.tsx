@@ -1,6 +1,6 @@
 import { useParams, Link } from "wouter";
 import {
-  ArrowLeft, Monitor, Smartphone, Calendar, MapPin,
+  ArrowLeft, Monitor, Smartphone, Tablet, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
   ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
@@ -182,7 +182,10 @@ export default function AssetDetail() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
-                {asset.assetType === "Laptop" ? <Monitor className="h-5 w-5 text-primary" /> : <Smartphone className="h-5 w-5 text-primary" />}
+                {asset.assetType === "Laptop"  ? <Monitor   className="h-5 w-5 text-primary" /> :
+                 asset.assetType === "Desktop" ? <Monitor   className="h-5 w-5 text-primary" /> :
+                 asset.assetType === "Tab"     ? <Tablet    className="h-5 w-5 text-primary" /> :
+                                                 <Smartphone className="h-5 w-5 text-primary" />}
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -303,11 +306,13 @@ export default function AssetDetail() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
                 {[
                   { icon: <Tag />,     label: "Asset ID",      value: asset.assetId },
-                  { icon: asset.assetType === "Laptop" ? <Monitor /> : <Smartphone />, label: "Type", value: asset.assetType },
+                  { icon: asset.assetType === "Laptop"  ? <Monitor />    :
+                          asset.assetType === "Desktop" ? <Monitor />    :
+                          asset.assetType === "Tab"     ? <Tablet />     : <Smartphone />, label: "Type", value: asset.assetType },
                   { icon: <Package />, label: "Brand",         value: asset.brand },
                   { icon: <Package />, label: "Model",         value: asset.model },
                   { icon: <Tag />,     label: "Serial Number", value: asset.serialNumber },
-                  ...(asset.assetType === "Mobile" ? [{ icon: <Tag />, label: "IMEI", value: asset.imeiNumber ?? "—" }] : []),
+                  ...((asset.assetType === "Mobile" || asset.assetType === "Tab") ? [{ icon: <Tag />, label: "IMEI", value: asset.imeiNumber ?? "—" }] : []),
                   { icon: <Calendar />, label: "Purchase Date",  value: asset.purchaseDate },
                   { icon: <Calendar />, label: "Warranty Ends",  value: asset.warrantyEndDate },
                   { icon: <MapPin />,   label: "Location",       value: asset.location },
