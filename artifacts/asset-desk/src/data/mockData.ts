@@ -98,6 +98,7 @@ export interface Asset {
   ackToken?:        string;
   acknowledged?:    boolean;
   acknowledgedAt?:  string;
+  assetPhotos?:     string[];
   department?:      string;
   location:         string;
   accessories:      string;
