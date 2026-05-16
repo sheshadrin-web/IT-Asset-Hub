@@ -9,12 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Laptop, Smartphone, Monitor } from "lucide-react";
+import { Laptop, Smartphone, Monitor, Tablet } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
-  assetType:       z.enum(["Laptop", "Mobile", "Desktop"]),
+  assetType:       z.enum(["Laptop", "Mobile", "Desktop", "Tab"]),
   brand:           z.string().min(1, "Brand is required"),
   model:           z.string().min(1, "Model is required"),
   serialNumber:    z.string().min(1, "Serial number is required"),
@@ -71,10 +71,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-const RAM_OPTIONS     = ["2 GB", "4 GB", "8 GB", "16 GB", "32 GB", "64 GB"];
-const STORAGE_OPTIONS = ["64 GB", "128 GB", "256 GB", "512 GB", "1 TB", "2 TB"];
-const OS_OPTIONS      = ["Windows 10", "Windows 11", "macOS", "Ubuntu 22.04", "Other"];
-const MONITOR_SIZES   = ['17"', '19"', '21"', '22"', '24"', '27"', '32"', 'Other'];
+const RAM_OPTIONS        = ["2 GB", "4 GB", "6 GB", "8 GB", "12 GB", "16 GB", "32 GB", "64 GB"];
+const STORAGE_OPTIONS    = ["64 GB", "128 GB", "256 GB", "512 GB", "1 TB", "2 TB"];
+const OS_OPTIONS         = ["Windows 10", "Windows 11", "macOS", "Ubuntu 22.04", "Other"];
+const MOBILE_OS_OPTIONS  = ["iOS", "Android"];
+const MONITOR_SIZES      = ['17"', '19"', '21"', '22"', '24"', '27"', '32"', 'Other'];
 
 function SelectField({
   label, value, onChange, placeholder, options,
@@ -136,6 +137,7 @@ export default function AssetForm({
   const isLaptop  = assetType === "Laptop";
   const isMobile  = assetType === "Mobile";
   const isDesktop = assetType === "Desktop";
+  const isTab     = assetType === "Tab";
 
   return (
     <Form {...form}>
@@ -167,8 +169,8 @@ export default function AssetForm({
 
         {/* Asset Type */}
         <Section title="Asset Type">
-          <div className="grid grid-cols-3 gap-3">
-            {(["Laptop", "Mobile", "Desktop"] as const).map((type) => (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {(["Laptop", "Mobile", "Desktop", "Tab"] as const).map((type) => (
               <button
                 key={type}
                 type="button"
@@ -183,9 +185,10 @@ export default function AssetForm({
                 )}
                 data-testid={`type-selector-${type.toLowerCase()}`}
               >
-                {type === "Laptop"  ? <Laptop className="h-7 w-7" />   :
+                {type === "Laptop"  ? <Laptop    className="h-7 w-7" /> :
                  type === "Mobile"  ? <Smartphone className="h-7 w-7" /> :
-                                      <Monitor className="h-7 w-7" />}
+                 type === "Tab"     ? <Tablet    className="h-7 w-7" /> :
+                                      <Monitor   className="h-7 w-7" />}
                 <span className="text-sm font-semibold">{type}</span>
               </button>
             ))}
@@ -285,6 +288,32 @@ export default function AssetForm({
         {isMobile && (
           <Section title="Mobile Details">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField control={form.control} name="operatingSystem" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>OS / Version</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {MOBILE_OS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="ram" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>RAM</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
               <FormField control={form.control} name="imeiNumber" render={({ field }) => (
                 <FormItem>
                   <FormLabel>IMEI 1</FormLabel>
@@ -326,6 +355,77 @@ export default function AssetForm({
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+          </Section>
+        )}
+
+        {/* ── Tab Details ──────────────────────────────────────────────── */}
+        {isTab && (
+          <Section title="Tab Details">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField control={form.control} name="operatingSystem" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>OS / Version</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select OS" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {MOBILE_OS_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="ram" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>RAM</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select RAM" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {RAM_OPTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="storage" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Storage</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {["64 GB", "128 GB", "256 GB", "512 GB", "1 TB"].map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="imeiNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>IMEI (Cellular)</FormLabel>
+                  <FormControl><Input {...field} placeholder="IMEI if cellular-enabled tab" data-testid="input-imei" /></FormControl>
+                  <FormDescription className="text-xs">Leave blank for Wi-Fi-only tablets</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="simNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SIM Number</FormLabel>
+                  <FormControl><Input {...field} placeholder="SIM card number / ICCID" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Phone / Data Number</FormLabel>
+                  <FormControl><Input {...field} placeholder="Assigned number (if any)" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
