@@ -44,7 +44,11 @@ function EndUserDashboard({ userName }: { userName: string }) {
   const { tickets }     = useTickets();
   const { currentUser } = useAuth();
 
-  const myTickets     = tickets.filter((t) => t.raisedBy === userName);
+  // Match by email (authoritative) or by display name (legacy fallback).
+  const myTickets     = tickets.filter((t) =>
+    (currentUser?.email && t.employeeEmail === currentUser.email) ||
+    t.raisedBy === userName
+  );
   const myAssets      = assets.filter((a) =>
     (a.assignedTo && a.assignedTo === userName) ||
     (a.assignedEmail && a.assignedEmail === currentUser?.email)
@@ -140,11 +144,6 @@ function EndUserDashboard({ userName }: { userName: string }) {
             <div className="px-4 py-10 text-center">
               <Ticket className="h-8 w-8 mx-auto text-muted-foreground/30 mb-3" />
               <p className="text-sm text-muted-foreground">No tickets yet.</p>
-              <Link href="/tickets/new">
-                <Button variant="outline" size="sm" className="mt-3 gap-2">
-                  <Plus className="h-3.5 w-3.5" />Raise your first ticket
-                </Button>
-              </Link>
             </div>
           ) : (
             <div className="overflow-x-auto">
