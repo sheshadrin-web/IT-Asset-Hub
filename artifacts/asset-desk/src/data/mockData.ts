@@ -95,6 +95,9 @@ export interface Asset {
   assignedEmail?:   string;
   assignedEcode?:   string;
   assignedAt?:      string;
+  ackToken?:        string;
+  acknowledged?:    boolean;
+  acknowledgedAt?:  string;
   department?:      string;
   location:         string;
   accessories:      string;
