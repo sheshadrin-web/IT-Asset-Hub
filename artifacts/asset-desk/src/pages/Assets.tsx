@@ -497,6 +497,17 @@ export default function Assets() {
                                   <div className="text-[10px] font-mono font-semibold text-muted-foreground leading-none mb-0.5">{ecode}</div>
                                 )}
                                 <span className="text-sm text-foreground leading-tight">{displayName}</span>
+                                {asset.acknowledged ? (
+                                  <div className="flex items-center gap-0.5 mt-0.5">
+                                    <svg className="h-2.5 w-2.5 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                                    <span className="text-[10px] text-emerald-600 font-semibold">Acknowledged</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-0.5 mt-0.5">
+                                    <svg className="h-2.5 w-2.5 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                                    <span className="text-[10px] text-amber-600 font-semibold">Pending Ack</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
