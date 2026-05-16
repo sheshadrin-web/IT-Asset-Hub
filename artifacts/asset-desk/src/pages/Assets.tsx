@@ -5,6 +5,7 @@ import {
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
   RotateCcw, ChevronUp, ChevronDown, ChevronsUpDown,
+  Users, CheckSquare, Package,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -156,7 +157,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, updateStatus, unassignAsset, deleteAssets } = useAssets();
+  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -202,6 +203,72 @@ export default function Assets() {
   const [handoverNote, setHandoverNote] = useState("");
   const [assignConfirmOpen, setAssignConfirmOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
+
+  // Bulk Assign state
+  const [bulkOpen,        setBulkOpen]        = useState(false);
+  const [bulkStep,        setBulkStep]        = useState<1 | 2 | 3>(1);
+  const [bulkUser,        setBulkUser]        = useState("");
+  const [bulkUserSearch,  setBulkUserSearch]  = useState("");
+  const [bulkAssetIds,    setBulkAssetIds]    = useState<Set<string>>(new Set());
+  const [bulkTypeFilter,  setBulkTypeFilter]  = useState("All");
+  const [bulkAssetSearch, setBulkAssetSearch] = useState("");
+  const [bulkReason,      setBulkReason]      = useState("New Joiner");
+  const [bulkDate,        setBulkDate]        = useState(new Date().toISOString().split("T")[0]);
+  const [bulkNote,        setBulkNote]        = useState("");
+  const [bulkAssigning,   setBulkAssigning]   = useState(false);
+
+  const openBulkAssign = () => {
+    setBulkStep(1); setBulkUser(""); setBulkUserSearch("");
+    setBulkAssetIds(new Set()); setBulkTypeFilter("All"); setBulkAssetSearch("");
+    setBulkReason("New Joiner"); setBulkDate(new Date().toISOString().split("T")[0]);
+    setBulkNote(""); setBulkOpen(true);
+  };
+
+  const bulkSelectedUser  = users.find(u => u.id === bulkUser);
+  const bulkFilteredUsers = users.filter(u => u.status === "active" && (
+    !bulkUserSearch.trim() ||
+    u.full_name.toLowerCase().includes(bulkUserSearch.toLowerCase()) ||
+    u.email.toLowerCase().includes(bulkUserSearch.toLowerCase()) ||
+    (u.ecode ?? "").toLowerCase().includes(bulkUserSearch.toLowerCase()) ||
+    (u.department ?? "").toLowerCase().includes(bulkUserSearch.toLowerCase())
+  ));
+
+  const availableAssets = assets.filter(a => a.status === "Available");
+  const bulkPickerAssets = availableAssets.filter(a => {
+    const matchType = bulkTypeFilter === "All" || a.assetType === bulkTypeFilter;
+    const q = bulkAssetSearch.toLowerCase();
+    const matchSearch = !q ||
+      a.assetId.toLowerCase().includes(q) ||
+      a.brand.toLowerCase().includes(q) ||
+      a.model.toLowerCase().includes(q) ||
+      (a.serialNumber ?? "").toLowerCase().includes(q);
+    return matchType && matchSearch;
+  });
+
+  const toggleBulkAsset = (id: string) =>
+    setBulkAssetIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const handleBulkAssignConfirm = async () => {
+    if (!bulkSelectedUser || bulkAssetIds.size === 0) return;
+    setBulkAssigning(true);
+    try {
+      await bulkAssignAssets(
+        [...bulkAssetIds],
+        bulkSelectedUser.id, bulkSelectedUser.full_name, bulkSelectedUser.email,
+        bulkSelectedUser.department ?? "",
+        bulkNote || undefined,
+        bulkReason,
+      );
+      toast({
+        title: `${bulkAssetIds.size} asset${bulkAssetIds.size > 1 ? "s" : ""} assigned`,
+        description: `All assigned to ${bulkSelectedUser.full_name}. Email sent with asset details.`,
+      });
+      setBulkOpen(false);
+    } catch (err) {
+      toast({ title: "Bulk assign failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    }
+    setBulkAssigning(false);
+  };
 
   // Bulk upload
   const [uploadOpen, setUploadOpen]   = useState(false);
@@ -390,12 +457,15 @@ export default function Assets() {
           <p className="text-sm text-muted-foreground mt-0.5">{assets.length} total assets</p>
         </div>
         {isAdmin && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Link href="/assets/import">
               <Button variant="outline" className="gap-2" data-testid="button-bulk-upload">
                 <Upload className="h-4 w-4" /> Bulk Import
               </Button>
             </Link>
+            <Button variant="outline" className="gap-2" onClick={openBulkAssign} data-testid="button-bulk-assign">
+              <Users className="h-4 w-4" /> Bulk Assign
+            </Button>
             <Link href="/assets/new">
               <Button className="gap-2" data-testid="button-add-asset">
                 <Plus className="h-4 w-4" /> Add Asset
@@ -965,6 +1035,277 @@ export default function Assets() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Bulk Assign Dialog ───────────────────────────────────────────────── */}
+      <Dialog open={bulkOpen} onOpenChange={v => { if (!bulkAssigning) setBulkOpen(v); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+
+          {/* Header */}
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <Users className="h-4 w-4 text-primary" /> Bulk Assign — New Joiner Onboarding
+                </DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Step {bulkStep} of 3 — {bulkStep === 1 ? "Select employee" : bulkStep === 2 ? "Select assets" : "Review & confirm"}
+                </p>
+              </div>
+              {/* Step progress dots */}
+              <div className="flex items-center gap-1.5 mr-2">
+                {([1, 2, 3] as const).map(s => (
+                  <div key={s} className={cn("h-2 w-2 rounded-full transition-colors",
+                    s < bulkStep ? "bg-primary" : s === bulkStep ? "bg-primary" : "bg-muted-foreground/20"
+                  )} />
+                ))}
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* ── Step 1: Select User ─────────────────────────────── */}
+          {bulkStep === 1 && (
+            <div className="flex flex-col flex-1 overflow-hidden px-6 py-4 gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  autoFocus
+                  placeholder="Search by name, email, E-Code, or department…"
+                  className="pl-9"
+                  value={bulkUserSearch}
+                  onChange={e => setBulkUserSearch(e.target.value)}
+                />
+              </div>
+              <div className="overflow-y-auto flex-1 rounded-lg border border-border divide-y divide-border">
+                {bulkFilteredUsers.length === 0 && (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">No active users found</div>
+                )}
+                {bulkFilteredUsers.map(u => (
+                  <button
+                    key={u.id} type="button"
+                    onClick={() => setBulkUser(u.id)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 transition-colors flex items-center gap-3",
+                      bulkUser === u.id ? "bg-primary/8 border-l-2 border-primary" : "hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                      {u.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{u.full_name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{u.email}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {u.ecode && <div className="text-xs font-mono text-muted-foreground">{u.ecode}</div>}
+                      {u.department && <div className="text-xs text-muted-foreground">{u.department}</div>}
+                    </div>
+                    {bulkUser === u.id && (
+                      <CheckSquare className="h-4 w-4 text-primary shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+              {bulkUser && (
+                <div className="text-xs text-primary font-medium flex items-center gap-1.5">
+                  <CheckSquare className="h-3.5 w-3.5" />
+                  Selected: {bulkSelectedUser?.full_name} ({bulkSelectedUser?.ecode ?? bulkSelectedUser?.email})
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Step 2: Select Assets ───────────────────────────── */}
+          {bulkStep === 2 && (
+            <div className="flex flex-col flex-1 overflow-hidden px-6 py-4 gap-3">
+              {/* Selected user pill */}
+              <div className="flex items-center gap-2 text-sm bg-primary/5 border border-primary/20 rounded-lg px-3 py-2">
+                <div className="h-6 w-6 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {bulkSelectedUser?.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                </div>
+                <span className="font-medium">{bulkSelectedUser?.full_name}</span>
+                <span className="text-muted-foreground">· {bulkSelectedUser?.department}</span>
+                <span className="ml-auto text-primary font-medium">{bulkAssetIds.size} selected</span>
+              </div>
+
+              {/* Type chips + search */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {["All", "Laptop", "Mobile", "Desktop", "Tab"].map(t => (
+                  <button key={t} type="button"
+                    onClick={() => setBulkTypeFilter(t)}
+                    className={cn(
+                      "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                      bulkTypeFilter === t ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/40"
+                    )}
+                  >{t}</button>
+                ))}
+                <div className="relative ml-auto">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search assets…"
+                    className="pl-8 h-7 text-xs w-44"
+                    value={bulkAssetSearch}
+                    onChange={e => setBulkAssetSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Asset picker list */}
+              <div className="overflow-y-auto flex-1 rounded-lg border border-border divide-y divide-border">
+                {bulkPickerAssets.length === 0 && (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                    No available assets{bulkTypeFilter !== "All" ? ` of type ${bulkTypeFilter}` : ""}
+                  </div>
+                )}
+                {bulkPickerAssets.map(a => {
+                  const checked = bulkAssetIds.has(a.assetId);
+                  const TypeIcon = a.assetType === "Mobile" ? Smartphone
+                    : a.assetType === "Tab" ? Tablet : Monitor;
+                  return (
+                    <button
+                      key={a.assetId} type="button"
+                      onClick={() => toggleBulkAsset(a.assetId)}
+                      className={cn(
+                        "w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors",
+                        checked ? "bg-primary/5" : "hover:bg-muted/50"
+                      )}
+                    >
+                      <Checkbox checked={checked} className="pointer-events-none shrink-0" />
+                      <TypeIcon className={cn("h-4 w-4 shrink-0",
+                        a.assetType === "Laptop" ? "text-blue-500"
+                        : a.assetType === "Mobile" ? "text-emerald-500"
+                        : a.assetType === "Desktop" ? "text-violet-500"
+                        : "text-amber-500"
+                      )} />
+                      <div className="flex-1 min-w-0">
+                        <span className="font-mono text-xs font-semibold text-foreground">{a.assetId}</span>
+                        <span className="text-sm text-muted-foreground ml-2">{a.brand} {a.model}</span>
+                      </div>
+                      {a.serialNumber && (
+                        <span className="text-xs text-muted-foreground font-mono shrink-0">S/N: {a.serialNumber}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 3: Review & Confirm ────────────────────────── */}
+          {bulkStep === 3 && (
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              {/* User summary */}
+              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Assigning to</p>
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                    {bulkSelectedUser?.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                  </div>
+                  <div>
+                    <div className="font-medium text-sm">{bulkSelectedUser?.full_name}</div>
+                    <div className="text-xs text-muted-foreground">{bulkSelectedUser?.email} · {bulkSelectedUser?.department}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Selected assets chips */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  Assets to assign ({bulkAssetIds.size})
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[...bulkAssetIds].map(id => {
+                    const a = assets.find(x => x.assetId === id);
+                    if (!a) return null;
+                    const TypeIcon = a.assetType === "Mobile" ? Smartphone
+                      : a.assetType === "Tab" ? Tablet : Monitor;
+                    return (
+                      <div key={id} className="flex items-center gap-1.5 bg-muted border border-border rounded-full px-3 py-1 text-xs">
+                        <TypeIcon className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-mono font-semibold">{id}</span>
+                        <span className="text-muted-foreground">{a.brand} {a.model}</span>
+                        <button type="button" onClick={() => toggleBulkAsset(id)} className="ml-1 text-muted-foreground hover:text-destructive">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Reason for Assignment</Label>
+                  <Select value={bulkReason} onValueChange={setBulkReason}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="New Joiner">New Joiner</SelectItem>
+                      <SelectItem value="Replacement">Replacement</SelectItem>
+                      <SelectItem value="Additional Asset">Additional Asset</SelectItem>
+                      <SelectItem value="">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Handover Date</Label>
+                  <Input type="date" className="h-9 text-sm" value={bulkDate} onChange={e => setBulkDate(e.target.value)} />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Handover Notes (optional)</Label>
+                <Textarea
+                  placeholder="Any notes about the handover, conditions, accessories…"
+                  className="text-sm resize-none"
+                  rows={3}
+                  value={bulkNote}
+                  onChange={e => setBulkNote(e.target.value)}
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                All {bulkAssetIds.size} assets will be marked <strong>Assigned</strong> and a single email listing all asset details will be sent to {bulkSelectedUser?.email}.
+              </p>
+            </div>
+          )}
+
+          {/* Footer nav */}
+          <div className="px-6 py-4 border-t border-border shrink-0 flex items-center justify-between gap-2">
+            <Button variant="outline" onClick={() => {
+              if (bulkStep === 1) setBulkOpen(false);
+              else setBulkStep(s => (s - 1) as 1 | 2 | 3);
+            }} disabled={bulkAssigning}>
+              {bulkStep === 1 ? "Cancel" : "← Back"}
+            </Button>
+
+            {bulkStep < 3 ? (
+              <Button
+                onClick={() => setBulkStep(s => (s + 1) as 1 | 2 | 3)}
+                disabled={bulkStep === 1 ? !bulkUser : bulkAssetIds.size === 0}
+              >
+                {bulkStep === 1
+                  ? `Next — Select Assets →`
+                  : `Review & Confirm (${bulkAssetIds.size}) →`}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleBulkAssignConfirm}
+                disabled={bulkAssigning || bulkAssetIds.size === 0}
+                className="gap-2"
+              >
+                <UserPlus className="h-4 w-4" />
+                {bulkAssigning ? "Assigning…" : `Assign ${bulkAssetIds.size} Asset${bulkAssetIds.size !== 1 ? "s" : ""}`}
+              </Button>
+            )}
+          </div>
+
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
