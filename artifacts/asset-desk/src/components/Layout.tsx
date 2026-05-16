@@ -27,7 +27,6 @@ const navItems: NavItem[] = [
   { label: "Assets",       icon: Monitor,         href: "/assets",      roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
-  { label: "Raise Ticket", icon: Plus,            href: "/tickets/new", roles: ["end_user"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
   { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin"] },
   { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent"] },
