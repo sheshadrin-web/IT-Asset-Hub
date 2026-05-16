@@ -96,18 +96,19 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
 }
 
 interface AssetContextType {
-  assets:        Asset[];
-  loading:       boolean;
-  getAsset:      (id: string) => Asset | undefined;
-  refresh:       () => Promise<void>;
-  addAsset:      (data: Omit<Asset, "id">) => Promise<Asset>;
-  addAssets:     (dataList: Omit<Asset, "id">[]) => Promise<Asset[]>;
-  updateAsset:   (asset: Asset) => Promise<void>;
-  assignAsset:   (assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string) => Promise<void>;
-  returnAsset:   (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
-  updateStatus:  (assetId: string, status: AssetStatus) => Promise<void>;
-  unassignAsset: (assetId: string) => Promise<void>;
-  deleteAssets:  (ids: string[]) => Promise<void>;
+  assets:             Asset[];
+  loading:            boolean;
+  getAsset:           (id: string) => Asset | undefined;
+  refresh:            () => Promise<void>;
+  addAsset:           (data: Omit<Asset, "id">) => Promise<Asset>;
+  addAssets:          (dataList: Omit<Asset, "id">[]) => Promise<Asset[]>;
+  updateAsset:        (asset: Asset) => Promise<void>;
+  assignAsset:        (assetId: string, userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string) => Promise<void>;
+  bulkAssignAssets:   (assetIds: string[], userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string) => Promise<void>;
+  returnAsset:        (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
+  updateStatus:       (assetId: string, status: AssetStatus) => Promise<void>;
+  unassignAsset:      (assetId: string) => Promise<void>;
+  deleteAssets:       (ids: string[]) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -332,10 +333,109 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     setAssets(prev => prev.filter(a => !ids.includes(a.assetId)));
   };
 
+  const bulkAssignAssets = async (
+    assetIds: string[], userId: string, userName: string, userEmail: string,
+    department: string, handoverNote?: string, reason?: string
+  ): Promise<void> => {
+    const assignedAt = new Date().toISOString();
+
+    // 1. Assign each asset in DB (parallel) with its own ack token
+    const tokens: Record<string, string> = {};
+    await Promise.all(assetIds.map(async assetId => {
+      const ackToken = crypto.randomUUID();
+      tokens[assetId] = ackToken;
+      const coreUpdates: Record<string, unknown> = {
+        status: "Assigned", assigned_to: userId, assigned_email: userEmail,
+        department, assigned_at: assignedAt, ack_token: ackToken,
+        acknowledged: false, acknowledged_at: null,
+      };
+      await supabase.from("assets").update(coreUpdates).eq("asset_id", assetId);
+      await supabase.from("assets").update({ assigned_to_name: userName }).eq("asset_id", assetId);
+      if (handoverNote) {
+        await supabase.from("assets").update({ remarks: handoverNote }).eq("asset_id", assetId);
+      }
+    }));
+
+    // 2. Update local state for all assigned assets
+    setAssets(prev => prev.map(a =>
+      assetIds.includes(a.assetId)
+        ? { ...a, status: "Assigned" as AssetStatus, assignedTo: userName, assignedEmail: userEmail,
+            department, assignedAt, ackToken: tokens[a.assetId], acknowledged: false, acknowledgedAt: undefined }
+        : a
+    ));
+
+    // 3. Resolve manager email (non-fatal)
+    let managerEmail: string | undefined;
+    try {
+      const { data: userProfile } = await supabase.from("profiles").select("reporting_manager").eq("id", userId).single();
+      const managerName = (userProfile as { reporting_manager?: string } | null)?.reporting_manager;
+      if (managerName) {
+        const { data: mgr } = await supabase.from("profiles").select("email").ilike("full_name", managerName).single();
+        managerEmail = (mgr as { email?: string } | null)?.email ?? undefined;
+      }
+    } catch { /* non-fatal */ }
+
+    // 4. Send ONE combined email with all assets (non-fatal)
+    try {
+      const assetObjs = assetIds.map(id => assets.find(a => a.assetId === id)).filter(Boolean) as typeof assets;
+      if (assetObjs.length > 0 && userEmail) {
+        await supabase.functions.invoke("send-bulk-assignment-email", {
+          body: {
+            toEmail: userEmail,
+            toName:  userName,
+            assets:  assetObjs.map(a => ({
+              assetId:          a.assetId,
+              assetType:        a.assetType,
+              brand:            a.brand,
+              model:            a.model,
+              serialNumber:     a.serialNumber,
+              processor:        a.processor,
+              ram:              a.ram,
+              storage:          a.storage,
+              operatingSystem:  a.operatingSystem,
+              imei1:            a.imeiNumber,
+              imei2:            a.imei2,
+              phoneNumber:      a.phoneNumber,
+              keyboard:         a.keyboard,
+              mouse:            a.mouse,
+              monitorBrand:     a.monitorBrand,
+              monitorModel:     a.monitorModel,
+              monitorSize:      a.monitorSize,
+              accessories:      a.accessories,
+              ackToken:         tokens[a.assetId],
+            })),
+            managerEmail,
+            reason:      reason ?? "",
+            handoverNote: handoverNote ?? "",
+          },
+        });
+      }
+    } catch { /* non-fatal */ }
+
+    // 5. Log history for each asset (non-fatal)
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: ecodeRow } = await supabase.from("profiles").select("ecode").eq("id", userId).single();
+      await supabase.from("asset_assignment_history").insert(
+        assetIds.map(assetId => {
+          const assetObj = assets.find(a => a.assetId === assetId);
+          return {
+            asset_id:   assetId,
+            asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
+            user_id:    userId, user_name: userName, user_email: userEmail,
+            user_ecode: (ecodeRow as { ecode?: string } | null)?.ecode ?? null,
+            department, event_type: "assigned", event_by: authUser?.id ?? null,
+            notes: handoverNote ?? null,
+          };
+        })
+      );
+    } catch { /* non-fatal */ }
+  };
+
   return (
     <AssetContext.Provider value={{
       assets, loading, getAsset, refresh: fetchAssets,
-      addAsset, addAssets, updateAsset, assignAsset, returnAsset,
+      addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
       updateStatus, unassignAsset, deleteAssets,
     }}>
       {children}
