@@ -56,7 +56,7 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
 }
 
 // ─── Asset types ─────────────────────────────────────────────────────────────
-export type AssetType   = "Laptop" | "Mobile" | "Desktop";
+export type AssetType   = "Laptop" | "Mobile" | "Desktop" | "Tab";
 export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
 
 export interface Asset {
@@ -140,6 +140,7 @@ export interface Ticket {
 export const TICKET_CATEGORIES: Record<string, string[]> = {
   "Laptop Issue":      ["Battery Issue", "Display Issue", "Keyboard Issue", "Charger Issue", "Slow Performance", "Overheating", "Boot Issue", "Other"],
   "Mobile Issue":      ["Battery Issue", "Screen Issue", "SIM Issue", "App Issue", "Network Issue", "Camera Issue", "Other"],
+  "Tab Issue":         ["Battery Issue", "Screen Issue", "App Issue", "Network Issue", "Camera Issue", "Charging Issue", "Other"],
   "Desktop Issue":     ["Monitor Issue", "CPU Issue", "Keyboard/Mouse Issue", "Power Issue", "Slow Performance", "Boot Issue", "Other"],
   "Accessory Issue":   ["Charger Not Working", "Mouse Issue", "Keyboard Issue", "Headset Issue", "Adapter Issue", "Other Accessory"],
   "Software Issue":    ["Application Error", "OS Issue", "Driver Issue", "Antivirus Issue", "License Issue", "Installation Request", "Other Software"],
