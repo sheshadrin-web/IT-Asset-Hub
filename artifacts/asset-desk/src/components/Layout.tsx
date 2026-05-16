@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
-  LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Plus, Package,
-  ChevronDown, MapPin, Building, Hash, UserCircle, Edit, Zap,
+  LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Package,
+  Edit, Zap,
 } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
@@ -41,24 +41,11 @@ const navItems: NavItem[] = [
   { label: "Settings",     icon: Settings,        href: "/settings",    roles: ["super_admin"] },
 ];
 
-const roleColors: Record<UserRole, string> = {
-  super_admin: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  it_admin:    "bg-blue-500/20   text-blue-300   border-blue-500/30",
-  it_agent:    "bg-cyan-500/20   text-cyan-300   border-cyan-500/30",
-  end_user:    "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-};
 const roleIconMap: Record<UserRole, React.ElementType> = {
   super_admin: Shield,
   it_admin:    Shield,
   it_agent:    UserCheck,
   end_user:    User,
-};
-
-const roleBadgeColors: Record<UserRole, string> = {
-  super_admin: "bg-purple-100 text-purple-700 border-purple-200",
-  it_admin:    "bg-blue-100 text-blue-700 border-blue-200",
-  it_agent:    "bg-cyan-100 text-cyan-700 border-cyan-200",
-  end_user:    "bg-emerald-100 text-emerald-700 border-emerald-200",
 };
 
 function playBellSound() {
@@ -90,19 +77,16 @@ function timeAgo(d: Date): string {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen,          setSidebarOpen]          = useState(false);
-  const [profileOpen,          setProfileOpen]          = useState(false);
   const [notifOpen,            setNotifOpen]            = useState(false);
   const [profileSettingsOpen,  setProfileSettingsOpen]  = useState(false);
   const [notifs,               setNotifs]               = useState<Notif[]>([]);
   const [location]                                      = useLocation();
   const { currentUser, signOut }                        = useAuth();
   const { toast }                                       = useToast();
-  const profileRef                                      = useRef<HTMLDivElement>(null);
   const notifRef                                        = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     };
     document.addEventListener("mousedown", handler);
@@ -139,7 +123,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const unread       = notifs.filter(n => !n.read).length;
   const visibleItems = navItems.filter(item => item.roles.includes(currentUser.role));
   const initials     = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-  const RoleIcon     = roleIconMap[currentUser.role];
   const roleLabel    = ROLE_LABELS[currentUser.role];
 
   const activeLabel = visibleItems.find(item => {
@@ -214,8 +197,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Bottom user strip */}
-        <div className="border-t border-sidebar-border/40 px-3 py-3">
-          <div className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-white/5 transition-colors cursor-pointer" onClick={() => setProfileSettingsOpen(true)}>
+        <div className="border-t border-sidebar-border/40 px-3 py-3 space-y-1">
+          <div
+            className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-white/5 transition-colors cursor-pointer"
+            onClick={() => setProfileSettingsOpen(true)}
+          >
             <Avatar className="h-8 w-8 flex-shrink-0">
               {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
               <AvatarFallback className="bg-primary text-white text-[11px] font-bold">{initials}</AvatarFallback>
@@ -226,6 +212,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
             <Edit className="h-3.5 w-3.5 text-sidebar-foreground/30 flex-shrink-0" />
           </div>
+          <button
+            onClick={signOut}
+            data-testid="button-profile-signout"
+            className="w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5 flex-shrink-0" />
+            Sign Out
+          </button>
         </div>
       </aside>
 
@@ -246,7 +240,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Notification bell */}
+            {/* Notification bell — admins only */}
             <div className="relative" ref={notifRef}>
               <Button
                 variant="ghost" size="icon"
@@ -321,86 +315,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
-            {/* Profile dropdown */}
-            <div className="relative" ref={profileRef}>
-              <button
-                onClick={() => setProfileOpen(v => !v)}
-                className={cn("flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent transition-colors focus:outline-none", profileOpen && "bg-accent")}
-                data-testid="button-profile"
-              >
-                <Avatar className="h-7 w-7">
-                  {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
-                  <AvatarFallback className="bg-primary text-white text-[10px] font-bold">{initials}</AvatarFallback>
-                </Avatar>
-                <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", profileOpen && "rotate-180")} />
-              </button>
-
-              {profileOpen && (
-                <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-border bg-card shadow-xl z-50 overflow-hidden">
-                  <div className="px-4 pt-4 pb-3 border-b border-border bg-gradient-to-br from-muted/30 to-transparent">
-                    <div className="flex items-center gap-3 mb-2.5">
-                      <Avatar className="h-11 w-11 flex-shrink-0 ring-2 ring-primary/20">
-                        {currentUser.avatarUrl && <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className="object-cover" />}
-                        <AvatarFallback className="bg-primary text-white text-base font-bold">{initials}</AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-foreground truncate">{currentUser.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{currentUser.email}</p>
-                      </div>
-                    </div>
-                    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", roleBadgeColors[currentUser.role])}>
-                      <RoleIcon className="h-3 w-3" />
-                      {roleLabel}
-                    </span>
-                  </div>
-
-                  <div className="px-4 py-2.5 space-y-1.5 border-b border-border">
-                    {currentUser.ecode && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Hash className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50" />
-                        <span className="text-foreground font-mono font-semibold">{currentUser.ecode}</span>
-                        <span className="text-muted-foreground/50">E-Code</span>
-                      </div>
-                    )}
-                    {currentUser.department && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Building className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50" />
-                        <span className="truncate">{currentUser.department}</span>
-                      </div>
-                    )}
-                    {currentUser.location && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50" />
-                        <span className="truncate">{currentUser.location}</span>
-                      </div>
-                    )}
-                    {currentUser.reportingManager && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <UserCircle className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50" />
-                        <span className="truncate">Reports to: <strong className="text-foreground">{currentUser.reportingManager}</strong></span>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => { setProfileOpen(false); setProfileSettingsOpen(true); }}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-foreground hover:bg-accent transition-colors border-b border-border"
-                    data-testid="button-profile-settings"
-                  >
-                    <Edit className="h-4 w-4 text-muted-foreground" />
-                    Profile Settings
-                  </button>
-                  <button
-                    onClick={() => { setProfileOpen(false); signOut(); }}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-destructive hover:bg-destructive/5 transition-colors"
-                    data-testid="button-profile-signout"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Sign Out
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
         </header>
 
