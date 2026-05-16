@@ -6,7 +6,7 @@ import {
   ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
   RefreshCw, Clock, MailCheck,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, ElementType } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,12 +46,12 @@ const STATUS_COLORS: Record<AssetStatus, string> = {
 };
 
 // ─── Lifecycle stages ─────────────────────────────────────────────────────────
-const LIFECYCLE_STAGES = [
-  { key: "procurement", label: "Procurement",   Icon: ShoppingCart,  statuses: ["In Procurement"] as AssetStatus[] },
-  { key: "inventory",   label: "In Inventory",  Icon: Package,       statuses: ["Available"] as AssetStatus[] },
-  { key: "allocated",   label: "Allocated",     Icon: UserPlus,      statuses: ["Assigned"] as AssetStatus[] },
-  { key: "return",      label: "Return",        Icon: RotateCcw,     statuses: ["Under Repair"] as AssetStatus[] },
-  { key: "verified",    label: "Re-verified",   Icon: ClipboardCheck,statuses: ["Retired"] as AssetStatus[] },
+const LIFECYCLE_STAGES: { key: string; label: string; sublabel: string; Icon: ElementType }[] = [
+  { key: "procurement", label: "Procurement",   sublabel: "Ordered & received",    Icon: ShoppingCart },
+  { key: "inventory",   label: "In Inventory",  sublabel: "Ready to assign",       Icon: Package },
+  { key: "allocated",   label: "Allocated",     sublabel: "Assigned to user",      Icon: UserPlus },
+  { key: "repair",      label: "Under Repair",  sublabel: "Sent for servicing",    Icon: Wrench },
+  { key: "retired",     label: "Retired",       sublabel: "End of life",           Icon: Archive },
 ];
 
 function getLifecycleStageIdx(status: AssetStatus): number {
@@ -301,46 +301,99 @@ export default function AssetDetail() {
       </div>
 
       {/* ── Lifecycle tracker ──────────────────────────────────────────────── */}
-      {asset.status !== "Lost" && (
-        <Card className="overflow-hidden">
-          <CardContent className="py-4 px-5">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-4">Asset Lifecycle</p>
-            <div className="flex items-start gap-0">
-              {LIFECYCLE_STAGES.map((stage, idx) => {
-                const currentIdx = getLifecycleStageIdx(asset.status);
-                const isActive  = idx === currentIdx;
-                const isDone    = idx < currentIdx;
-                const { Icon }  = stage;
-                return (
-                  <div key={stage.key} className="flex items-center flex-1 min-w-0">
-                    <div className="flex flex-col items-center flex-1 min-w-0">
-                      <div className={cn(
-                        "h-9 w-9 rounded-full flex items-center justify-center mb-2 transition-all border-2",
-                        isActive ? "bg-primary text-primary-foreground border-primary shadow-md" :
-                        isDone   ? "bg-primary/20 text-primary border-primary/40" :
-                                   "bg-muted text-muted-foreground border-border"
-                      )}>
-                        {isDone
-                          ? <CheckCircle2 className="h-4 w-4" />
-                          : <Icon className="h-4 w-4" />}
+      {asset.status !== "Lost" && (() => {
+        const currentIdx = getLifecycleStageIdx(asset.status);
+        const total      = LIFECYCLE_STAGES.length;
+        const fillPct    = currentIdx === 0 ? 0 : (currentIdx / (total - 1)) * 100;
+        return (
+          <Card>
+            <CardContent className="px-6 pt-5 pb-6">
+              <div className="flex items-center justify-between mb-6">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  Asset Lifecycle
+                </p>
+                <span className={cn(
+                  "text-[11px] font-semibold px-2.5 py-0.5 rounded-full border",
+                  currentIdx === 0 ? "bg-orange-50 text-orange-600 border-orange-200" :
+                  currentIdx === 1 ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                  currentIdx === 2 ? "bg-blue-50 text-blue-600 border-blue-200" :
+                  currentIdx === 3 ? "bg-amber-50 text-amber-600 border-amber-200" :
+                                     "bg-gray-100 text-gray-500 border-gray-200"
+                )}>
+                  {LIFECYCLE_STAGES[currentIdx].label}
+                </span>
+              </div>
+
+              {/* Step circles + connector track */}
+              <div className="relative">
+                {/* Gray baseline track — spans between centers of first and last circles (10%→90%) */}
+                <div className="absolute top-[17px] h-[2px] bg-border rounded-full" style={{ left: "10%", right: "10%" }} />
+                {/* Filled progress track */}
+                {currentIdx > 0 && (
+                  <div
+                    className="absolute top-[17px] h-[2px] rounded-full transition-all duration-500"
+                    style={{
+                      left: "10%",
+                      width: `${fillPct * 0.8}%`,
+                      background: "linear-gradient(to right, #10b981, #3b82f6)",
+                    }}
+                  />
+                )}
+
+                <div className="flex justify-between">
+                  {LIFECYCLE_STAGES.map((stage, idx) => {
+                    const isActive = idx === currentIdx;
+                    const isDone   = idx < currentIdx;
+                    const { Icon } = stage;
+                    return (
+                      <div key={stage.key} className="flex flex-col items-center gap-2.5" style={{ width: `${100 / total}%` }}>
+                        {/* Circle */}
+                        <div className={cn(
+                          "relative z-10 h-[34px] w-[34px] rounded-full border-2 flex items-center justify-center transition-all duration-300",
+                          isActive
+                            ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30 ring-4 ring-blue-100"
+                            : isDone
+                            ? "bg-emerald-500 border-emerald-500 text-white shadow-sm"
+                            : "bg-white border-border text-muted-foreground/50"
+                        )}>
+                          {isDone ? (
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          ) : (
+                            <Icon className="h-[15px] w-[15px]" />
+                          )}
+                        </div>
+
+                        {/* Label */}
+                        <div className="text-center px-1">
+                          <p className={cn(
+                            "text-[11px] font-semibold leading-tight",
+                            isActive ? "text-blue-600" : isDone ? "text-emerald-600" : "text-muted-foreground/50"
+                          )}>
+                            {stage.label}
+                          </p>
+                          <p className={cn(
+                            "text-[10px] leading-tight mt-0.5 hidden sm:block",
+                            isActive ? "text-blue-400" : isDone ? "text-emerald-400" : "text-muted-foreground/35"
+                          )}>
+                            {stage.sublabel}
+                          </p>
+                          {isActive && (
+                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 text-[9px] font-bold uppercase tracking-wide">
+                              Current
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <span className={cn(
-                        "text-[10px] font-medium text-center leading-tight px-1 truncate w-full text-center",
-                        isActive ? "text-primary font-semibold" : isDone ? "text-primary/70" : "text-muted-foreground"
-                      )}>
-                        {stage.label}
-                      </span>
-                    </div>
-                    {idx < LIFECYCLE_STAGES.length - 1 && (
-                      <div className={cn("h-0.5 w-full mx-1 mb-5 flex-shrink rounded-full", idx < currentIdx ? "bg-primary/40" : "bg-border")} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
