@@ -4,6 +4,7 @@ import {
   User, Building, Tag, Package, Edit, AlertTriangle,
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
   ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
+  RefreshCw, Clock, MailCheck,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -91,6 +92,7 @@ export default function AssetDetail() {
   const [assignReason,     setAssignReason]      = useState("");
   const [history,          setHistory]           = useState<HistoryRow[]>([]);
   const [historyLoading,   setHistoryLoading]    = useState(false);
+  const [resendState,      setResendState]       = useState<"idle" | "sending" | "sent" | "error">("idle");
 
   useEffect(() => {
     if (!id || !supabaseConfigured) return;
@@ -109,6 +111,50 @@ export default function AssetDetail() {
   const asset          = getAsset(id);
   const relatedTickets = tickets.filter(t => t.assetId === id);
   const isAdmin        = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+
+  const resendAckEmail = async () => {
+    if (!asset || !asset.assignedEmail || !asset.ackToken) return;
+    setResendState("sending");
+    try {
+      const { data, error } = await supabase.functions.invoke("send-assignment-email", {
+        body: {
+          toEmail:        asset.assignedEmail,
+          toName:         asset.assignedTo ?? asset.assignedEmail,
+          brand:          asset.brand,
+          model:          asset.model,
+          assetType:      asset.assetType,
+          assetId:        asset.assetId,
+          serialNumber:   asset.serialNumber,
+          processor:      asset.processor,
+          ram:            asset.ram,
+          storage:        asset.storage,
+          operatingSystem:asset.operatingSystem,
+          imei1:          asset.imeiNumber,
+          imei2:          asset.imei2,
+          phoneNumber:    asset.phoneNumber,
+          monitorBrand:   asset.monitorBrand,
+          monitorModel:   asset.monitorModel,
+          monitorSize:    asset.monitorSize,
+          keyboard:       asset.keyboard,
+          mouse:          asset.mouse,
+          accessories:    asset.accessories,
+          reason:         "",
+          ackToken:       asset.ackToken,
+        },
+      });
+      if (error) throw new Error(error.message);
+      const d = data as { success?: boolean; error?: string };
+      if (d.error) throw new Error(d.error);
+      setResendState("sent");
+      toast({ title: "Email re-sent", description: `Acknowledgement email sent to ${asset.assignedEmail}` });
+      setTimeout(() => setResendState("idle"), 5000);
+    } catch (err) {
+      setResendState("error");
+      const msg = err instanceof Error ? err.message : "Failed to send email";
+      toast({ title: "Failed to send", description: msg, variant: "destructive" });
+      setTimeout(() => setResendState("idle"), 4000);
+    }
+  };
   const canEdit        = isAdmin || currentUser?.role === "it_agent";
   const activeUsers    = users.filter(u => u.status === "active");
   const selectedUser   = users.find(u => u.id === assignUserId);
@@ -545,6 +591,46 @@ export default function AssetDetail() {
                         Pending Acknowledgement
                       </span>
                     )}
+                    {/* ── Re-send email block ── */}
+                    {!asset.acknowledged && asset.assignedEmail && asset.ackToken && isAdmin && (() => {
+                      const hoursElapsed = asset.assignedAt
+                        ? (Date.now() - new Date(asset.assignedAt).getTime()) / 36e5
+                        : 0;
+                      const isOverdue = hoursElapsed >= 24;
+                      return (
+                        <div className="mt-2 flex flex-col gap-1.5">
+                          {isOverdue && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                              <Clock className="h-3 w-3" />
+                              {Math.floor(hoursElapsed)}h without acknowledgement
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={resendState === "sending" || resendState === "sent"}
+                            onClick={resendAckEmail}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                              resendState === "sent"
+                                ? "bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default"
+                                : resendState === "error"
+                                ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                                : isOverdue
+                                ? "bg-red-600 border-red-700 text-white hover:bg-red-700 disabled:opacity-60"
+                                : "bg-white border-border text-foreground hover:bg-accent disabled:opacity-60"
+                            )}
+                          >
+                            {resendState === "sending" ? (
+                              <><RefreshCw className="h-3 w-3 animate-spin" />Sending…</>
+                            ) : resendState === "sent" ? (
+                              <><MailCheck className="h-3 w-3" />Email Sent</>
+                            ) : (
+                              <><RefreshCw className="h-3 w-3" />Re-send Acknowledgement Email</>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 {(() => {
