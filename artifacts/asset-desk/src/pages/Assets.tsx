@@ -84,11 +84,11 @@ const COL_DEFS: { label: string; key?: ColKey; align?: "left" | "right" }[] = [
   { label: "Type",          key: "assetType" },
   { label: "Brand / Model", key: "brand" },
   { label: "Serial Number", key: "serialNumber" },
+  { label: "Status",        key: "status" },
+  { label: "Warranty End",  key: "warrantyEndDate", align: "right" },
   { label: "Assigned To",   key: "assignedTo" },
   { label: "Department",    key: "department" },
-  { label: "Status",        key: "status" },
   { label: "Assigned Date", key: "assignedAt",      align: "right" },
-  { label: "Warranty End",  key: "warrantyEndDate", align: "right" },
   { label: "Actions" },
 ];
 
@@ -683,6 +683,16 @@ export default function Assets() {
                         <div className="text-xs text-muted-foreground">{asset.model}</div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{asset.serialNumber}</td>
+                      {/* Status — col 5 */}
+                      <td className="px-4 py-3">
+                        <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[asset.status])} />
+                          {asset.status}
+                        </span>
+                      </td>
+                      {/* Warranty End — col 6 */}
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
+                      {/* Assigned To — col 7 */}
                       <td className="px-4 py-3">
                         {(() => {
                           const displayName = asset.assignedTo;
@@ -715,19 +725,14 @@ export default function Assets() {
                           );
                         })()}
                       </td>
+                      {/* Department — col 8 */}
                       <td className="px-4 py-3 text-muted-foreground text-xs">{asset.department ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
-                          <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[asset.status])} />
-                          {asset.status}
-                        </span>
-                      </td>
+                      {/* Assigned Date — col 9 */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {asset.assignedAt
                           ? new Date(asset.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
                           : "—"}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
                       <td className="px-4 py-3">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
