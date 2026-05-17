@@ -157,7 +157,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets } = useAssets();
+  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -405,6 +405,15 @@ export default function Assets() {
   const handleMarkAvailable = async (id: string) => {
     try { await updateStatus(id, "Available"); toast({ title: "Marked as Available", description: id }); }
     catch { toast({ title: "Failed to update status", variant: "destructive" }); }
+  };
+
+  const handleResetAck = async (id: string) => {
+    try {
+      await resetAcknowledgement(id);
+      toast({ title: "Acknowledgement reset", description: `${id} — user can re-submit via the original link.` });
+    } catch {
+      toast({ title: "Failed to reset acknowledgement", variant: "destructive" });
+    }
   };
 
   const handleFile = useCallback((file: File) => {
@@ -779,6 +788,14 @@ export default function Assets() {
                                     <DropdownMenuItem onClick={() => { unassignAsset(asset.assetId); toast({ title: "Asset unassigned" }); }} className="flex items-center gap-2 cursor-pointer">
                                       <UserPlus className="h-3.5 w-3.5 text-muted-foreground" /> Unassign
                                     </DropdownMenuItem>
+                                    {asset.acknowledged && (
+                                      <DropdownMenuItem
+                                        onClick={() => handleResetAck(asset.assetId)}
+                                        className="flex items-center gap-2 cursor-pointer text-amber-600"
+                                      >
+                                        <RotateCcw className="h-3.5 w-3.5" /> Reset Acknowledgement
+                                      </DropdownMenuItem>
+                                    )}
                                   </>
                                 )}
                                 {/* Mark Repair — Available or Assigned */}
