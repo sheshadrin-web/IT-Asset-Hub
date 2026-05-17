@@ -33,6 +33,7 @@ import { useUsers } from "@/context/UsersContext";
 import { useAuth } from "@/context/AuthContext";
 import { AssetStatus, Asset } from "@/data/mockData";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
+import TablePagination from "@/components/TablePagination";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -170,6 +171,8 @@ export default function Assets() {
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
   const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
+  const [page, setPage]                 = useState(1);
+  const [rowsPerPage, setRowsPerPage]   = useState(50);
 
   const handleSort = (col: ColKey) => {
     if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -316,9 +319,13 @@ export default function Assets() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, userFilter, deptFilter, colFilters]);
+
+  const paged          = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const pagedIds       = paged.map(a => a.assetId);
   const allFilteredIds = filtered.map(a => a.assetId);
-  const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.has(id));
-  const someSelected   = allFilteredIds.some(id => selected.has(id)) && !allSelected;
+  const allSelected    = pagedIds.length > 0 && pagedIds.every(id => selected.has(id));
+  const someSelected   = pagedIds.some(id => selected.has(id)) && !allSelected;
   const selectedCount  = [...selected].filter(id => allFilteredIds.includes(id)).length;
 
   useEffect(() => {
@@ -328,9 +335,9 @@ export default function Assets() {
 
   const toggleAll = () => {
     if (allSelected) {
-      setSelected(prev => { const n = new Set(prev); allFilteredIds.forEach(id => n.delete(id)); return n; });
+      setSelected(prev => { const n = new Set(prev); pagedIds.forEach(id => n.delete(id)); return n; });
     } else {
-      setSelected(prev => new Set([...prev, ...allFilteredIds]));
+      setSelected(prev => new Set([...prev, ...pagedIds]));
     }
   };
   const toggleRow = (id: string) => {
@@ -659,7 +666,7 @@ export default function Assets() {
                     </td>
                   </tr>
                 )}
-                {sorted.map(asset => {
+                {paged.map(asset => {
                   const isSelected = selected.has(asset.assetId);
                   return (
                     <tr key={asset.assetId}
@@ -821,12 +828,14 @@ export default function Assets() {
               </tbody>
             </table>
           </div>
-          {filtered.length > 0 && (
-            <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-              Showing {filtered.length} of {assets.length} assets
-              {selectedCount > 0 && <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>}
-            </div>
-          )}
+          <TablePagination
+            total={filtered.length}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setPage}
+            onRowsPerPageChange={rpp => { setRowsPerPage(rpp); setPage(1); }}
+            noun="assets"
+          />
         </CardContent>
       </Card>
 
