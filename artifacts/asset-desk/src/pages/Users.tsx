@@ -8,6 +8,7 @@ import {
   ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
+import ManagerSearchField from "@/components/ManagerSearchField";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1368,20 +1369,13 @@ export default function Users() {
                 <FormField control={addForm.control} name="reporting_manager" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Reporting Manager</FormLabel>
-                    <Select
-                      value={field.value || "__none__"}
-                      onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                    >
-                      <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="__none__">— None —</SelectItem>
-                        {users.filter(u => u.status === "active").map(u => (
-                          <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <ManagerSearchField
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                        users={users}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -1497,20 +1491,14 @@ export default function Users() {
               <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Reporting Manager</FormLabel>
-                  <Select
-                    value={field.value || "__none__"}
-                    onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                  >
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="__none__">— None —</SelectItem>
-                      {users.filter(u => u.status === "active").map(u => (
-                        <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    <ManagerSearchField
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      users={users}
+                      excludeEmail={editingUser?.email}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
