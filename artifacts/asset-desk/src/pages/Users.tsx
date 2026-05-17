@@ -1124,7 +1124,15 @@ export default function Users() {
                     { label: "Role",              value: ROLE_LABELS[vu.role], badge: roleColors[vu.role] },
                     { label: "Department",        value: vu.department || "—" },
                     { label: "Location",          value: vu.location || "—" },
-                    { label: "Reporting Manager", value: vu.reporting_manager || "—" },
+                    { label: "Reporting Manager", value: (() => {
+                        const rm = vu.reporting_manager;
+                        if (!rm) return "—";
+                        if (rm.includes("@")) {
+                          const mgr = users.find(u => u.email === rm);
+                          return mgr ? mgr.full_name : rm;
+                        }
+                        return rm;
+                      })() },
                     { label: "Status",            value: statusLabel[vu.status], badge: statusColors[vu.status] },
                   ].map(({ label, value, badge }) => (
                     <div key={label} className="space-y-1">
@@ -1360,7 +1368,17 @@ export default function Users() {
                 <FormField control={addForm.control} name="reporting_manager" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Reporting Manager</FormLabel>
-                    <FormControl><Input placeholder="Manager name" {...field} /></FormControl>
+                    <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">— None —</SelectItem>
+                        {users.filter(u => u.status === "active").map(u => (
+                          <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -1474,7 +1492,21 @@ export default function Users() {
                 )} />
               </div>
               <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
-                <FormItem><FormLabel>Reporting Manager</FormLabel><FormControl><Input placeholder="Manager name" {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem>
+                  <FormLabel>Reporting Manager</FormLabel>
+                  <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="">— None —</SelectItem>
+                      {users.filter(u => u.status === "active").map(u => (
+                        <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
               )} />
               {editingUser?.id === currentUser?.userId && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-center gap-1.5">
