@@ -261,12 +261,15 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             <FormField control={form.control} name="reporting_manager" render={({ field }) => (
               <FormItem>
                 <FormLabel>Reporting Manager</FormLabel>
-                <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                <Select
+                  value={field.value || "__none__"}
+                  onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                >
                   <FormControl>
                     <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="">— None —</SelectItem>
+                    <SelectItem value="__none__">— None —</SelectItem>
                     {users.filter(u => u.status === "active" && u.email !== currentUser?.email).map(u => (
                       <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
                     ))}
