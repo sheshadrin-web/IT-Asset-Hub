@@ -107,8 +107,9 @@ interface AssetContextType {
   bulkAssignAssets:   (assetIds: string[], userId: string, userName: string, userEmail: string, department: string, handoverNote?: string, reason?: string) => Promise<void>;
   returnAsset:        (assetId: string, finalStatus: AssetStatus, returnNote?: string) => Promise<void>;
   updateStatus:       (assetId: string, status: AssetStatus) => Promise<void>;
-  unassignAsset:      (assetId: string) => Promise<void>;
-  deleteAssets:       (ids: string[]) => Promise<void>;
+  unassignAsset:            (assetId: string) => Promise<void>;
+  deleteAssets:             (ids: string[]) => Promise<void>;
+  resetAcknowledgement:     (assetId: string) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -339,6 +340,19 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     setAssets(prev => prev.filter(a => !ids.includes(a.assetId)));
   };
 
+  const resetAcknowledgement = async (assetId: string): Promise<void> => {
+    const { error } = await supabase
+      .from("assets")
+      .update({ acknowledged: false, acknowledged_at: null, asset_photos: null })
+      .eq("asset_id", assetId);
+    if (error) throw new Error(error.message);
+    setAssets(prev => prev.map(a =>
+      a.assetId === assetId
+        ? { ...a, acknowledged: false, acknowledgedAt: undefined, assetPhotos: undefined }
+        : a
+    ));
+  };
+
   const bulkAssignAssets = async (
     assetIds: string[], userId: string, userName: string, userEmail: string,
     department: string, handoverNote?: string, reason?: string
@@ -446,7 +460,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     <AssetContext.Provider value={{
       assets, loading, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
-      updateStatus, unassignAsset, deleteAssets,
+      updateStatus, unassignAsset, deleteAssets, resetAcknowledgement,
     }}>
       {children}
     </AssetContext.Provider>
