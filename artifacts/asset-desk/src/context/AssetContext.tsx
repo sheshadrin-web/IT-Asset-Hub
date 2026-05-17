@@ -203,8 +203,8 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     try {
       const assetObjForEmail = assets.find(a => a.assetId === assetId);
       if (assetObjForEmail && userEmail) {
-        // Resolve manager email: fetch assigned user's reporting_manager name,
-        // then look up that manager's email from profiles
+        // Resolve manager email from the assigned user's reporting_manager field.
+        // The field may store an email directly (new behaviour) or a name (legacy).
         let managerEmail: string | undefined;
         try {
           const { data: userProfile } = await supabase
@@ -212,14 +212,20 @@ export function AssetProvider({ children }: { children: ReactNode }) {
             .select("reporting_manager")
             .eq("id", userId)
             .single();
-          const managerName = (userProfile as { reporting_manager?: string } | null)?.reporting_manager;
-          if (managerName) {
-            const { data: managerProfile } = await supabase
-              .from("profiles")
-              .select("email")
-              .ilike("full_name", managerName)
-              .single();
-            managerEmail = (managerProfile as { email?: string } | null)?.email ?? undefined;
+          const rmValue = (userProfile as { reporting_manager?: string } | null)?.reporting_manager?.trim();
+          if (rmValue) {
+            if (rmValue.includes("@")) {
+              // Stored as email directly — use it
+              managerEmail = rmValue;
+            } else {
+              // Legacy: stored as name — look up email by full_name
+              const { data: managerProfile } = await supabase
+                .from("profiles")
+                .select("email")
+                .ilike("full_name", rmValue)
+                .maybeSingle();
+              managerEmail = (managerProfile as { email?: string } | null)?.email ?? undefined;
+            }
           }
         } catch { /* non-fatal */ }
 
@@ -364,14 +370,18 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         : a
     ));
 
-    // 3. Resolve manager email (non-fatal)
+    // 3. Resolve manager email (non-fatal) — email stored directly (new) or name lookup (legacy)
     let managerEmail: string | undefined;
     try {
       const { data: userProfile } = await supabase.from("profiles").select("reporting_manager").eq("id", userId).single();
-      const managerName = (userProfile as { reporting_manager?: string } | null)?.reporting_manager;
-      if (managerName) {
-        const { data: mgr } = await supabase.from("profiles").select("email").ilike("full_name", managerName).single();
-        managerEmail = (mgr as { email?: string } | null)?.email ?? undefined;
+      const rmValue = (userProfile as { reporting_manager?: string } | null)?.reporting_manager?.trim();
+      if (rmValue) {
+        if (rmValue.includes("@")) {
+          managerEmail = rmValue;
+        } else {
+          const { data: mgr } = await supabase.from("profiles").select("email").ilike("full_name", rmValue).maybeSingle();
+          managerEmail = (mgr as { email?: string } | null)?.email ?? undefined;
+        }
       }
     } catch { /* non-fatal */ }
 
