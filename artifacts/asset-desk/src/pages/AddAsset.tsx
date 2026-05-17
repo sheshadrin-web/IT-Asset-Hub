@@ -64,7 +64,7 @@ export default function AddAsset() {
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-semibold text-muted-foreground">Asset Details</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pb-4">
           <AssetForm
             onSubmit={handleSubmit}
             onCancel={() => setLocation("/assets")}
