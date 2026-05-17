@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -8,6 +8,7 @@ import {
   ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
+import TablePagination from "@/components/TablePagination";
 import ManagerSearchField from "@/components/ManagerSearchField";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -146,6 +147,8 @@ export default function Users() {
   const [colFilters,   setColFilters]   = useState<Record<UserColKey, Set<string>>>(makeEmptyUserColFilters);
   const [sortCol,      setSortCol]      = useState<UserColKey>("ecode");
   const [sortDir,      setSortDir]      = useState<"asc" | "desc">("asc");
+  const [page, setPage]                 = useState(1);
+  const [rowsPerPage, setRowsPerPage]   = useState(50);
 
   const setColFilter = (col: UserColKey, vals: Set<string>) =>
     setColFilters(prev => ({ ...prev, [col]: vals }));
@@ -582,21 +585,25 @@ export default function Users() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const selectableIds  = filtered.filter(u => u.id !== currentUser?.userId).map(u => u.id);
-  const allSelected    = selectableIds.length > 0 && selectableIds.every(id => selectedUserIds.has(id));
-  const someSelected   = selectableIds.some(id => selectedUserIds.has(id));
+  useEffect(() => { setPage(1); }, [search, roleFilter, statusFilter, colFilters]);
+
+  const paged         = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const pagedIds      = paged.filter(u => u.id !== currentUser?.userId).map(u => u.id);
+  const selectableIds = filtered.filter(u => u.id !== currentUser?.userId).map(u => u.id);
+  const allSelected   = pagedIds.length > 0 && pagedIds.every(id => selectedUserIds.has(id));
+  const someSelected  = pagedIds.some(id => selectedUserIds.has(id)) && !allSelected;
 
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelectedUserIds(prev => {
         const next = new Set(prev);
-        selectableIds.forEach(id => next.delete(id));
+        pagedIds.forEach(id => next.delete(id));
         return next;
       });
     } else {
       setSelectedUserIds(prev => {
         const next = new Set(prev);
-        selectableIds.forEach(id => next.add(id));
+        pagedIds.forEach(id => next.add(id));
         return next;
       });
     }
@@ -971,7 +978,7 @@ export default function Users() {
                       {users.length === 0 ? "No users found. Add your first user above." : "No users match the current filters."}
                     </td>
                   </tr>
-                ) : sorted.map(user => {
+                ) : paged.map(user => {
                   const initials = user.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
                   const isSelf   = user.id === currentUser?.userId;
                   const busy     = actionSaving === user.id;
@@ -1085,10 +1092,15 @@ export default function Users() {
               </tbody>
             </table>
           </div>
-          {filtered.length > 0 && !loading && (
-            <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-              Showing {filtered.length} of {users.length} user{users.length !== 1 ? "s" : ""}
-            </div>
+          {!loading && (
+            <TablePagination
+              total={filtered.length}
+              page={page}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+              onRowsPerPageChange={rpp => { setRowsPerPage(rpp); setPage(1); }}
+              noun="users"
+            />
           )}
         </CardContent>
       </Card>
