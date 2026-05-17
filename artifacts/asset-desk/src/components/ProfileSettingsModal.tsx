@@ -11,7 +11,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
+import { useUsers } from "@/context/UsersContext";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
@@ -44,6 +48,7 @@ interface Props {
 
 export default function ProfileSettingsModal({ open, onClose }: Props) {
   const { currentUser, refreshProfile } = useAuth();
+  const { users }                        = useUsers();
   const { toast }                        = useToast();
   const [saving,      setSaving]         = useState(false);
   const [uploading,   setUploading]      = useState(false);
@@ -256,7 +261,17 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             <FormField control={form.control} name="reporting_manager" render={({ field }) => (
               <FormItem>
                 <FormLabel>Reporting Manager</FormLabel>
-                <FormControl><Input placeholder="Manager's name" {...field} /></FormControl>
+                <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                  <FormControl>
+                    <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="">— None —</SelectItem>
+                    {users.filter(u => u.status === "active" && u.email !== currentUser?.email).map(u => (
+                      <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <FormMessage />
               </FormItem>
             )} />
