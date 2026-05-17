@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import {
   Plus, Search, MoreHorizontal, Eye, UserCheck, Trash2, X,
@@ -26,6 +26,7 @@ import { useUsers } from "@/context/UsersContext";
 import { TicketStatus, TicketPriority, Ticket } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import TablePagination from "@/components/TablePagination";
 
 const PRIORITY_COLORS: Record<TicketPriority, string> = {
   Critical: "bg-red-500/15 text-red-500 border-red-500/20",
@@ -74,8 +75,10 @@ export default function Tickets() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [deleteTarget, setDeleteTarget]   = useState<string | null>(null);
 
-  const [selected, setSelected]           = useState<Set<string>>(new Set());
+  const [selected, setSelected]             = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [page, setPage]                     = useState(1);
+  const [rowsPerPage, setRowsPerPage]       = useState(50);
 
   const isEndUser = currentUser?.role === "end_user";
   const isAdmin   = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
@@ -111,16 +114,20 @@ export default function Tickets() {
     closed:     base.filter((t) => t.status === "Closed").length,
   };
 
-  const allFilteredIds  = filtered.map((t) => t.ticketId);
-  const allSelected     = allFilteredIds.length > 0 && allFilteredIds.every((id) => selected.has(id));
-  const someSelected    = allFilteredIds.some((id) => selected.has(id)) && !allSelected;
-  const selectedCount   = [...selected].filter((id) => allFilteredIds.includes(id)).length;
+  useEffect(() => { setPage(1); }, [search, statusFilter, priorityFilter]);
+
+  const paged          = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const allFilteredIds = filtered.map((t) => t.ticketId);
+  const pagedIds       = paged.map((t) => t.ticketId);
+  const allSelected    = pagedIds.length > 0 && pagedIds.every((id) => selected.has(id));
+  const someSelected   = pagedIds.some((id) => selected.has(id)) && !allSelected;
+  const selectedCount  = [...selected].filter((id) => allFilteredIds.includes(id)).length;
 
   const toggleAll = () => {
     if (allSelected) {
-      setSelected((prev) => { const n = new Set(prev); allFilteredIds.forEach((id) => n.delete(id)); return n; });
+      setSelected((prev) => { const n = new Set(prev); pagedIds.forEach((id) => n.delete(id)); return n; });
     } else {
-      setSelected((prev) => new Set([...prev, ...allFilteredIds]));
+      setSelected((prev) => new Set([...prev, ...pagedIds]));
     }
   };
   const toggleRow = (id: string) => {
@@ -284,7 +291,7 @@ export default function Tickets() {
                     </td>
                   </tr>
                 )}
-                {filtered.map((ticket) => {
+                {paged.map((ticket) => {
                   const isSelected = selected.has(ticket.ticketId);
                   return (
                     <tr
@@ -387,14 +394,14 @@ export default function Tickets() {
               </tbody>
             </table>
           </div>
-          {filtered.length > 0 && (
-            <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
-              Showing {filtered.length} of {base.length} tickets
-              {selectedCount > 0 && (
-                <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>
-              )}
-            </div>
-          )}
+          <TablePagination
+            total={filtered.length}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setPage}
+            onRowsPerPageChange={rpp => { setRowsPerPage(rpp); setPage(1); }}
+            noun="tickets"
+          />
         </CardContent>
       </Card>
 
