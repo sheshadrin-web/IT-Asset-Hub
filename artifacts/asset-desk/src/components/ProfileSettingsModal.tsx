@@ -11,11 +11,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
 import { useUsers } from "@/context/UsersContext";
+import ManagerSearchField from "@/components/ManagerSearchField";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
@@ -261,20 +259,14 @@ export default function ProfileSettingsModal({ open, onClose }: Props) {
             <FormField control={form.control} name="reporting_manager" render={({ field }) => (
               <FormItem>
                 <FormLabel>Reporting Manager</FormLabel>
-                <Select
-                  value={field.value || "__none__"}
-                  onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
-                >
-                  <FormControl>
-                    <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {users.filter(u => u.status === "active" && u.email !== currentUser?.email).map(u => (
-                      <SelectItem key={u.id} value={u.email}>{u.full_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FormControl>
+                  <ManagerSearchField
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    users={users}
+                    excludeEmail={currentUser?.email}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )} />
