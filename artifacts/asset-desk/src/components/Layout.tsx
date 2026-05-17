@@ -318,7 +318,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 bg-muted/20">{children}</main>
+        <main className="flex-1 overflow-y-auto px-6 pt-6 pb-4 bg-muted/20">{children}</main>
       </div>
 
       <ProfileSettingsModal open={profileSettingsOpen} onClose={() => setProfileSettingsOpen(false)} />
