@@ -1,6 +1,12 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { X, Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { useState, useMemo } from "react";
+import { Check, ChevronsUpDown, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Profile } from "@/data/mockData";
 
@@ -15,142 +21,96 @@ interface Props {
 export default function ManagerSearchField({
   value, onChange, users, excludeEmail, disabled,
 }: Props) {
-  const [query,       setQuery]       = useState("");
-  const [open,        setOpen]        = useState(false);
-  const [highlighted, setHighlighted] = useState(-1);
-  const containerRef                  = useRef<HTMLDivElement>(null);
-  const inputRef                      = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
 
-  const selected = users.find(u => u.email === value);
+  const options = useMemo(
+    () => users.filter(u => u.status === "active" && u.email !== excludeEmail),
+    [users, excludeEmail],
+  );
 
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    return users
-      .filter(u => u.status === "active" && u.email !== excludeEmail)
-      .filter(u =>
-        !q ||
-        u.full_name.toLowerCase().includes(q) ||
-        (u.ecode ?? "").toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q)
-      )
-      .slice(0, 50);
-  }, [users, query, excludeEmail]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const handleSelect = (email: string) => {
-    onChange(email);
-    setQuery("");
-    setOpen(false);
-    setHighlighted(-1);
-  };
-
-  const handleClear = () => {
-    onChange("");
-    setQuery("");
-    setOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
-      setOpen(true);
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlighted(h => Math.min(h + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlighted(h => Math.max(h - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (highlighted >= 0 && filtered[highlighted]) {
-        handleSelect(filtered[highlighted].email);
-      }
-    } else if (e.key === "Escape") {
-      setOpen(false);
-      setHighlighted(-1);
-    }
-  };
-
-  if (disabled) {
-    return (
-      <div className="px-3 py-2 text-sm rounded-md border bg-muted text-muted-foreground">
-        {selected ? selected.full_name : "—"}
-      </div>
-    );
-  }
+  const selected = options.find(u => u.email === value);
 
   return (
-    <div ref={containerRef} className="relative">
-      {selected && !open ? (
-        <div className="flex items-center gap-2 px-3 py-2 border border-input rounded-md bg-background min-h-[40px]">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium leading-none truncate">{selected.full_name}</p>
-            <p className="text-xs text-muted-foreground truncate mt-0.5">
-              {selected.ecode ? `${selected.ecode} · ` : ""}{selected.email}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleClear}
-            className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-            title="Remove manager"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ) : (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            ref={inputRef}
-            placeholder="Search by name, E-code, or email"
-            value={query}
-            className="pl-9"
-            onChange={e => { setQuery(e.target.value); setOpen(true); setHighlighted(-1); }}
-            onFocus={() => setOpen(true)}
-            onKeyDown={handleKeyDown}
-            autoComplete="off"
-          />
-        </div>
-      )}
-
-      {open && (
-        <div className="absolute z-[200] top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-56 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-              No matching users found
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className="w-full justify-between h-auto min-h-[40px] font-normal text-left"
+        >
+          {selected ? (
+            <div className="flex flex-col items-start min-w-0 flex-1 py-0.5">
+              <span className="text-sm font-medium leading-none truncate w-full">
+                {selected.full_name}
+              </span>
+              <span className="text-xs text-muted-foreground truncate w-full mt-0.5">
+                {selected.ecode ? `${selected.ecode} · ` : ""}{selected.email}
+              </span>
             </div>
           ) : (
-            filtered.map((u, i) => (
-              <button
-                type="button"
-                key={u.id}
-                className={cn(
-                  "w-full text-left px-3 py-2.5 border-b border-border/50 last:border-0 transition-colors",
-                  i === highlighted ? "bg-primary/10" : "hover:bg-accent/60"
-                )}
-                onClick={() => handleSelect(u.email)}
-              >
-                <p className="text-sm font-medium leading-none">{u.full_name}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {u.ecode ? `${u.ecode} · ` : ""}{u.email}{u.department ? ` · ${u.department}` : ""}
-                </p>
-              </button>
-            ))
+            <span className="text-muted-foreground text-sm">
+              Search by name, E-code, or email…
+            </span>
           )}
-        </div>
-      )}
-    </div>
+          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+            {value && (
+              <span
+                role="button"
+                tabIndex={-1}
+                onPointerDown={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onChange("");
+                }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Remove manager"
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <ChevronsUpDown className="h-3.5 w-3.5 opacity-40" />
+          </div>
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        className="p-0"
+        style={{ width: "var(--radix-popover-trigger-width)" }}
+        align="start"
+        sideOffset={4}
+      >
+        <Command>
+          <CommandInput placeholder="Search by name, E-code, or email…" />
+          <CommandList className="max-h-56">
+            <CommandEmpty>No matching users found.</CommandEmpty>
+            <CommandGroup>
+              {options.map(u => (
+                <CommandItem
+                  key={u.id}
+                  value={`${u.full_name} ${u.ecode ?? ""} ${u.email} ${u.department ?? ""}`}
+                  onSelect={() => { onChange(u.email); setOpen(false); }}
+                  className="flex items-center gap-2 py-2 cursor-pointer"
+                >
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-sm font-medium leading-none">{u.full_name}</span>
+                    <span className="text-xs text-muted-foreground mt-0.5">
+                      {u.ecode ? `${u.ecode} · ` : ""}{u.email}
+                      {u.department ? ` · ${u.department}` : ""}
+                    </span>
+                  </div>
+                  <Check className={cn(
+                    "h-4 w-4 flex-shrink-0",
+                    value === u.email ? "opacity-100 text-primary" : "opacity-0",
+                  )} />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
