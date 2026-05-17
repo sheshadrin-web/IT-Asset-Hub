@@ -22,21 +22,21 @@ async function handleInfo(token: string, sb: ReturnType<typeof createClient>) {
 
   if (error || !asset) {
     return new Response(
-      JSON.stringify({ error: "Invalid or expired acknowledgement link" }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ success: false, error: "Invalid or expired acknowledgement link" }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
   return new Response(
     JSON.stringify({
-      success:            true,
+      success:             true,
       alreadyAcknowledged: asset.acknowledged === true,
-      assetName:          `${asset.brand} ${asset.model}`,
-      assetType:          asset.asset_type,
-      userName:           asset.assigned_to_name,
-      userEmail:          asset.assigned_email,
+      assetName:           `${asset.brand} ${asset.model}`,
+      assetType:           asset.asset_type,
+      userName:            asset.assigned_to_name,
+      userEmail:           asset.assigned_email,
     }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 }
 
@@ -54,8 +54,8 @@ async function handleSubmit(
 
   if (findErr || !asset) {
     return new Response(
-      JSON.stringify({ error: "Invalid or expired acknowledgement link" }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ success: false, error: "Invalid or expired acknowledgement link" }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
@@ -176,8 +176,8 @@ serve(async (req: Request) => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ success: false, error: msg }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });
