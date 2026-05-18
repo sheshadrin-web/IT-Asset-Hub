@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Laptop, Smartphone, Monitor, Tablet } from "lucide-react";
 import { cn } from "@/lib/utils";
+import AccessoriesSelector from "@/components/AccessoriesSelector";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
@@ -609,9 +610,16 @@ export default function AssetForm({
             <FormItem>
               <FormLabel>Accessories</FormLabel>
               <FormControl>
-                <Input {...field} placeholder={isDesktop ? "e.g. Power Cable, UPS" : "e.g. Charger, Mouse, Laptop Bag"} data-testid="input-accessories" />
+                <AccessoriesSelector
+                  assetType={assetType}
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  disabled={disabled}
+                />
               </FormControl>
-              <FormDescription className="text-xs">List all items bundled with this device</FormDescription>
+              <FormDescription className="text-xs">
+                Select all items bundled with this device. Choose <strong>Others</strong> to enter anything not listed.
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )} />
