@@ -10,6 +10,7 @@ import {
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
 import ManagerSearchField from "@/components/ManagerSearchField";
+import LocationSelect from "@/components/LocationSelect";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1374,7 +1375,9 @@ export default function Users() {
                 <FormField control={addForm.control} name="location" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Location</FormLabel>
-                    <FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl>
+                    <FormControl>
+                      <LocationSelect value={field.value ?? ""} onChange={field.onChange} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -1497,7 +1500,13 @@ export default function Users() {
                   <FormItem><FormLabel>Department</FormLabel><FormControl><Input placeholder="Engineering, HR…" {...field} data-testid="input-user-department" /></FormControl><FormMessage /></FormItem>
                 )} />
                 <FormField control={editForm.control} name="location" render={({ field }) => (
-                  <FormItem><FormLabel>Location</FormLabel><FormControl><Input placeholder="Bangalore, Mumbai…" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl>
+                      <LocationSelect value={field.value ?? ""} onChange={field.onChange} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )} />
               </div>
               <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
