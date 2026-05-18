@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Laptop, Smartphone, Monitor, Tablet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
+import LocationSelect from "@/components/LocationSelect";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
@@ -590,23 +591,13 @@ export default function AssetForm({
             <FormField control={form.control} name="location" render={({ field }) => (
               <FormItem>
                 <FormLabel>Location <span className="text-destructive">*</span></FormLabel>
-                <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
-                  <FormControl>
-                    <SelectTrigger data-testid="input-location">
-                      <SelectValue placeholder="Select location" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="__none__">Select location</SelectItem>
-                    {[
-                      "Ahmedabad", "Bangalore", "Chennai", "Delhi",
-                      "Ernakulam - Kochi", "Hyderabad", "Kolkata",
-                      "Mumbai", "Pune", "UAE - Dubai", "USA",
-                    ].map(loc => (
-                      <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FormControl>
+                  <LocationSelect
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    disabled={disabled}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )} />
