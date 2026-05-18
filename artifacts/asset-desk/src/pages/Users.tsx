@@ -1371,9 +1371,9 @@ export default function Users() {
                   </FormItem>
                 )} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <FormField control={addForm.control} name="location" render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="min-w-0">
                     <FormLabel>Location</FormLabel>
                     <FormControl>
                       <LocationSelect value={field.value ?? ""} onChange={field.onChange} />
@@ -1382,7 +1382,7 @@ export default function Users() {
                   </FormItem>
                 )} />
                 <FormField control={addForm.control} name="reporting_manager" render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="min-w-0">
                     <FormLabel>Reporting Manager</FormLabel>
                     <FormControl>
                       <ManagerSearchField
