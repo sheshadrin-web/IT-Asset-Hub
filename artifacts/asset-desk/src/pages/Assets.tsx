@@ -54,11 +54,12 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   Retired:          "bg-gray-400",
 };
 
-type ColKey = "assetId" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate";
+type ColKey = "assetId" | "location" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate";
 
 function getColValue(a: Asset, col: ColKey): string {
   switch (col) {
     case "assetId":         return a.assetId || "";
+    case "location":        return a.location || "—";
     case "assetType":       return a.assetType || "";
     case "brand":           return a.brand ? `${a.brand} – ${a.model}` : "";
     case "serialNumber":    return a.serialNumber || "";
@@ -74,7 +75,7 @@ function getColValue(a: Asset, col: ColKey): string {
 
 function makeEmptyColFilters(): Record<ColKey, Set<string>> {
   return {
-    assetId: new Set(), assetType: new Set(), brand: new Set(),
+    assetId: new Set(), location: new Set(), assetType: new Set(), brand: new Set(),
     serialNumber: new Set(), assignedTo: new Set(), department: new Set(),
     status: new Set(), assignedAt: new Set(), warrantyEndDate: new Set(),
   };
@@ -82,6 +83,7 @@ function makeEmptyColFilters(): Record<ColKey, Set<string>> {
 
 const COL_DEFS: { label: string; key?: ColKey; align?: "left" | "right" }[] = [
   { label: "Asset ID",      key: "assetId" },
+  { label: "Location",      key: "location" },
   { label: "Type",          key: "assetType" },
   { label: "Brand / Model", key: "brand" },
   { label: "Serial Number", key: "serialNumber" },
@@ -655,7 +657,7 @@ export default function Assets() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 10 : 9} className="px-4 py-16 text-center">
+                    <td colSpan={isAdmin ? 11 : 10} className="px-4 py-16 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <Monitor className="h-10 w-10 text-muted-foreground/40" />
                         <p className="text-muted-foreground font-medium">No assets found</p>
@@ -684,6 +686,9 @@ export default function Assets() {
                       )}
                       <td className="px-4 py-3">
                         <Link href={`/assets/${asset.assetId}`} className="font-semibold text-primary hover:underline">{asset.assetId}</Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-foreground">{asset.location || "—"}</span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
