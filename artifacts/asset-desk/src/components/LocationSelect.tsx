@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -6,9 +6,9 @@ import { Input } from "@/components/ui/input";
 import { LOCATION_OPTIONS } from "@/lib/locationOptions";
 
 interface Props {
-  value:       string;
-  onChange:    (v: string) => void;
-  disabled?:   boolean;
+  value:        string;
+  onChange:     (v: string) => void;
+  disabled?:    boolean;
   placeholder?: string;
 }
 
@@ -22,52 +22,66 @@ export default function LocationSelect({
   disabled,
   placeholder = "Select location",
 }: Props) {
-  // Derive what the Select should show
-  const selectValue = useMemo(() => {
-    if (!value) return "__none__";
-    if (isKnownLocation(value)) return value;
-    return "others";
-  }, [value]);
-
-  // Local text for the "Others" free-input — seeded from the current value
-  // if it isn't a known location (handles pre-existing custom values).
+  // ── Local state ───────────────────────────────────────────────────────────
+  // isOthersMode: true when user explicitly chose "Others".
+  // We CANNOT derive this purely from `value` because selecting Others sets
+  // value="" (empty) and value="" would re-derive to "not Others".
+  const [isOthersMode, setIsOthersMode] = useState<boolean>(
+    () => Boolean(value) && !isKnownLocation(value),
+  );
   const [othersText, setOthersText] = useState<string>(
     () => (!isKnownLocation(value) && value) ? value : "",
   );
 
-  // Re-sync local text when the form resets externally, but not on our own changes.
+  // Compute what the <Select> should display
+  const selectValue = isOthersMode
+    ? "others"
+    : (value && isKnownLocation(value) ? value : "__none__");
+
+  // Suppress re-sync when a change originated here
   const ownChange = useRef(false);
+
   useEffect(() => {
     if (ownChange.current) { ownChange.current = false; return; }
+    // External reset (e.g. form.reset())
     if (!value) {
+      setIsOthersMode(false);
       setOthersText("");
-    } else if (!isKnownLocation(value)) {
-      setOthersText(value);
+    } else if (isKnownLocation(value)) {
+      setIsOthersMode(false);
+      setOthersText("");
     } else {
-      setOthersText("");
+      // Pre-existing custom value — show Others mode with the text pre-filled
+      setIsOthersMode(true);
+      setOthersText(value);
     }
   }, [value]);
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSelect = (v: string) => {
     ownChange.current = true;
     if (v === "others") {
+      setIsOthersMode(true);
       setOthersText("");
-      onChange("");           // clear until user types
+      onChange("");            // clear until user types something
     } else if (v === "__none__") {
+      setIsOthersMode(false);
       setOthersText("");
       onChange("");
     } else {
+      setIsOthersMode(false);
       setOthersText("");
-      onChange(v);
+      onChange(v);             // save the chosen location directly
     }
   };
 
   const handleOthersText = (text: string) => {
     setOthersText(text);
     ownChange.current = true;
-    onChange(text);           // save raw text directly (e.g. "Jaipur")
+    onChange(text);            // raw text saved (e.g. "Jaipur")
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-2">
       <Select value={selectValue} onValueChange={handleSelect} disabled={disabled}>
@@ -83,7 +97,7 @@ export default function LocationSelect({
         </SelectContent>
       </Select>
 
-      {selectValue === "others" && (
+      {isOthersMode && (
         <Input
           value={othersText}
           onChange={e => handleOthersText(e.target.value)}
