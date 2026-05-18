@@ -39,10 +39,10 @@ export default function ManagerSearchField({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="w-full justify-between h-auto min-h-[40px] font-normal text-left"
+          className="w-full justify-between h-auto min-h-[40px] font-normal text-left overflow-hidden"
         >
           {selected ? (
-            <div className="flex flex-col items-start min-w-0 flex-1 py-0.5">
+            <div className="flex flex-col items-start min-w-0 flex-1 py-0.5 overflow-hidden">
               <span className="text-sm font-medium leading-none truncate w-full">
                 {selected.full_name}
               </span>
@@ -51,8 +51,8 @@ export default function ManagerSearchField({
               </span>
             </div>
           ) : (
-            <span className="text-muted-foreground text-sm">
-              Search by name, E-code, or email…
+            <span className="text-muted-foreground text-sm truncate min-w-0 flex-1 block">
+              Search by name, E-code, or email
             </span>
           )}
           <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
