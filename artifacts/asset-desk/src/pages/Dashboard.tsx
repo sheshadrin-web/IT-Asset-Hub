@@ -342,7 +342,7 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent className="p-0">
           {recentTickets.length === 0 ? (
-            <div className="px-4 py-12 text-center">
+            <div className="px-4 py-8 text-center">
               <Clock className="h-8 w-8 mx-auto text-muted-foreground/25 mb-3" />
               <p className="text-sm text-muted-foreground">No active tickets.</p>
               <p className="text-xs text-muted-foreground/60 mt-1">Open and in-progress tickets will appear here.</p>
