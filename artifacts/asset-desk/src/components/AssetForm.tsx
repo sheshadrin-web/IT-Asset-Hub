@@ -590,7 +590,23 @@ export default function AssetForm({
             <FormField control={form.control} name="location" render={({ field }) => (
               <FormItem>
                 <FormLabel>Location <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input {...field} placeholder="e.g. IT Storage Room, HQ Floor 2" data-testid="input-location" /></FormControl>
+                <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                  <FormControl>
+                    <SelectTrigger data-testid="input-location">
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select location</SelectItem>
+                    {[
+                      "Ahmedabad", "Bangalore", "Chennai", "Delhi",
+                      "Ernakulam - Kochi", "Hyderabad", "Kolkata",
+                      "Mumbai", "Pune", "UAE - Dubai", "USA",
+                    ].map(loc => (
+                      <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <FormMessage />
               </FormItem>
             )} />
