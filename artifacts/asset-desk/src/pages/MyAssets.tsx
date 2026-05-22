@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import { Link } from "wouter";
 import { Monitor, Smartphone, MapPin, Package, ChevronDown, ChevronUp, Tablet } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -71,8 +72,6 @@ export default function MyAssets() {
           {myAssets.map(asset => {
             const isExpanded = expandedId === asset.assetId;
             const isMobile = asset.assetType === "Mobile" || asset.assetType === "Tab";
-            const TypeIcon = asset.assetType === "Mobile" ? Smartphone
-              : asset.assetType === "Tab" ? Tablet : Monitor;
 
             return (
               <Card key={asset.assetId} className="hover:shadow-md transition-shadow" data-testid={`card-my-asset-${asset.assetId}`}>
@@ -80,7 +79,7 @@ export default function MyAssets() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                        <TypeIcon className="h-4 w-4 text-primary" />
+                        <span className="text-lg leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>
                       </div>
                       <div>
                         <p className="text-sm font-bold text-foreground leading-none">{asset.brand}</p>
