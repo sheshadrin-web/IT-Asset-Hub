@@ -25,6 +25,7 @@ export default function AcknowledgePage() {
   const [files,       setFiles]       = useState<File[]>([]);
   const [previews,    setPreviews]    = useState<string[]>([]);
   const [uploadPct,   setUploadPct]   = useState(0);
+  const [remarks,     setRemarks]     = useState("");
   const fileInputRef                  = useRef<HTMLInputElement>(null);
 
   // Fetch asset info — runs in background while upload UI is immediately visible
@@ -91,7 +92,7 @@ export default function AcknowledgePage() {
       }
       setUploadPct(80);
       const { data, error } = await supabase.functions.invoke("acknowledge-receipt", {
-        body: { token, action: "submit", photoUrls },
+        body: { token, action: "submit", photoUrls, remarks: remarks.trim() || undefined },
       });
       if (error) throw new Error(error.message);
       const d = data as { success?: boolean; error?: string; alreadyAcknowledged?: boolean };
@@ -295,6 +296,27 @@ export default function AcknowledgePage() {
                 <span className="text-[10px] text-muted-foreground">Add more</span>
               </button>
             )}
+          </div>
+        )}
+
+        {/* Remarks (optional) */}
+        {!isSubmitting && (
+          <div className="w-full">
+            <label htmlFor="ack-remarks" className="block text-sm font-medium text-foreground mb-1.5">
+              Remarks <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="ack-remarks"
+              value={remarks}
+              onChange={e => setRemarks(e.target.value.slice(0, 500))}
+              maxLength={500}
+              rows={3}
+              placeholder="Write remarks about asset condition, scratches, issues, accessories received, etc."
+              className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary resize-none"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1 text-right">
+              {remarks.length} / 500
+            </p>
           </div>
         )}
 
