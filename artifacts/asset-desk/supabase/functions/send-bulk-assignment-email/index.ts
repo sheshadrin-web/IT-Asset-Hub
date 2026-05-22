@@ -125,7 +125,7 @@ ${replacementNote}
   <li>Attach clear pictures of all assigned assets</li>
   <li>Click the individual acknowledge links above for each asset</li>
   <li>Handle these assets with care. As per company policy, any damage beyond normal wear and tear may result in recovery charges</li>
-  <li>For any technical issues, please raise a ticket via the IT Help Desk</li>
+  <li>For any technical issues, please raise a ticket via the <a href="${APP_URL}" style="color:#1a56db;font-weight:bold;text-decoration:none;">IT Help Desk Portal →</a></li>
 </ul>
 <p>If you notice any discrepancies, kindly report them immediately.</p>
 <br/>
