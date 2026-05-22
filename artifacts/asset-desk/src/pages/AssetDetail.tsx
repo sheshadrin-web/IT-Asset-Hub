@@ -1,5 +1,5 @@
 import { useParams, Link } from "wouter";
-import { getAssetEmoji, getFieldEmoji } from "@/lib/assetEmoji";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import {
   ArrowLeft, Monitor, Smartphone, Tablet, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
@@ -419,15 +419,15 @@ export default function AssetDetail() {
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Identity</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   {[
-                    { emoji: getFieldEmoji("Asset ID"),                label: "Asset ID",       value: asset.assetId },
-                    { emoji: getAssetEmoji(asset.assetType),           label: "Type",           value: asset.assetType },
-                    { emoji: getFieldEmoji("Brand"),                   label: "Brand",          value: asset.brand },
-                    { emoji: getFieldEmoji("Model"),                   label: "Model",          value: asset.model },
-                    { emoji: getFieldEmoji("Serial Number"),           label: "Serial Number",  value: asset.serialNumber },
-                    ...(asset.productNumber ? [{ emoji: getFieldEmoji("Product Number"), label: "Product Number", value: asset.productNumber }] : []),
+                    { icon: <Tag />,      label: "Asset ID",       value: asset.assetId },
+                    { icon: <span className="text-base leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>, label: "Type", value: asset.assetType },
+                    { icon: <Package />,  label: "Brand",          value: asset.brand },
+                    { icon: <Package />,  label: "Model",          value: asset.model },
+                    { icon: <Tag />,      label: "Serial Number",  value: asset.serialNumber },
+                    ...(asset.productNumber ? [{ icon: <Tag />, label: "Product Number", value: asset.productNumber }] : []),
                   ].map(f => (
                     <div key={f.label} className="flex items-start gap-3">
-                      <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{f.emoji}</span>
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                         <p className="text-sm text-foreground mt-0.5 font-medium break-all">{f.value}</p>
@@ -449,7 +449,7 @@ export default function AssetDetail() {
                       { label: "Operating System",  value: asset.operatingSystem },
                     ].filter(f => f.value).map(f => (
                       <div key={f.label} className="flex items-start gap-3">
-                        <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji(f.label)}</span>
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
                         <div>
                           <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                           <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
@@ -473,7 +473,7 @@ export default function AssetDetail() {
                       { label: "Phone Number",  value: asset.phoneNumber },
                     ].filter(f => f.value).map(f => (
                       <div key={f.label} className="flex items-start gap-3">
-                        <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji(f.label)}</span>
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
                         <div>
                           <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                           <p className="text-sm text-foreground mt-0.5 font-medium font-mono">{f.value}</p>
@@ -499,7 +499,7 @@ export default function AssetDetail() {
                       { label: "Mouse",         value: asset.mouse },
                     ].filter(f => f.value).map(f => (
                       <div key={f.label} className="flex items-start gap-3">
-                        <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji(f.label)}</span>
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Monitor /></div>
                         <div>
                           <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                           <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
@@ -515,13 +515,13 @@ export default function AssetDetail() {
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Purchase & Location</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   {[
-                    { label: "Purchase Date", value: asset.purchaseDate },
-                    { label: "Location",      value: asset.location },
-                    ...(asset.vendor   ? [{ label: "Vendor",      value: asset.vendor }]  : []),
-                    ...(asset.invoice  ? [{ label: "Invoice No.", value: asset.invoice }] : []),
+                    { icon: <Calendar />, label: "Purchase Date", value: asset.purchaseDate },
+                    { icon: <MapPin />,   label: "Location",      value: asset.location },
+                    ...(asset.vendor   ? [{ icon: <Building />, label: "Vendor",      value: asset.vendor }]  : []),
+                    ...(asset.invoice  ? [{ icon: <Tag />,      label: "Invoice No.", value: asset.invoice }] : []),
                   ].map(f => (
                     <div key={f.label} className="flex items-start gap-3">
-                      <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji(f.label)}</span>
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                         <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
@@ -536,7 +536,7 @@ export default function AssetDetail() {
                 <div className="border-t border-border pt-4 space-y-3">
                   {asset.accessories && (
                     <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji("Accessories")}</span>
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Package /></div>
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">Accessories</p>
                         <p className="text-sm text-foreground mt-0.5 font-medium">{asset.accessories}</p>
@@ -545,7 +545,7 @@ export default function AssetDetail() {
                   )}
                   {asset.others && (
                     <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji("Others")}</span>
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">Others</p>
                         <p className="text-sm text-foreground mt-0.5">{asset.others}</p>
@@ -554,7 +554,7 @@ export default function AssetDetail() {
                   )}
                   {asset.remarks && (
                     <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex-shrink-0 text-base leading-none w-5 text-center" aria-hidden>{getFieldEmoji("Remarks")}</span>
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">Remarks</p>
                         <p className="text-sm text-foreground mt-0.5">{asset.remarks}</p>
