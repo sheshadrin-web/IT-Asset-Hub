@@ -153,6 +153,7 @@ export default function AssetDetail() {
           accessories:    asset.accessories,
           reason:         "",
           ackToken:       asset.ackToken,
+          isReminder:     "true",
         },
       });
       if (error) throw new Error(error.message);
