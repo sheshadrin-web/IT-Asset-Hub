@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -187,10 +188,7 @@ export default function AssetForm({
                 )}
                 data-testid={`type-selector-${type.toLowerCase()}`}
               >
-                {type === "Laptop"  ? <Laptop    className="h-7 w-7" /> :
-                 type === "Mobile"  ? <Smartphone className="h-7 w-7" /> :
-                 type === "Tab"     ? <Tablet    className="h-7 w-7" /> :
-                                      <Monitor   className="h-7 w-7" />}
+                <span className="text-3xl leading-none" aria-hidden>{getAssetEmoji(type)}</span>
                 <span className="text-sm font-semibold">{type}</span>
               </button>
             ))}
