@@ -80,7 +80,20 @@ const TICKET_STATUS_COLORS: Record<string, string> = {
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
-  const { getAsset, assignAsset, updateStatus, unassignAsset } = useAssets();
+  const { getAsset, assignAsset, updateStatus, unassignAsset, markAcknowledged } = useAssets();
+  const [ackState, setAckState] = useState<"idle" | "saving">("idle");
+  const handleMarkAcknowledged = async () => {
+    if (!asset) return;
+    setAckState("saving");
+    try {
+      await markAcknowledged(asset.assetId);
+      toast({ title: "Marked as acknowledged", description: `${asset.assetId} acknowledged on behalf of ${asset.assignedTo ?? "user"}.` });
+    } catch (err) {
+      toast({ title: "Failed to mark acknowledged", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setAckState("idle");
+    }
+  };
   const { tickets } = useTickets();
   const { users }   = useUsers();
   const { currentUser } = useAuth();
@@ -643,6 +656,18 @@ export default function AssetDetail() {
                         <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
                         Pending Acknowledgement
                       </span>
+                    )}
+                    {/* ── Admin: Mark as acknowledged manually ── */}
+                    {!asset.acknowledged && isAdmin && (
+                      <button
+                        type="button"
+                        disabled={ackState === "saving"}
+                        onClick={handleMarkAcknowledged}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        {ackState === "saving" ? "Saving…" : "Mark as Acknowledged"}
+                      </button>
                     )}
                     {/* ── Re-send email block ── */}
                     {!asset.acknowledged && asset.assignedEmail && asset.ackToken && isAdmin && (() => {
