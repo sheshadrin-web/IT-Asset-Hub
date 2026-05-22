@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import { useParams, Link } from "wouter";
 import {
   ArrowLeft, AlertTriangle, Send, UserCheck, CheckCircle,
@@ -423,7 +424,7 @@ export default function TicketDetail() {
               <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Asset Info</CardTitle></CardHeader>
               <CardContent className="space-y-2.5 text-sm">
                 <div className="flex items-center gap-2 mb-2">
-                  {linkedAsset.assetType === "Laptop" ? <Monitor className="h-4 w-4 text-blue-500" /> : <Smartphone className="h-4 w-4 text-indigo-500" />}
+                  <span className="text-base leading-none" aria-hidden>{getAssetEmoji(linkedAsset.assetType)}</span>
                   <span className="font-semibold text-foreground">{linkedAsset.brand} {linkedAsset.model}</span>
                 </div>
                 {[
