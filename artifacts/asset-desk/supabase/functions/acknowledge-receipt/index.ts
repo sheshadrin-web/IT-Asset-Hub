@@ -44,6 +44,7 @@ async function handleInfo(token: string, sb: ReturnType<typeof createClient>) {
 async function handleSubmit(
   token: string,
   photoUrls: string[],
+  remarks: string,
   sb: ReturnType<typeof createClient>,
 ) {
   const { data: asset, error: findErr } = await sb
@@ -66,14 +67,18 @@ async function handleSubmit(
     );
   }
 
-  // Mark acknowledged + save photo URLs
+  // Mark acknowledged + save photo URLs + remarks
+  const updatePayload: Record<string, unknown> = {
+    acknowledged:    true,
+    acknowledged_at: new Date().toISOString(),
+    asset_photos:    photoUrls.length > 0 ? photoUrls : null,
+  };
+  if (remarks && remarks.trim()) {
+    updatePayload.ack_remarks = remarks.trim().slice(0, 500);
+  }
   const { error: updateErr } = await sb
     .from("assets")
-    .update({
-      acknowledged:    true,
-      acknowledged_at: new Date().toISOString(),
-      asset_photos:    photoUrls.length > 0 ? photoUrls : null,
-    })
+    .update(updatePayload)
     .eq("ack_token", token);
 
   if (updateErr) throw new Error(updateErr.message);
@@ -116,7 +121,9 @@ async function handleSubmit(
 </ul>
 <p><strong>Uploaded Photos:</strong></p>
 <ul>${photoLinks}</ul>
-<p style="color:#555;font-size:12px;">The photos are also attached to this email.</p>
+${remarks && remarks.trim() ? `<p style="margin-top:14px;"><strong>User Remarks:</strong></p>
+<div style="background:#f8fafc;border-left:3px solid #1a56db;padding:10px 14px;color:#333;white-space:pre-wrap;border-radius:4px;">${remarks.trim().slice(0, 500).replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>` : ""}
+<p style="color:#555;font-size:12px;margin-top:14px;">The photos are also attached to this email.</p>
 <br/>
 <p style="margin-bottom:2px;">IT Asset Management System</p>
 <p style="color:#1a3a7a;"><strong>Miles Education Pvt Ltd</strong></p>
@@ -158,8 +165,8 @@ serve(async (req: Request) => {
   }
 
   try {
-    const body = await req.json() as { token?: string; action?: string; photoUrls?: string[] };
-    const { token, action = "submit", photoUrls = [] } = body;
+    const body = await req.json() as { token?: string; action?: string; photoUrls?: string[]; remarks?: string };
+    const { token, action = "submit", photoUrls = [], remarks = "" } = body;
 
     if (!token) {
       return new Response(
@@ -171,7 +178,7 @@ serve(async (req: Request) => {
     const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     if (action === "info") return await handleInfo(token, sb);
-    return await handleSubmit(token, photoUrls, sb);
+    return await handleSubmit(token, photoUrls, remarks, sb);
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
