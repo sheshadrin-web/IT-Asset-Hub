@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import { Link } from "wouter";
 import {
   Plus, Search, Monitor, Smartphone, Tablet, Eye, Edit,
@@ -692,10 +693,7 @@ export default function Assets() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          {asset.assetType === "Laptop"  ? <Monitor    className="h-3.5 w-3.5 text-blue-500"   /> :
-                           asset.assetType === "Desktop" ? <Monitor    className="h-3.5 w-3.5 text-violet-500" /> :
-                           asset.assetType === "Tab"     ? <Tablet     className="h-3.5 w-3.5 text-teal-500"   /> :
-                                                           <Smartphone className="h-3.5 w-3.5 text-indigo-500" />}
+                          <span className="text-base leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>
                           <span className="text-xs font-medium text-foreground">{asset.assetType}</span>
                         </div>
                       </td>
@@ -1195,8 +1193,6 @@ export default function Assets() {
                 )}
                 {bulkPickerAssets.map(a => {
                   const checked = bulkAssetIds.has(a.assetId);
-                  const TypeIcon = a.assetType === "Mobile" ? Smartphone
-                    : a.assetType === "Tab" ? Tablet : Monitor;
                   return (
                     <button
                       key={a.assetId} type="button"
@@ -1207,12 +1203,7 @@ export default function Assets() {
                       )}
                     >
                       <Checkbox checked={checked} className="pointer-events-none shrink-0" />
-                      <TypeIcon className={cn("h-4 w-4 shrink-0",
-                        a.assetType === "Laptop" ? "text-blue-500"
-                        : a.assetType === "Mobile" ? "text-emerald-500"
-                        : a.assetType === "Desktop" ? "text-violet-500"
-                        : "text-amber-500"
-                      )} />
+                      <span className="text-lg leading-none shrink-0" aria-hidden>{getAssetEmoji(a.assetType)}</span>
                       <div className="flex-1 min-w-0">
                         <span className="font-mono text-xs font-semibold text-foreground">{a.assetId}</span>
                         <span className="text-sm text-muted-foreground ml-2">{a.brand} {a.model}</span>
@@ -1253,11 +1244,9 @@ export default function Assets() {
                   {[...bulkAssetIds].map(id => {
                     const a = assets.find(x => x.assetId === id);
                     if (!a) return null;
-                    const TypeIcon = a.assetType === "Mobile" ? Smartphone
-                      : a.assetType === "Tab" ? Tablet : Monitor;
                     return (
                       <div key={id} className="flex items-center gap-1.5 bg-muted border border-border rounded-full px-3 py-1 text-xs">
-                        <TypeIcon className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-sm leading-none" aria-hidden>{getAssetEmoji(a.assetType)}</span>
                         <span className="font-mono font-semibold">{id}</span>
                         <span className="text-muted-foreground">{a.brand} {a.model}</span>
                         <button type="button" onClick={() => toggleBulkAsset(id)} className="ml-1 text-muted-foreground hover:text-destructive">
