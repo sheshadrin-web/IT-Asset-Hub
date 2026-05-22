@@ -110,6 +110,7 @@ interface AssetContextType {
   unassignAsset:            (assetId: string) => Promise<void>;
   deleteAssets:             (ids: string[]) => Promise<void>;
   resetAcknowledgement:     (assetId: string) => Promise<void>;
+  markAcknowledged:         (assetId: string) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -353,6 +354,20 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const markAcknowledged = async (assetId: string): Promise<void> => {
+    const ackAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("assets")
+      .update({ acknowledged: true, acknowledged_at: ackAt })
+      .eq("asset_id", assetId);
+    if (error) throw new Error(error.message);
+    setAssets(prev => prev.map(a =>
+      a.assetId === assetId
+        ? { ...a, acknowledged: true, acknowledgedAt: ackAt }
+        : a
+    ));
+  };
+
   const bulkAssignAssets = async (
     assetIds: string[], userId: string, userName: string, userEmail: string,
     department: string, handoverNote?: string, reason?: string
@@ -460,7 +475,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     <AssetContext.Provider value={{
       assets, loading, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
-      updateStatus, unassignAsset, deleteAssets, resetAcknowledgement,
+      updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, markAcknowledged,
     }}>
       {children}
     </AssetContext.Provider>
