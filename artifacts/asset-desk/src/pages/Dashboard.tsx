@@ -51,10 +51,10 @@ function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; mes
 }
 
 function StatCard({
-  label, value, icon: Icon, color, bg, border, href,
+  label, value, emoji, bg, border, href,
 }: {
-  label: string; value: number; icon: React.ElementType;
-  color: string; bg: string; border: string; href: string;
+  label: string; value: number; emoji: string;
+  bg: string; border: string; href: string;
 }) {
   return (
     <Link href={href}>
@@ -62,8 +62,8 @@ function StatCard({
         <div className={`h-0.5 ${border} w-full`} />
         <CardContent className="p-4">
           <div className="flex items-start justify-between mb-3">
-            <div className={`inline-flex rounded-xl p-2.5 ${bg}`}>
-              <Icon className={`h-4 w-4 ${color}`} />
+            <div className={`inline-flex items-center justify-center rounded-xl ${bg} h-9 w-9 text-lg leading-none`} aria-hidden>
+              {emoji}
             </div>
             <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
           </div>
@@ -109,10 +109,10 @@ function EndUserDashboard({ userName }: { userName: string }) {
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "My Tickets",  value: myTickets.length,  icon: Ticket,       color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
-          { label: "Open",        value: openCount,          icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50",   border: "bg-amber-500",   href: "/tickets" },
-          { label: "Resolved",    value: resolvedCount,      icon: CheckCircle,  color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
-          { label: "My Assets",   value: myAssets.length,   icon: Monitor,      color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/my-assets" },
+          { label: "My Tickets",  value: myTickets.length,  emoji: "🎫", bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
+          { label: "Open",        value: openCount,          emoji: "🚨", bg: "bg-amber-50",   border: "bg-amber-500",   href: "/tickets" },
+          { label: "Resolved",    value: resolvedCount,      emoji: "✅", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
+          { label: "My Assets",   value: myAssets.length,   emoji: "💻", bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/my-assets" },
         ].map((c) => <StatCard key={c.label} {...c} />)}
       </div>
 
@@ -121,7 +121,7 @@ function EndUserDashboard({ userName }: { userName: string }) {
         <Card>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Monitor className="h-4 w-4 text-muted-foreground" />My Assigned Assets
+              <span className="text-base leading-none" aria-hidden>💻</span>My Assigned Assets
             </CardTitle>
             <Link href="/my-assets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
           </CardHeader>
@@ -160,7 +160,7 @@ function EndUserDashboard({ userName }: { userName: string }) {
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />My Recent Tickets
+            <span className="text-base leading-none" aria-hidden>📅</span>My Recent Tickets
           </CardTitle>
           <Link href="/tickets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
         </CardHeader>
@@ -241,14 +241,14 @@ export default function Dashboard() {
   const pendingAck = assets.filter(a => a.status === "Assigned" && !a.acknowledged).length;
 
   const statCards = [
-    { label: "Total Assets",        value: assets.length,                                                                                                          icon: Package,       color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/assets" },
-    { label: "Assigned",            value: assets.filter((a) => a.status === "Assigned").length,                                                                   icon: Monitor,       color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/assets" },
-    { label: "Available",           value: assets.filter((a) => a.status === "Available").length,                                                                  icon: CheckCircle,   color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/assets" },
-    { label: "Under Repair",        value: assets.filter((a) => a.status === "Under Repair").length,                                                               icon: Wrench,        color: "text-amber-600",   bg: "bg-amber-50",   border: "bg-amber-500",   href: "/assets" },
-    { label: "Open Tickets",        value: tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length,                                   icon: Ticket,        color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
-    { label: "Critical Tickets",    value: tickets.filter((t) => t.priority === "Critical" && !["Resolved", "Closed", "Rejected"].includes(t.status)).length,      icon: AlertTriangle, color: "text-red-600",     bg: "bg-red-50",     border: "bg-red-500",     href: "/tickets" },
-    { label: "Resolved This Month", value: tickets.filter((t) => t.status === "Resolved").length,                                                                  icon: TrendingUp,    color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
-    { label: "Pending Ack.",        value: pendingAck,                                                                                                             icon: Clock,         color: "text-orange-600",  bg: "bg-orange-50",  border: "bg-orange-500",  href: "/assets" },
+    { label: "Total Assets",        value: assets.length,                                                                                                       emoji: "📦", bg: "bg-blue-50",    border: "bg-blue-500",    href: "/assets" },
+    { label: "Assigned",            value: assets.filter((a) => a.status === "Assigned").length,                                                                emoji: "👨‍💻", bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/assets" },
+    { label: "Available",           value: assets.filter((a) => a.status === "Available").length,                                                               emoji: "✅", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/assets" },
+    { label: "Under Repair",        value: assets.filter((a) => a.status === "Under Repair").length,                                                            emoji: "🛠️", bg: "bg-amber-50",   border: "bg-amber-500",   href: "/assets" },
+    { label: "Open Tickets",        value: tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length,                                emoji: "🎫", bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
+    { label: "Critical Tickets",    value: tickets.filter((t) => t.priority === "Critical" && !["Resolved", "Closed", "Rejected"].includes(t.status)).length,   emoji: "🚨", bg: "bg-red-50",     border: "bg-red-500",     href: "/tickets" },
+    { label: "Resolved This Month", value: tickets.filter((t) => t.status === "Resolved").length,                                                               emoji: "📈", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
+    { label: "Pending Ack.",        value: pendingAck,                                                                                                          emoji: "⏳", bg: "bg-orange-50",  border: "bg-orange-500",  href: "/assets" },
   ];
 
   return (
@@ -272,7 +272,7 @@ export default function Dashboard() {
       {/* Pending acknowledgement alert */}
       {pendingAck > 0 && (
         <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
-          <Clock className="h-4 w-4 text-orange-500 flex-shrink-0" />
+          <span className="text-base leading-none flex-shrink-0" aria-hidden>🔔</span>
           <p className="text-sm text-orange-700">
             <strong>{pendingAck} asset{pendingAck > 1 ? "s" : ""}</strong> {pendingAck > 1 ? "are" : "is"} awaiting acknowledgement from assigned users.
           </p>
@@ -285,7 +285,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <PieChartIcon className="h-4 w-4 text-muted-foreground" />
+              <span className="text-base leading-none" aria-hidden>📊</span>
               Asset Status Distribution
             </CardTitle>
           </CardHeader>
@@ -311,7 +311,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <BarChartIcon className="h-4 w-4 text-muted-foreground" />
+              <span className="text-base leading-none" aria-hidden>📂</span>
               Tickets by Category
             </CardTitle>
           </CardHeader>
@@ -336,7 +336,7 @@ export default function Dashboard() {
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />Active Tickets
+            <span className="text-base leading-none" aria-hidden>📝</span>Active Tickets
           </CardTitle>
           <Link href="/tickets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
         </CardHeader>
