@@ -12,14 +12,19 @@ const APP_URL  = "https://it-asset-hub-a7rf.onrender.com";
 
 type Reason = "New Joiner" | "Replacement" | "Additional Asset" | "";
 
-function getSubject(reason: Reason, assetType: string): string {
+function getSubject(reason: Reason, assetType: string, isReminder = false): string {
+  if (isReminder) return `Reminder: Please Acknowledge Receipt of Your ${assetType} — Miles Education`;
   if (reason === "New Joiner") return `Welcome to Miles Education — ${assetType} Asset Details`;
   if (reason === "Replacement") return `${assetType} Replacement — Asset Details`;
   if (reason === "Additional Asset") return `Additional ${assetType} Assigned — Asset Details`;
   return `Company Asset Details — Miles Education`;
 }
 
-function getIntro(firstName: string, reason: Reason, assetType: string): string {
+function getIntro(firstName: string, reason: Reason, assetType: string, isReminder = false): string {
+  if (isReminder) {
+    return `<p>Hi ${firstName},</p>
+<p>This is a gentle reminder to acknowledge receipt of the ${assetType.toLowerCase()} assigned to you. Our records show that your acknowledgement is still pending. Kindly review the asset details below and click the <strong>Acknowledge Receipt</strong> button at your earliest convenience.</p>`;
+  }
   if (reason === "New Joiner") {
     return `<p>Hi ${firstName},</p>
 <p>Welcome to Miles Education! We're excited to have you on board. As part of your onboarding, the following ${assetType.toLowerCase()} has been assigned to you. Kindly review the details below:</p>`;
@@ -42,6 +47,7 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
   const assetType = p.assetType ?? "Asset";
   const ackToken  = p.ackToken ?? "";
   const ackUrl    = ackToken ? `${APP_URL}/ack/${ackToken}` : "";
+  const isReminder = p.isReminder === "true" || p.isReminder === "1";
 
   const row = (label: string, value?: string) =>
     value ? `<li style="margin-bottom:6px"><strong>${label}:</strong> ${value}</li>` : "";
@@ -80,7 +86,7 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
         .map((a: string) => `<li style="margin-bottom:4px">${a}</li>`).join("")
     : "";
 
-  const intro = getIntro(firstName, reason, assetType);
+  const intro = getIntro(firstName, reason, assetType, isReminder);
 
   const replacementNote = reason === "Replacement"
     ? `<p><strong>Note:</strong> Kindly ensure your previous device is returned to the IT team at the earliest.</p>`
@@ -100,7 +106,7 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head>
 <body style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:680px;margin:0 auto;padding:24px;">
-<h2 style="font-size:18px;margin-bottom:20px;">${getSubject(reason, assetType)}</h2>
+<h2 style="font-size:18px;margin-bottom:20px;">${getSubject(reason, assetType, isReminder)}</h2>
 ${intro}
 <p><strong>Assigned Asset:</strong></p>
 <p><strong>${assetType}: ${p.brand} ${p.model}</strong></p>
@@ -113,7 +119,7 @@ ${replacementNote}
   <li>Attach clear pictures of all assigned assets</li>
   <li>Confirm receipt by clicking the button below</li>
   <li>Kindly handle these assets with care. As per company policy, any damage beyond normal wear and tear may result in recovery charges</li>
-  <li>If you encounter any technical issues, please raise a ticket via the IT Help Desk</li>
+  <li>If you encounter any technical issues, please raise a ticket via the <a href="${APP_URL}" style="color:#1a56db;font-weight:bold;text-decoration:none;">IT Help Desk Portal →</a></li>
 </ul>
 ${ackButton}
 <p>If you notice any discrepancies, kindly report them immediately.</p>
@@ -157,7 +163,8 @@ serve(async (req: Request) => {
       .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
     const html = buildHtml(body, senderName, gmailUser);
-    const subject = getSubject((body.reason ?? "") as Reason, body.assetType ?? "Asset");
+    const isReminder = body.isReminder === "true" || body.isReminder === "1";
+    const subject = getSubject((body.reason ?? "") as Reason, body.assetType ?? "Asset", isReminder);
 
     const ccList = [...FIXED_CC];
     if (managerEmail && !ccList.includes(managerEmail)) ccList.push(managerEmail);
