@@ -1,4 +1,5 @@
 import { useParams, Link } from "wouter";
+import { getAssetEmoji } from "@/lib/assetEmoji";
 import {
   ArrowLeft, Monitor, Smartphone, Tablet, Calendar, MapPin,
   User, Building, Tag, Package, Edit, AlertTriangle,
@@ -242,10 +243,7 @@ export default function AssetDetail() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
-                {asset.assetType === "Laptop"  ? <Monitor   className="h-5 w-5 text-primary" /> :
-                 asset.assetType === "Desktop" ? <Monitor   className="h-5 w-5 text-primary" /> :
-                 asset.assetType === "Tab"     ? <Tablet    className="h-5 w-5 text-primary" /> :
-                                                 <Smartphone className="h-5 w-5 text-primary" />}
+                <span className="text-xl leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -422,7 +420,7 @@ export default function AssetDetail() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   {[
                     { icon: <Tag />,      label: "Asset ID",       value: asset.assetId },
-                    { icon: asset.assetType === "Laptop" || asset.assetType === "Desktop" ? <Monitor /> : asset.assetType === "Tab" ? <Tablet /> : <Smartphone />, label: "Type", value: asset.assetType },
+                    { icon: <span className="text-base leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>, label: "Type", value: asset.assetType },
                     { icon: <Package />,  label: "Brand",          value: asset.brand },
                     { icon: <Package />,  label: "Model",          value: asset.model },
                     { icon: <Tag />,      label: "Serial Number",  value: asset.serialNumber },
