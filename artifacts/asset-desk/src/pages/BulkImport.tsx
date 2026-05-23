@@ -104,18 +104,54 @@ function findCol(headers: string[], field: string): string | undefined {
 // ─── Value mapping ────────────────────────────────────────────────────────────
 function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
   // Asset ID prefix is the most reliable signal — always check it first.
-  // This prevents a wrong or missing "Type" column from overriding the tag.
   const aid = assetIdFallback.toUpperCase();
   if (/-MOB-|-PHN-/.test(aid))        return "Mobile";
   if (/-TAB-/.test(aid))              return "Tab";
   if (/-DES-|-DSK-/.test(aid))        return "Desktop";
   if (/-LAP-/.test(aid))              return "Laptop";
+  if (/-MON-/.test(aid))              return "Monitor";
+  if (/-KBD-|-KEY-/.test(aid))        return "Keyboard";
+  if (/-MOU-|-MSE-/.test(aid))        return "Mouse";
+  if (/-HSE-|-HDS-/.test(aid))        return "Headset";
+  if (/-HDD-|-SSD-/.test(aid))        return "Hard Disk";
+  if (/-SPK-/.test(aid))              return "Speaker";
+  if (/-DCK-|-DOC-/.test(aid))        return "Docking Station";
+  if (/-PRN-|-PRT-/.test(aid))        return "Printer";
+  if (/-RTR-/.test(aid))              return "Router";
+  if (/-SRV-|-SVR-/.test(aid))        return "Server";
+  if (/-CAM-/.test(aid))              return "Camera";
+  if (/-CCTV-/.test(aid))             return "CCTV";
+  if (/-TV-/.test(aid))               return "Smart TV";
+  if (/-PRJ-|-PROJ-/.test(aid))       return "Projector";
+  if (/-CPU-/.test(aid))              return "CPU";
+  if (/-NET-|-SWT-/.test(aid))        return "Network Device";
+  if (/-FW-/.test(aid))               return "Firewall";
 
   // Fall back to whatever the type column says
   const v = raw.toLowerCase().trim();
-  if (v.includes("desk"))                         return "Desktop";
-  if (v === "tab" || v.includes("tablet"))        return "Tab";
-  if (v.includes("mob") || v.includes("phone"))   return "Mobile";
+  if (!v)                                                  return "Laptop";
+  if (v.includes("laptop") || v.includes("notebook"))      return "Laptop";
+  if (v.includes("desk"))                                  return "Desktop";
+  if (v === "tab" || v.includes("tablet"))                 return "Tab";
+  if (v.includes("mob") || v.includes("phone"))            return "Mobile";
+  if (v.includes("monitor") || v.includes("display"))      return "Monitor";
+  if (v.includes("keyboard"))                              return "Keyboard";
+  if (v.includes("mouse"))                                 return "Mouse";
+  if (v.includes("headset") || v.includes("headphone"))    return "Headset";
+  if (v.includes("hard disk") || v.includes("hdd") || v.includes("ssd")) return "Hard Disk";
+  if (v.includes("speaker"))                               return "Speaker";
+  if (v.includes("docking"))                               return "Docking Station";
+  if (v.includes("printer"))                               return "Printer";
+  if (v.includes("router"))                                return "Router";
+  if (v.includes("server"))                                return "Server";
+  if (v.includes("cctv"))                                  return "CCTV";
+  if (v.includes("camera"))                                return "Camera";
+  if (v.includes("tv") || v.includes("television"))        return "Smart TV";
+  if (v.includes("projector"))                             return "Projector";
+  if (v.includes("cpu"))                                   return "CPU";
+  if (v.includes("firewall"))                              return "Firewall";
+  if (v.includes("network") || v.includes("switch"))       return "Network Device";
+  if (v.includes("generic"))                               return "Generic Asset";
   return "Laptop";
 }
 
@@ -217,7 +253,7 @@ interface MappedRow {
 }
 
 // ─── Type-specific templates ──────────────────────────────────────────────────
-const TEMPLATES: Record<AssetType, { headers: string[]; rows: string[]; filename: string }> = {
+const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; filename: string }>> = {
   Laptop: {
     filename: "laptop_import_template.csv",
     headers: ["Asset Tag","Brand","Model","Serial Number","Location","OS","Config","RAM","ROM","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"],
@@ -256,7 +292,8 @@ const TEMPLATES: Record<AssetType, { headers: string[]; rows: string[]; filename
   },
 };
 function downloadTemplate(type: AssetType) {
-  const t   = TEMPLATES[type];
+  const t = TEMPLATES[type];
+  if (!t) return;
   const csv = [t.headers.join(","), ...t.rows].join("\n");
   const a   = document.createElement("a");
   a.href    = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
