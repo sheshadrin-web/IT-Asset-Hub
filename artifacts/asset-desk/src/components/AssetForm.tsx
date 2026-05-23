@@ -141,8 +141,10 @@ export default function AssetForm({
   const isMobile  = assetType === "Mobile";
   const isDesktop = assetType === "Desktop";
   const isTab     = assetType === "Tab";
+  const isCPU     = assetType === "CPU";
+  const showComputerSpecs = isLaptop || isCPU || isDesktop;
   // Suppress unused warnings — these flags are referenced in conditional sections below.
-  void isLaptop; void isMobile; void isDesktop; void isTab;
+  void isLaptop; void isMobile; void isDesktop; void isTab; void isCPU; void showComputerSpecs;
 
   return (
     <Form {...form}>
@@ -239,8 +241,8 @@ export default function AssetForm({
           </div>
         </Section>
 
-        {/* ── Laptop Specs ─────────────────────────────────────────────── */}
-        {isLaptop && (
+        {/* ── Computer Specs (Laptop / CPU / Desktop) ──────────────────── */}
+        {showComputerSpecs && (
           <Section title="Hardware Specifications">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField control={form.control} name="processor" render={({ field }) => (
