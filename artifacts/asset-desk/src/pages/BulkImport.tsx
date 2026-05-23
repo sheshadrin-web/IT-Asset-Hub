@@ -412,7 +412,7 @@ export default function BulkImport() {
   const [dragOver,         setDragOver]        = useState(false);
   const [mappedRows,       setMappedRows]      = useState<MappedRow[]>([]);
   const [progress,         setProgress]        = useState(0);
-  const [results,          setResults]         = useState({ success: 0, failed: 0, skipped: 0 });
+  const [results,          setResults]         = useState<{ success: number; failed: number; skipped: number; errorMessages: string[] }>({ success: 0, failed: 0, skipped: 0, errorMessages: [] });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const resetToSelect = () => {
@@ -555,6 +555,7 @@ export default function BulkImport() {
 
     let success = 0;
     let failed  = 0;
+    const errorMessages: string[] = [];
     const CHUNK = 50;
 
     for (let i = 0; i < validRows.length; i += CHUNK) {
@@ -567,13 +568,25 @@ export default function BulkImport() {
         serial_number:     r.assetType === "Mobile" ? "" : (r.serialNumber || ""),
         imei_1:            r.assetType === "Mobile" ? (r.imei1 || null) : null,
         imei_2:            r.assetType === "Mobile" ? (r.imei2 || null) : null,
-        processor:         r.processor        || null,
-        ram:               r.ram              || null,
-        operating_system:  r.operatingSystem  || null,
-        storage:           r.storage          || null,
+        // NOT NULL text columns — must be "" not null
+        product_number:    "",
+        processor:         r.processor        || "",
+        ram:               r.ram              || "",
+        operating_system:  r.operatingSystem  || "",
+        storage:           r.storage          || "",
+        sim_number:        "",
+        phone_number:      "",
+        vendor:            r.vendor           || "",
+        invoice:           "",
+        monitor_brand:     "",
+        monitor_model:     "",
+        monitor_size:      "",
+        keyboard:          "",
+        mouse:             "",
+        cpu:               "",
+        others:            "",
         purchase_date:     r.purchaseDate,
         warranty_end_date: r.warrantyEndDate,
-        vendor:            r.vendor           || null,
         status:            r.status,
         assigned_to:       r.assignedToId     || null,
         assigned_email:    r.assignedToId ? (r.assignedEmail || null) : null,
@@ -591,7 +604,12 @@ export default function BulkImport() {
         // Try row-by-row for partial success
         for (const row of dbRows) {
           const { error: e2 } = await supabase.from("assets").insert(row);
-          e2 ? failed++ : success++;
+          if (e2) {
+            failed++;
+            if (errorMessages.length < 3) errorMessages.push(`${row.asset_id}: ${e2.message}`);
+          } else {
+            success++;
+          }
         }
       } else {
         success += chunk.length;
@@ -600,8 +618,15 @@ export default function BulkImport() {
     }
 
     await refresh();
-    setResults({ success, failed, skipped: mappedRows.filter(r => r.errors.length > 0).length });
+    setResults({ success, failed, skipped: mappedRows.filter(r => r.errors.length > 0).length, errorMessages });
     setStep("done");
+    if (failed > 0 && errorMessages.length > 0) {
+      toast({
+        title:       `${failed} row${failed === 1 ? "" : "s"} failed to import`,
+        description: errorMessages[0],
+        variant:     "destructive",
+      });
+    }
   };
 
   const validRows   = mappedRows.filter(r => r.errors.length === 0);
@@ -1022,6 +1047,14 @@ export default function BulkImport() {
                 </div>
               )}
             </div>
+            {results.failed > 0 && results.errorMessages.length > 0 && (
+              <div className="w-full max-w-xl text-left bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-red-700 dark:text-red-300">Why some rows failed:</p>
+                {results.errorMessages.map((msg, i) => (
+                  <p key={i} className="text-xs text-red-600 dark:text-red-300 font-mono break-words">• {msg}</p>
+                ))}
+              </div>
+            )}
             <div className="flex gap-3">
               <Button variant="outline" onClick={resetToSelect}>
                 Import another type
