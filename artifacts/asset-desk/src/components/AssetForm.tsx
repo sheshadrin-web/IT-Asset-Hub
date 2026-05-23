@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getAssetEmoji } from "@/lib/assetEmoji";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Check, ChevronsUpDown } from "lucide-react";
 import {
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
@@ -10,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
 import LocationSelect from "@/components/LocationSelect";
@@ -136,6 +139,7 @@ export default function AssetForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(defaultValues)]);
 
+  const [typeOpen, setTypeOpen] = useState(false);
   const assetType = form.watch("assetType");
   const isLaptop  = assetType === "Laptop";
   const isMobile  = assetType === "Mobile";
@@ -177,29 +181,59 @@ export default function AssetForm({
         {/* Asset Type */}
         <Section title="Asset Type">
           <FormField control={form.control} name="assetType" render={({ field }) => (
-            <FormItem>
+            <FormItem className="flex flex-col">
               <FormLabel>Type <span className="text-destructive">*</span></FormLabel>
-              <Select
-                value={field.value}
-                onValueChange={(v) => field.onChange(v)}
-                disabled={assetIdReadOnly}
-              >
-                <FormControl>
-                  <SelectTrigger data-testid="select-asset-type">
-                    <SelectValue placeholder="Select asset type" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
-                    <div key={label}>
-                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-                      {types.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+              <Popover open={typeOpen} onOpenChange={setTypeOpen}>
+                <PopoverTrigger asChild>
+                  <FormControl>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      disabled={assetIdReadOnly}
+                      className={cn("w-full justify-between font-normal", !field.value && "text-muted-foreground")}
+                      data-testid="select-asset-type"
+                    >
+                      {field.value
+                        ? <span className="flex items-center gap-2"><span aria-hidden>{getAssetEmoji(field.value)}</span>{field.value}</span>
+                        : "Select asset type"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </FormControl>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-[--radix-popover-trigger-width] p-0"
+                  align="start"
+                  side="bottom"
+                  sideOffset={4}
+                  avoidCollisions={false}
+                >
+                  <Command>
+                    <CommandInput placeholder="Search asset type…" />
+                    <CommandList className="max-h-72 overflow-y-auto">
+                      <CommandEmpty>No asset type found.</CommandEmpty>
+                      {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                        <CommandGroup key={label} heading={label}>
+                          {types.map((t) => (
+                            <CommandItem
+                              key={t}
+                              value={t}
+                              onSelect={() => {
+                                field.onChange(t);
+                                setTypeOpen(false);
+                              }}
+                            >
+                              <span className="mr-2" aria-hidden>{getAssetEmoji(t)}</span>
+                              <span>{t}</span>
+                              <Check className={cn("ml-auto h-4 w-4", field.value === t ? "opacity-100" : "opacity-0")} />
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
                       ))}
-                    </div>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               <FormDescription className="text-xs">Choose the category that best describes this asset.</FormDescription>
               <FormMessage />
             </FormItem>
