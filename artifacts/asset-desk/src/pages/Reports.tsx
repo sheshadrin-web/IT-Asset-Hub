@@ -13,12 +13,14 @@ import {
 import {
   TrendingUp, Monitor, Ticket, Users, Download, FileText,
   PieChart as PieChartIcon, BarChart2 as BarChartIcon,
+  Package, Cpu, Wrench,
 } from "lucide-react";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
 import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
+import { ASSET_TYPE_CATEGORIES, getAssetEmoji } from "@/lib/assetEmoji";
 
 const tooltipStyle = {
   backgroundColor: "hsl(var(--card))",
@@ -45,15 +47,26 @@ function downloadCsv(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function exportAssetsCsv(assets: Asset[]) {
-  const header = ["Asset ID","Type","Brand","Model","Serial Number","IMEI","Status","Assigned To","Assigned Email","Department","Location","Purchase Date","Warranty End","Accessories","Remarks"];
+function exportAssetsCsv(assets: Asset[], filenameSuffix = "") {
+  const header = [
+    "Asset ID","Type","Brand","Model","Serial Number","Product No.",
+    "Processor","RAM","Storage","Operating System",
+    "IMEI 1","IMEI 2","SIM Number","Phone Number",
+    "Status","Assigned To","E-Code","Assigned Email","Department",
+    "Location","Purchase Date","Warranty End","Vendor","Invoice",
+    "Accessories","Remarks",
+  ];
   const rows = assets.map((a) => [
-    a.assetId, a.assetType, a.brand, a.model, a.serialNumber,
-    a.imeiNumber ?? "", a.status, a.assignedTo ?? "", a.assignedEmail ?? "", a.department ?? "",
-    a.location, a.purchaseDate, a.warrantyEndDate, a.accessories ?? "", a.remarks ?? "",
+    a.assetId, a.assetType, a.brand, a.model, a.serialNumber, a.productNumber ?? "",
+    a.processor ?? "", a.ram ?? "", a.storage ?? "", a.operatingSystem ?? "",
+    a.imeiNumber ?? "", a.imei2 ?? "", a.simNumber ?? "", a.phoneNumber ?? "",
+    a.status, a.assignedTo ?? "", a.assignedEcode ?? "", a.assignedEmail ?? "", a.department ?? "",
+    a.location, a.purchaseDate, a.warrantyEndDate, a.vendor ?? "", a.invoice ?? "",
+    a.accessories ?? "", a.remarks ?? "",
   ]);
-  const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
-  downloadCsv(csv, `assets_report_${new Date().toISOString().split("T")[0]}.csv`);
+  const csv = "\ufeff" + [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const slug = filenameSuffix ? `_${filenameSuffix.toLowerCase().replace(/\s+/g, "_")}` : "";
+  downloadCsv(csv, `assets${slug}_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
 function exportTicketsCsv(tickets: TicketType[]) {
@@ -329,10 +342,24 @@ export default function Reports() {
     toast({ title: `${label} exported`, description: "CSV file downloaded to your device" });
   };
 
-  const assetsByType = [
-    { name: "Laptop", count: assets.filter((a) => a.assetType === "Laptop").length },
-    { name: "Mobile", count: assets.filter((a) => a.assetType === "Mobile").length },
-  ];
+  // Count every asset type that has at least 1 record; show emoji in label
+  const assetsByType = Array.from(ASSET_TYPE_CATEGORIES.flatMap((c) => c.types))
+    .map((t) => ({ name: `${getAssetEmoji(t)} ${t}`, type: t, count: assets.filter((a) => a.assetType === t).length }))
+    .filter((d) => d.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  // Category roll-up: Main Devices / Accessories / Fixed Assets
+  const assetsByCategory = ASSET_TYPE_CATEGORIES.map((cat) => ({
+    name:  cat.label,
+    types: cat.types as readonly string[],
+    count: assets.filter((a) => cat.types.includes(a.assetType)).length,
+  })).filter((d) => d.count > 0);
+
+  const CATEGORY_COLORS: Record<string, string> = {
+    "Main Devices": "#3b82f6",
+    "Accessories":  "#a855f7",
+    "Fixed Assets": "#f59e0b",
+  };
   const assetsByStatus = [
     { name: "Available",    count: assets.filter((a) => a.status === "Available").length,    color: "#22c55e" },
     { name: "Assigned",     count: assets.filter((a) => a.status === "Assigned").length,     color: "#3b82f6" },
@@ -390,10 +417,31 @@ export default function Reports() {
               <Download className="h-4 w-4" />Export Data
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuContent align="end" className="w-64 max-h-[70vh] overflow-y-auto">
             <DropdownMenuItem className="flex items-center gap-2 cursor-pointer" onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")}>
-              <Monitor className="h-3.5 w-3.5 text-blue-500" />Export Assets
+              <Monitor className="h-3.5 w-3.5 text-blue-500" />Export All Assets
             </DropdownMenuItem>
+
+            {/* By category */}
+            {assetsByCategory.length > 0 && <DropdownMenuSeparator />}
+            {assetsByCategory.map((cat) => {
+              const Icon = cat.name === "Main Devices" ? Cpu : cat.name === "Accessories" ? Package : Wrench;
+              return (
+                <DropdownMenuItem
+                  key={cat.name}
+                  className="flex items-center gap-2 cursor-pointer text-xs"
+                  onClick={() => handleExport(
+                    () => exportAssetsCsv(assets.filter((a) => cat.types.includes(a.assetType)), cat.name),
+                    `${cat.name} report`,
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" style={{ color: CATEGORY_COLORS[cat.name] }} />
+                  Export {cat.name} <span className="ml-auto text-muted-foreground">{cat.count}</span>
+                </DropdownMenuItem>
+              );
+            })}
+
+            <DropdownMenuSeparator />
             <DropdownMenuItem className="flex items-center gap-2 cursor-pointer" onClick={() => handleExport(() => exportTicketsCsv(tickets), "Tickets report")}>
               <Ticket className="h-3.5 w-3.5 text-purple-500" />Export Tickets
             </DropdownMenuItem>
@@ -522,19 +570,41 @@ export default function Reports() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold">Assets by Category</CardTitle>
+            <ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />
+          </CardHeader>
+          <CardContent>
+            {assetsByCategory.length === 0 ? (
+              <EmptyChart icon={PieChartIcon} message="No assets yet" sub="Main Devices / Accessories / Fixed Assets" />
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={assetsByCategory} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="count">
+                    {assetsByCategory.map((entry) => <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name] ?? "#94a3b8"} />)}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Legend iconType="circle" iconSize={8} formatter={(v) => <span style={{ fontSize: "12px", color: "hsl(var(--foreground))" }}>{v}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">Assets by Type</CardTitle>
             <ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />
           </CardHeader>
           <CardContent>
-            {assets.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No assets yet" sub="Laptop vs Mobile breakdown will appear here" />
+            {assetsByType.length === 0 ? (
+              <EmptyChart icon={BarChartIcon} message="No assets yet" sub="A breakdown across all 22 asset types will appear here" />
             ) : (
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={assetsByType} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <ResponsiveContainer width="100%" height={Math.max(220, assetsByType.length * 26)}>
+                <BarChart data={assetsByType} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
+                  <XAxis type="number" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} axisLine={false} tickLine={false} interval={0} />
                   <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="count" fill="#6366f1" radius={[4,4,0,0]} name="Assets" />
+                  <Bar dataKey="count" fill="#6366f1" radius={[0,4,4,0]} name="Assets" />
                 </BarChart>
               </ResponsiveContainer>
             )}
