@@ -173,7 +173,7 @@ export default function Assets() {
   const [search, setSearch]           = useState("");
   const [typeFilter, setTypeFilter]     = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [userFilter, setUserFilter]     = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
@@ -191,11 +191,11 @@ export default function Assets() {
 
   const hasColFilters = Object.values(colFilters).some(s => s.size > 0);
   const hasAnyFilter  = search !== "" || typeFilter !== "all" || statusFilter !== "all"
-    || userFilter !== "all" || deptFilter !== "all" || hasColFilters;
+    || locationFilter !== "all" || deptFilter !== "all" || hasColFilters;
 
   const clearAllFilters = () => {
     setSearch(""); setTypeFilter("all"); setStatusFilter("all");
-    setUserFilter("all"); setDeptFilter("all");
+    setLocationFilter("all"); setDeptFilter("all");
     setColFilters(makeEmptyColFilters());
   };
 
@@ -302,9 +302,9 @@ export default function Assets() {
       || (a.assignedEmail?.toLowerCase().includes(q) ?? false);
     const matchType   = typeFilter   === "all" || a.assetType === typeFilter;
     const matchStatus = statusFilter === "all" || a.status    === statusFilter;
-    const matchUser   = userFilter   === "all" || a.assignedEmail === userFilter || a.assignedEcode === userFilter;
-    const matchDept   = deptFilter   === "all" || (a.department ?? "") === deptFilter;
-    return matchSearch && matchType && matchStatus && matchUser && matchDept;
+    const matchLocation = locationFilter === "all" || (a.location ?? "") === locationFilter;
+    const matchDept     = deptFilter     === "all" || (a.department ?? "") === deptFilter;
+    return matchSearch && matchType && matchStatus && matchLocation && matchDept;
   });
 
   const filtered = baseFiltered.filter(a =>
@@ -326,7 +326,7 @@ export default function Assets() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, userFilter, deptFilter, colFilters]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, colFilters]);
 
   const paged          = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const pagedIds       = paged.map(a => a.assetId);
@@ -557,22 +557,18 @@ export default function Assets() {
                 ))}
               </SelectContent>
             </Select>
-            {/* Assigned-to user filter — only shows users who have ≥1 assigned asset */}
-            <Select value={userFilter} onValueChange={setUserFilter}>
-              <SelectTrigger className="w-full sm:w-52" data-testid="select-user-filter">
-                <SelectValue placeholder="Assigned To" />
+            {/* Location filter — only shows locations that have ≥1 asset */}
+            <Select value={locationFilter} onValueChange={setLocationFilter}>
+              <SelectTrigger className="w-full sm:w-52" data-testid="select-location-filter">
+                <SelectValue placeholder="Location" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Users</SelectItem>
-                {users
-                  .filter(u => assets.some(a => a.assignedEmail === u.email || a.assignedEcode === u.ecode))
-                  .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""))
-                  .map(u => (
-                    <SelectItem key={u.id} value={u.email}>
-                      <span className="flex flex-col leading-tight">
-                        <span className="font-medium">{u.full_name}</span>
-                        {u.ecode && <span className="text-xs text-muted-foreground font-mono">{u.ecode}</span>}
-                      </span>
+                <SelectItem value="all">All Locations</SelectItem>
+                {[...new Set(assets.map(a => a.location).filter(Boolean))]
+                  .sort((a, b) => a.localeCompare(b))
+                  .map(loc => (
+                    <SelectItem key={loc} value={loc}>
+                      <span className="flex items-center gap-2">📍 {loc}</span>
                     </SelectItem>
                   ))}
               </SelectContent>
