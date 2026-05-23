@@ -176,34 +176,34 @@ export default function AssetForm({
 
         {/* Asset Type */}
         <Section title="Asset Type">
-          <div className="space-y-5">
-            {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
-              <div key={label}>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{label}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {types.map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => !assetIdReadOnly && form.setValue("assetType", type as AssetFormValues["assetType"], { shouldValidate: true })}
-                      disabled={assetIdReadOnly}
-                      className={cn(
-                        "flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-all",
-                        assetType === type
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-border hover:border-muted-foreground/40 text-muted-foreground",
-                        assetIdReadOnly && "cursor-not-allowed opacity-60"
-                      )}
-                      data-testid={`type-selector-${type.toLowerCase().replace(/\s+/g, "-")}`}
-                    >
-                      <span className="text-2xl leading-none" aria-hidden>{getAssetEmoji(type)}</span>
-                      <span className="text-xs font-semibold text-center leading-tight">{type}</span>
-                    </button>
+          <FormField control={form.control} name="assetType" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Type <span className="text-destructive">*</span></FormLabel>
+              <Select
+                value={field.value}
+                onValueChange={(v) => field.onChange(v)}
+                disabled={assetIdReadOnly}
+              >
+                <FormControl>
+                  <SelectTrigger data-testid="select-asset-type">
+                    <SelectValue placeholder="Select asset type" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                    <div key={label}>
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+                      {types.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </div>
                   ))}
-                </div>
-              </div>
-            ))}
-          </div>
+                </SelectContent>
+              </Select>
+              <FormDescription className="text-xs">Choose the category that best describes this asset.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )} />
         </Section>
 
         {/* Device Identification */}
