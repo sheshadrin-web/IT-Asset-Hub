@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { getAssetEmoji } from "@/lib/assetEmoji";
 import { Link } from "wouter";
 import {
   Plus, Search, Monitor, Smartphone, Tablet, Eye, Edit,
@@ -37,11 +36,15 @@ import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES, MAIN_DEVICE_TYPES, getAssetEmoji,
+} from "@/lib/assetEmoji";
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
   Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
   Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Recovery Stage": "bg-red-500/15 text-red-600 border-red-500/30 font-semibold",
   "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
   Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
   Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
@@ -50,6 +53,7 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500",
   Available:        "bg-emerald-500",
   Assigned:         "bg-blue-500",
+  "Recovery Stage": "bg-red-600",
   "Under Repair":   "bg-amber-500",
   Lost:             "bg-red-500",
   Retired:          "bg-gray-400",
@@ -124,7 +128,7 @@ function parseCsvText(text: string): ParsedRow[] {
     headers.forEach((h, j) => { row[h] = values[j] ?? ""; });
     const errors: string[] = [];
     if (!row.assetId) errors.push("assetId is required");
-    if (!["Laptop", "Mobile", "Desktop", "Tab"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop, Mobile, Desktop, or Tab");
+    if (!ALL_ASSET_TYPES.includes(row.assetType as typeof ALL_ASSET_TYPES[number])) errors.push(`assetType must be one of: ${ALL_ASSET_TYPES.join(", ")}`);
     if (!row.brand) errors.push("brand is required");
     if (!row.model) errors.push("model is required");
     if (!row.serialNumber) errors.push("serialNumber is required");
@@ -135,7 +139,7 @@ function parseCsvText(text: string): ParsedRow[] {
       index: i + 1,
       data: {
         assetId:         row.assetId,
-        assetType:       (row.assetType as "Laptop" | "Mobile" | "Desktop" | "Tab") || "Laptop",
+        assetType:       (row.assetType as typeof ALL_ASSET_TYPES[number]) || "Laptop",
         brand:           row.brand,
         model:           row.model,
         serialNumber:    row.serialNumber,
@@ -530,17 +534,23 @@ export default function Assets() {
               <SelectTrigger className="w-full sm:w-40" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="Laptop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Laptop</span></SelectItem>
-                <SelectItem value="Mobile"><span className="flex items-center gap-2"><Smartphone className="h-3.5 w-3.5" /> Mobile</span></SelectItem>
-                <SelectItem value="Desktop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Desktop</span></SelectItem>
-                <SelectItem value="Tab"><span className="flex items-center gap-2"><Tablet className="h-3.5 w-3.5" /> Tab</span></SelectItem>
+                {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                  <div key={label}>
+                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+                    {types.map(t => (
+                      <SelectItem key={t} value={t}>
+                        <span className="flex items-center gap-2"><span aria-hidden>{getAssetEmoji(t)}</span> {t}</span>
+                      </SelectItem>
+                    ))}
+                  </div>
+                ))}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {(["In Procurement","Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
+                {(["In Procurement","Available","Assigned","Recovery Stage","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
                   <SelectItem key={s} value={s}>
                     <span className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} />{s}</span>
                   </SelectItem>
@@ -1163,7 +1173,7 @@ export default function Assets() {
 
               {/* Type chips + search */}
               <div className="flex items-center gap-2 flex-wrap">
-                {["All", "Laptop", "Mobile", "Desktop", "Tab"].map(t => (
+                {["All", ...MAIN_DEVICE_TYPES].map(t => (
                   <button key={t} type="button"
                     onClick={() => setBulkTypeFilter(t)}
                     className={cn(
