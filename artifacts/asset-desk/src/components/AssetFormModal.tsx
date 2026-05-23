@@ -28,17 +28,18 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Asset } from "@/data/mockData";
+import { ALL_ASSET_TYPES } from "@/lib/assetEmoji";
 
 const schema = z.object({
   assetId: z.string().min(1, "Required"),
-  assetType: z.enum(["Laptop", "Mobile", "Desktop", "Tab"]),
+  assetType: z.enum(ALL_ASSET_TYPES as unknown as [string, ...string[]]),
   brand: z.string().min(1, "Required"),
   model: z.string().min(1, "Required"),
   serialNumber: z.string().min(1, "Required"),
   imeiNumber: z.string().optional(),
   purchaseDate: z.string().min(1, "Required"),
   warrantyEndDate: z.string().min(1, "Required"),
-  status: z.enum(["In Procurement", "Available", "Assigned", "Under Repair", "Lost", "Retired"]),
+  status: z.enum(["In Procurement", "Available", "Assigned", "Recovery Stage", "Under Repair", "Lost", "Retired"]),
   assignedTo: z.string().optional(),
   department: z.string().optional(),
   location: z.string().min(1, "Required"),
@@ -121,6 +122,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
   const onSubmit = (values: FormValues) => {
     onSave({
       ...values,
+      assetType: values.assetType as Asset["assetType"],
       imeiNumber: values.imeiNumber || undefined,
       assignedTo: values.assignedTo || undefined,
       department: values.department || undefined,
