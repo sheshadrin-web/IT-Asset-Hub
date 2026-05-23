@@ -41,7 +41,7 @@ export default function AddAsset() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5 pb-0">
+    <div className="max-w-2xl mx-auto flex flex-col gap-5 min-h-full">
       <div className="flex items-center gap-3">
         <Link href="/assets">
           <Button variant="ghost" size="icon" data-testid="button-back">
@@ -62,11 +62,11 @@ export default function AddAsset() {
         </span>
       </div>
 
-      <Card>
+      <Card className="flex-1 flex flex-col">
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-semibold text-muted-foreground">Asset Details</CardTitle>
         </CardHeader>
-        <CardContent className="pb-4">
+        <CardContent className="pb-4 flex-1">
           <AssetForm
             onSubmit={handleSubmit}
             onCancel={() => setLocation("/assets")}
