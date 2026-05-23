@@ -165,7 +165,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement } = useAssets();
+  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -698,10 +698,47 @@ export default function Assets() {
                         <span className="text-xs text-foreground">{asset.location || "—"}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-base leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>
-                          <span className="text-xs font-medium text-foreground">{asset.assetType}</span>
-                        </div>
+                        <Select
+                          value={asset.assetType}
+                          onValueChange={async (v) => {
+                            if (v === asset.assetType) return;
+                            try {
+                              await updateAsset({ ...asset, assetType: v as Asset["assetType"] });
+                              toast({ title: "Type updated", description: `${asset.assetId} → ${v}` });
+                            } catch (err) {
+                              toast({
+                                title: "Failed to update type",
+                                description: err instanceof Error ? err.message : "Please try again.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger
+                            className="h-7 w-[140px] px-2 text-xs"
+                            data-testid={`select-type-${asset.assetId}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <SelectValue>
+                              <span className="flex items-center gap-1.5">
+                                <span aria-hidden>{getAssetEmoji(asset.assetType)}</span>
+                                <span className="text-xs font-medium">{asset.assetType}</span>
+                              </span>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                              <div key={label}>
+                                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+                                {types.map((t) => (
+                                  <SelectItem key={t} value={t}>
+                                    <span className="flex items-center gap-2"><span aria-hidden>{getAssetEmoji(t)}</span> {t}</span>
+                                  </SelectItem>
+                                ))}
+                              </div>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground leading-tight">{asset.brand}</div>
