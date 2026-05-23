@@ -10,14 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Laptop, Smartphone, Monitor, Tablet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
 import LocationSelect from "@/components/LocationSelect";
+import { ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES } from "@/lib/assetEmoji";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
-  assetType:       z.enum(["Laptop", "Mobile", "Desktop", "Tab"]),
+  assetType:       z.enum(ALL_ASSET_TYPES as unknown as [string, ...string[]]),
   brand:           z.string().min(1, "Brand is required"),
   model:           z.string().min(1, "Model is required"),
   serialNumber:    z.string().min(1, "Serial number is required"),
@@ -141,6 +141,8 @@ export default function AssetForm({
   const isMobile  = assetType === "Mobile";
   const isDesktop = assetType === "Desktop";
   const isTab     = assetType === "Tab";
+  // Suppress unused warnings — these flags are referenced in conditional sections below.
+  void isLaptop; void isMobile; void isDesktop; void isTab;
 
   return (
     <Form {...form}>
@@ -172,25 +174,32 @@ export default function AssetForm({
 
         {/* Asset Type */}
         <Section title="Asset Type">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {(["Laptop", "Mobile", "Desktop", "Tab"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => !assetIdReadOnly && form.setValue("assetType", type, { shouldValidate: true })}
-                disabled={assetIdReadOnly}
-                className={cn(
-                  "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all",
-                  assetType === type
-                    ? "border-primary bg-primary/5 text-primary"
-                    : "border-border hover:border-muted-foreground/40 text-muted-foreground",
-                  assetIdReadOnly && "cursor-not-allowed opacity-60"
-                )}
-                data-testid={`type-selector-${type.toLowerCase()}`}
-              >
-                <span className="text-3xl leading-none" aria-hidden>{getAssetEmoji(type)}</span>
-                <span className="text-sm font-semibold">{type}</span>
-              </button>
+          <div className="space-y-5">
+            {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+              <div key={label}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{label}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {types.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => !assetIdReadOnly && form.setValue("assetType", type as AssetFormValues["assetType"], { shouldValidate: true })}
+                      disabled={assetIdReadOnly}
+                      className={cn(
+                        "flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-all",
+                        assetType === type
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-border hover:border-muted-foreground/40 text-muted-foreground",
+                        assetIdReadOnly && "cursor-not-allowed opacity-60"
+                      )}
+                      data-testid={`type-selector-${type.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <span className="text-2xl leading-none" aria-hidden>{getAssetEmoji(type)}</span>
+                      <span className="text-xs font-semibold text-center leading-tight">{type}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </Section>
