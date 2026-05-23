@@ -56,8 +56,14 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
 }
 
 // ─── Asset types ─────────────────────────────────────────────────────────────
-export type AssetType   = "Laptop" | "Mobile" | "Desktop" | "Tab";
-export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Under Repair" | "Lost" | "Retired";
+export type AssetType   =
+  // Main Devices
+  | "Laptop" | "Desktop" | "Monitor" | "Mobile" | "Tab" | "Camera" | "CPU" | "Generic Asset"
+  // Accessories
+  | "Keyboard" | "Mouse" | "Headset" | "Hard Disk" | "Speaker" | "Docking Station"
+  // Fixed Assets
+  | "Printer" | "Router" | "Server" | "CCTV" | "Smart TV" | "Projector" | "Network Device" | "Firewall";
+export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Recovery Stage" | "Under Repair" | "Lost" | "Retired";
 
 export interface Asset {
   id?:              string;   // Supabase UUID
