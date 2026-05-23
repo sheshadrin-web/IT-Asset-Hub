@@ -54,7 +54,7 @@ export default function EditAsset() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="max-w-2xl mx-auto flex flex-col gap-5 min-h-full">
       <div className="flex items-center gap-3">
         <Link href={`/assets/${asset.assetId}`}>
           <Button variant="ghost" size="icon" data-testid="button-back"><ArrowLeft className="h-4 w-4" /></Button>
@@ -65,11 +65,11 @@ export default function EditAsset() {
         </div>
       </div>
 
-      <Card>
+      <Card className="flex-1 flex flex-col">
         <CardHeader className="pb-4">
           <CardTitle className="text-sm font-semibold text-muted-foreground">Asset Details</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex-1">
           <AssetForm
             defaultValues={{
               assetId:         asset.assetId,
