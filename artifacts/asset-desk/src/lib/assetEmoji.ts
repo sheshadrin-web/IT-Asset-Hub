@@ -1,12 +1,34 @@
+// ─── Asset type emoji & categories ────────────────────────────────────────────
+// Single source of truth for asset type emojis and category groupings.
+// Used in selectors, filters, table cells, detail headers, etc.
+
 export const ASSET_TYPE_EMOJI: Record<string, string> = {
-  Laptop:  "💻",
-  Desktop: "🖥️",
-  Mobile:  "📱",
-  Tab:     "📲",
-  Tablet:  "📲",
-  Monitor: "🖥",
-  Printer: "🖨️",
-  Server:  "🗄️",
+  // Main Devices
+  Laptop:           "💻",
+  Desktop:          "🖥️",
+  Monitor:          "🖥",
+  Mobile:           "📱",
+  Tab:              "📲",
+  Tablet:           "📲",
+  Camera:           "📷",
+  CPU:              "🧠",
+  "Generic Asset":  "📦",
+  // Accessories
+  Keyboard:         "⌨️",
+  Mouse:            "🖱️",
+  Headset:          "🎧",
+  "Hard Disk":      "💾",
+  Speaker:          "🔊",
+  "Docking Station":"🧰",
+  // Fixed Assets
+  Printer:          "🖨️",
+  Router:           "📡",
+  Server:           "🗄️",
+  CCTV:             "📹",
+  "Smart TV":       "📺",
+  Projector:        "🎥",
+  "Network Device": "📶",
+  Firewall:         "🔒",
 };
 
 export function getAssetEmoji(type?: string | null): string {
@@ -14,39 +36,33 @@ export function getAssetEmoji(type?: string | null): string {
   return ASSET_TYPE_EMOJI[type] ?? "📦";
 }
 
-export const FIELD_EMOJI: Record<string, string> = {
-  "Asset ID":         "🆔",
-  "Type":             "🏷️",
-  "Brand":            "🏭",
-  "Model":            "📦",
-  "Serial Number":    "🔢",
-  "Product Number":   "🔖",
-  "Processor":        "🧠",
-  "CPU":              "🧠",
-  "RAM":              "🧮",
-  "Storage":          "💽",
-  "Operating System": "🪟",
-  "IMEI 1":           "📡",
-  "IMEI 2":           "📡",
-  "SIM Number":       "📶",
-  "Phone Number":     "☎️",
-  "Monitor Brand":    "🖥",
-  "Monitor Model":    "🖥",
-  "Monitor Size":     "📏",
-  "Keyboard":         "⌨️",
-  "Mouse":            "🖱️",
-  "Purchase Date":    "📅",
-  "Location":         "📍",
-  "Vendor":           "🏢",
-  "Invoice No.":      "🧾",
-  "Accessories":      "🧰",
-  "Others":           "✨",
-  "Remarks":          "📝",
-  "Warranty":         "🛡️",
-  "Purchased":        "🛒",
-  "Expires":          "⏳",
-};
+// ─── Category groupings ───────────────────────────────────────────────────────
+export const MAIN_DEVICE_TYPES = [
+  "Laptop", "Desktop", "Monitor", "Mobile", "Tab", "Camera", "CPU", "Generic Asset",
+] as const;
 
+export const ACCESSORY_TYPES = [
+  "Keyboard", "Mouse", "Headset", "Hard Disk", "Speaker", "Docking Station",
+] as const;
+
+export const FIXED_ASSET_TYPES = [
+  "Printer", "Router", "Server", "CCTV", "Smart TV", "Projector", "Network Device", "Firewall",
+] as const;
+
+export const ALL_ASSET_TYPES = [
+  ...MAIN_DEVICE_TYPES, ...ACCESSORY_TYPES, ...FIXED_ASSET_TYPES,
+] as const;
+
+export type AssetTypeName = typeof ALL_ASSET_TYPES[number];
+
+export const ASSET_TYPE_CATEGORIES: { label: string; types: readonly string[] }[] = [
+  { label: "Main Devices", types: MAIN_DEVICE_TYPES },
+  { label: "Accessories",  types: ACCESSORY_TYPES   },
+  { label: "Fixed Assets", types: FIXED_ASSET_TYPES },
+];
+
+// Field label emojis (kept for backwards-compat; currently unused in UI).
+export const FIELD_EMOJI: Record<string, string> = {};
 export function getFieldEmoji(label?: string | null): string {
   if (!label) return "•";
   return FIELD_EMOJI[label] ?? "•";
