@@ -41,7 +41,7 @@ export default function AddAsset() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="max-w-2xl mx-auto space-y-5 pb-0">
       <div className="flex items-center gap-3">
         <Link href="/assets">
           <Button variant="ghost" size="icon" data-testid="button-back">
