@@ -3,19 +3,21 @@ import { Link } from "wouter";
 import {
   ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle,
   AlertCircle, Download, Info, Loader2, X, UserCheck,
-  Monitor, Smartphone, Server,
+  Monitor, Smartphone, Server, Package,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useAssets } from "@/context/AssetContext";
 import { useUsers } from "@/context/UsersContext";
 import { supabase } from "@/lib/supabaseClient";
 import { AssetStatus, AssetType } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
+import { ASSET_TYPE_CATEGORIES, getAssetEmoji } from "@/lib/assetEmoji";
 
 // ─── CSV parser (handles quoted fields) ──────────────────────────────────────
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
@@ -252,6 +254,29 @@ interface MappedRow {
   errors:          string[];
 }
 
+// ─── Asset-tag prefix per type (matches mapAssetType regex above) ────────────
+const TAG_PREFIX: Record<string, string> = {
+  Laptop:"LAP", Desktop:"DES", Mobile:"MOB", Tab:"TAB", CPU:"CPU",
+  Monitor:"MON", Keyboard:"KBD", Mouse:"MOU", Headset:"HSE", "Hard Disk":"HDD",
+  Speaker:"SPK", "Docking Station":"DCK", Printer:"PRN",
+  Router:"RTR", Server:"SRV", "Network Device":"NET", Firewall:"FW",
+  Camera:"CAM", CCTV:"CCTV", "Smart TV":"TV", Projector:"PRJ",
+  "Generic Asset":"AST",
+};
+
+// Column-set categories that drive the generated template
+type ColumnSet = "computer" | "mobile" | "tab" | "monitor" | "simple" | "network";
+const COLUMN_SET: Partial<Record<AssetType, ColumnSet>> = {
+  Laptop:"computer", Desktop:"computer", CPU:"computer", Server:"computer",
+  Mobile:"mobile",
+  Tab:"tab",
+  Monitor:"monitor",
+  Router:"network", "Network Device":"network", Firewall:"network",
+};
+function columnSetFor(type: AssetType): ColumnSet {
+  return COLUMN_SET[type] ?? "simple";
+}
+
 // ─── Type-specific templates ──────────────────────────────────────────────────
 const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; filename: string }>> = {
   Laptop: {
@@ -291,22 +316,87 @@ const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; 
     ],
   },
 };
+// Build a generic template for any AssetType that doesn't have a hard-coded one
+function buildGenericTemplate(type: AssetType): { headers: string[]; rows: string[]; filename: string } {
+  const prefix = TAG_PREFIX[type] ?? "AST";
+  const tag = (n: number) => `MILES-${prefix}-${String(n).padStart(3,"0")}`;
+  const set = columnSetFor(type);
+
+  const common = ["Asset Tag","Brand","Model","Location","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"];
+
+  if (set === "computer") {
+    const headers = ["Asset Tag","Brand","Model","Serial Number","Location","OS","Config","RAM","ROM","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"];
+    return {
+      filename: `${type.toLowerCase().replace(/\s+/g,"_")}_import_template.csv`,
+      headers,
+      rows: [
+        `${tag(1)},Dell,Sample Model,SN10001,Mumbai,Windows,Intel i7,16,512,2024,Under Warranty,Good,Assigned,C Prompt Solutions,John Doe,MPE1234,IT`,
+        `${tag(2)},HP,Sample Model,SN10002,Bangalore,Windows,Intel i5,8,256,2023,Under Warranty,Good,Available,,,,`,
+      ],
+    };
+  }
+  if (set === "mobile") {
+    const headers = ["Asset Tag","Brand","Model","IMEI 1","IMEI 2","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"];
+    return { filename: `${type.toLowerCase()}_import_template.csv`, headers, rows: [
+      `${tag(1)},Samsung,Sample Model,354812345678901,354812345678902,Mumbai,2024,Under Warranty,Assigned,John Doe,MPE1234,Sales`,
+      `${tag(2)},Apple,Sample Model,356789012345678,,Bangalore,2025,Under Warranty,Available,,,,`,
+    ]};
+  }
+  if (set === "tab") {
+    const headers = ["Asset Tag","Brand","Model","Serial Number","Location","OS","RAM","ROM","IMEI","Purchase Year","Warranty","Asset Condition","Asset Status","Employee Name","Employee Code","Employee Department"];
+    return { filename: `${type.toLowerCase()}_import_template.csv`, headers, rows: [
+      `${tag(1)},Apple,iPad Sample,SN20001,Mumbai,iOS,8,256,,2024,Under Warranty,Good,Assigned,John Doe,MPE1234,Sales`,
+      `${tag(2)},Samsung,Galaxy Tab Sample,SN20002,Bangalore,Android,8,128,358765432109876,2023,Under Warranty,Good,Available,,,,`,
+    ]};
+  }
+  if (set === "monitor") {
+    const headers = ["Asset Tag","Brand","Model","Serial Number","Location","Screen Size","Resolution","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Employee Name","Employee Code","Employee Department"];
+    return { filename: `${type.toLowerCase()}_import_template.csv`, headers, rows: [
+      `${tag(1)},Dell,UltraSharp U2422H,SN30001,Mumbai,24",1920x1080,2024,Under Warranty,Good,Assigned,Owned,John Doe,MPE1234,IT`,
+      `${tag(2)},LG,27UN880,SN30002,Bangalore,27",3840x2160,2023,Under Warranty,Good,Available,Owned,,,,`,
+    ]};
+  }
+  if (set === "network") {
+    const headers = ["Asset Tag","Brand","Model","Serial Number","Location","IP Address","Firmware","Purchase Year","Warranty","Asset Condition","Asset Status","Ownership","Remarks"];
+    return { filename: `${type.toLowerCase().replace(/\s+/g,"_")}_import_template.csv`, headers, rows: [
+      `${tag(1)},Cisco,Sample Model,SN40001,Mumbai HQ,192.168.1.1,1.0.0,2023,Under Warranty,Good,Available,Owned,Core ${type}`,
+      `${tag(2)},Fortinet,Sample Model,SN40002,Bangalore Office,192.168.2.1,2.0.0,2024,Under Warranty,Good,Available,Owned,`,
+    ]};
+  }
+  // simple: accessories, fixed assets, etc.
+  const headers = ["Asset Tag","Brand","Model","Serial Number", ...common.slice(3)];
+  return { filename: `${type.toLowerCase().replace(/\s+/g,"_")}_import_template.csv`, headers, rows: [
+    `${tag(1)},Sample Brand,Sample Model,SN50001,Mumbai,2024,Under Warranty,Good,Available,Owned,,,`,
+    `${tag(2)},Sample Brand,Sample Model,SN50002,Bangalore,2023,Under Warranty,Good,Assigned,Owned,John Doe,MPE1234,IT`,
+  ]};
+}
+
 function downloadTemplate(type: AssetType) {
-  const t = TEMPLATES[type];
-  if (!t) return;
-  const csv = [t.headers.join(","), ...t.rows].join("\n");
+  const t = TEMPLATES[type] ?? buildGenericTemplate(type);
+  // Prepend UTF-8 BOM so Excel opens Indian rupee / unicode characters correctly
+  const csv = "\ufeff" + [t.headers.join(","), ...t.rows].join("\n");
   const a   = document.createElement("a");
-  a.href    = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.href    = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   a.download = t.filename;
   a.click();
 }
 
-// ─── Asset type selection cards ───────────────────────────────────────────────
-const TYPE_CARDS: { type: AssetType; Icon: React.ElementType; color: string; ring: string; desc: string }[] = [
-  { type: "Laptop",  Icon: Monitor,    color: "bg-blue-50 text-blue-600 border-blue-200",    ring: "ring-blue-400",   desc: "Laptops & notebooks — MILES-LAP-* tags" },
-  { type: "Mobile",  Icon: Smartphone, color: "bg-purple-50 text-purple-600 border-purple-200", ring: "ring-purple-400", desc: "Phones & tablets — MILES-MOB-* tags, IMEI columns" },
-  { type: "Desktop", Icon: Server,     color: "bg-amber-50 text-amber-600 border-amber-200",  ring: "ring-amber-400",  desc: "Desktops & workstations — MILES-DES-* tags" },
-];
+// ─── Visual styling per asset type (icon + colour for banner/badges) ──────────
+type TypeStyle = { Icon: React.ElementType; color: string; ring: string; desc: string };
+const DEFAULT_TYPE_STYLE: TypeStyle = {
+  Icon: Package,
+  color: "bg-slate-50 text-slate-600 border-slate-200",
+  ring:  "ring-slate-400",
+  desc:  "",
+};
+const TYPE_STYLE: Partial<Record<AssetType, TypeStyle>> = {
+  Laptop:  { Icon: Monitor,    color: "bg-blue-50 text-blue-600 border-blue-200",       ring: "ring-blue-400",   desc: "Laptops & notebooks — MILES-LAP-* tags" },
+  Mobile:  { Icon: Smartphone, color: "bg-purple-50 text-purple-600 border-purple-200", ring: "ring-purple-400", desc: "Phones — MILES-MOB-* tags, IMEI columns" },
+  Desktop: { Icon: Server,     color: "bg-amber-50 text-amber-600 border-amber-200",    ring: "ring-amber-400",  desc: "Desktops & workstations — MILES-DES-* tags" },
+};
+function getTypeStyle(type: AssetType): TypeStyle {
+  return TYPE_STYLE[type] ?? DEFAULT_TYPE_STYLE;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 type Step = "select" | "upload" | "preview" | "importing" | "done";
@@ -565,37 +655,85 @@ export default function BulkImport() {
 
       {/* ── STEP 0: Select Type ───────────────────────────────────────────────── */}
       {step === "select" && (
-        <div className="space-y-5">
-          <p className="text-sm text-muted-foreground">Choose the type of assets you want to import in this batch. Each batch is for one asset type only.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {TYPE_CARDS.map(({ type, Icon, color, ring, desc }) => (
-              <button
-                key={type}
-                className={cn(
-                  "group relative flex flex-col items-start gap-4 rounded-xl border-2 bg-card p-5 text-left transition-all hover:border-primary hover:shadow-md focus:outline-none focus-visible:ring-2",
-                  ring
-                )}
-                onClick={() => { setAssetTypeFilter(type); setStep("upload"); }}
+        <Card className="max-w-2xl mx-auto">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Select asset type for this batch</CardTitle>
+            <p className="text-sm text-muted-foreground">Each upload is for one asset type only. Download the template for the type below — the columns match what we'll import.</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-foreground">Asset Type <span className="text-destructive">*</span></label>
+              <Select
+                value={assetTypeFilter ?? ""}
+                onValueChange={(v) => setAssetTypeFilter(v as AssetType)}
               >
-                <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl border", color)}>
-                  <Icon className="h-6 w-6" />
+                <SelectTrigger className="mt-1.5" data-testid="select-import-type">
+                  <SelectValue placeholder="Select asset type…" />
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                    <SelectGroup key={label}>
+                      <SelectLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</SelectLabel>
+                      {types.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          <span className="inline-flex items-center gap-2">
+                            <span aria-hidden>{getAssetEmoji(t)}</span>
+                            <span>{t}</span>
+                            {TAG_PREFIX[t] && (
+                              <span className="text-[10px] text-muted-foreground font-mono">MILES-{TAG_PREFIX[t]}-*</span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {assetTypeFilter && (() => {
+              const style = getTypeStyle(assetTypeFilter);
+              const set = columnSetFor(assetTypeFilter);
+              const setLabel: Record<ColumnSet,string> = {
+                computer:"OS, processor, RAM, storage + serial number",
+                mobile:  "IMEI 1 & IMEI 2 columns (no serial number)",
+                tab:     "OS, RAM, storage + optional IMEI",
+                monitor: "Screen size & resolution",
+                network: "IP address & firmware",
+                simple:  "Basic asset details (brand, model, serial)",
+              };
+              return (
+                <div className={cn("flex items-start gap-3 rounded-lg border p-3", style.color)}>
+                  <span className="text-xl leading-none" aria-hidden>{getAssetEmoji(assetTypeFilter)}</span>
+                  <div className="text-sm">
+                    <p className="font-semibold">{assetTypeFilter}</p>
+                    <p className="text-xs opacity-80 mt-0.5">Template includes: {setLabel[set]}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-base font-semibold text-foreground">{type}s</p>
-                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{desc}</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-1.5 mt-auto text-xs"
-                  onClick={e => { e.stopPropagation(); downloadTemplate(type); }}
-                >
-                  <Download className="h-3.5 w-3.5" /> Download template
-                </Button>
-              </button>
-            ))}
-          </div>
-        </div>
+              );
+            })()}
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <Button
+                variant="outline"
+                className="gap-2"
+                disabled={!assetTypeFilter}
+                onClick={() => assetTypeFilter && downloadTemplate(assetTypeFilter)}
+                data-testid="button-download-template"
+              >
+                <Download className="h-4 w-4" /> Download template
+              </Button>
+              <Button
+                className="gap-2 sm:ml-auto"
+                disabled={!assetTypeFilter}
+                onClick={() => setStep("upload")}
+                data-testid="button-continue-upload"
+              >
+                Continue to upload →
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* ── STEP 1: Upload ────────────────────────────────────────────────────── */}
@@ -604,12 +742,12 @@ export default function BulkImport() {
           <div className="lg:col-span-2 space-y-4">
             {/* Selected type banner */}
             {assetTypeFilter && (() => {
-              const card = TYPE_CARDS.find(c => c.type === assetTypeFilter)!;
+              const style = getTypeStyle(assetTypeFilter);
               return (
-                <div className={cn("flex items-center justify-between rounded-lg border px-4 py-3", card.color)}>
+                <div className={cn("flex items-center justify-between rounded-lg border px-4 py-3", style.color)}>
                   <div className="flex items-center gap-2">
-                    <card.Icon className="h-4 w-4" />
-                    <span className="text-sm font-semibold">Importing: {assetTypeFilter}s only</span>
+                    <style.Icon className="h-4 w-4" />
+                    <span className="text-sm font-semibold">Importing: {assetTypeFilter} only</span>
                   </div>
                   <button className="text-xs underline opacity-70 hover:opacity-100" onClick={resetToSelect}>
                     Change type
@@ -722,10 +860,10 @@ export default function BulkImport() {
                 <FileText className="h-4 w-4" /> {file?.name}
               </p>
               {assetTypeFilter && (() => {
-                const card = TYPE_CARDS.find(c => c.type === assetTypeFilter)!;
+                const style = getTypeStyle(assetTypeFilter);
                 return (
-                  <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", card.color)}>
-                    <card.Icon className="h-3 w-3" /> {assetTypeFilter}s
+                  <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium", style.color)}>
+                    <style.Icon className="h-3 w-3" /> {assetTypeFilter}
                   </span>
                 );
               })()}
