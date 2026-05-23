@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import AssetForm, { AssetFormValues } from "@/components/AssetForm";
 import { useAssets } from "@/context/AssetContext";
+import { Asset } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 
 export default function EditAsset() {
@@ -34,6 +35,7 @@ export default function EditAsset() {
       await updateAsset({
         ...asset,
         ...values,
+        assetType:   values.assetType as Asset["assetType"],
         assetId:     asset.assetId,          // ID is immutable after creation
         imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
