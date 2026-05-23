@@ -138,7 +138,7 @@ function exportUsers(users: Profile[]) {
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
   const { users, loading, refresh, updateUser, deleteUser } = useUsers();
-  const { assets } = useAssets();
+  const { assets, refresh: refreshAssets } = useAssets();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
@@ -751,8 +751,41 @@ export default function Users() {
     if (!deactivateTarget) return;
     setActionSaving(deactivateTarget.id);
     try {
+      // 1. Mark user inactive (blocks login).
       await updateUser(deactivateTarget.id, { ...deactivateTarget, status: "inactive" });
-      toast({ title: "User deactivated", description: `${deactivateTarget.full_name} can no longer log in.` });
+
+      // 2. Auto-move all of this user's currently-Assigned assets to "Recovery Stage"
+      //    so IT can chase the recovery without losing the assignment history.
+      //    We keep assigned_to / assigned_email / assigned_to_name intact — only the
+      //    status changes. Returning the asset via the normal flow clears the user.
+      let recoveryCount = 0;
+      try {
+        const { data: updatedRows, error: recErr } = await supabase
+          .from("assets")
+          .update({ status: "Recovery Stage" })
+          .eq("assigned_to", deactivateTarget.id)
+          .eq("status", "Assigned")
+          .select("asset_id");
+        if (recErr) throw recErr;
+        recoveryCount = updatedRows?.length ?? 0;
+        if (recoveryCount > 0) {
+          await refreshAssets();
+        }
+      } catch (recErr) {
+        // Non-fatal: user is already deactivated; surface a warning toast.
+        toast({
+          title: "User deactivated, but asset recovery flag failed",
+          description: recErr instanceof Error ? recErr.message : "Please flag their assets manually.",
+          variant: "destructive",
+        });
+      }
+
+      toast({
+        title: "User deactivated",
+        description: recoveryCount > 0
+          ? `${deactivateTarget.full_name} can no longer log in. ${recoveryCount} asset${recoveryCount === 1 ? "" : "s"} flagged as Recovery Stage.`
+          : `${deactivateTarget.full_name} can no longer log in.`,
+      });
     } catch (err) {
       toast({ title: "Failed to deactivate", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
