@@ -2,9 +2,9 @@
 
 # 🖥️ IT-Asset-Hub
 
-### *One source of truth for every laptop, license, and ticket in your organization.*
+### *One source of truth for every laptop, license, and ticket at Miles Education.*
 
-A modern, full-stack IT Asset Management System that helps IT teams track hardware, software licenses, employee allocations, and helpdesk tickets — end to end.
+**Built for [Miles Education Pvt Ltd](https://www.mileseducation.com)** — a modern, full-stack IT Asset Management & Helpdesk System that helps the Miles IT team track hardware, software licenses, employee allocations, and support tickets — end to end.
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
 [![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=next.js&logoColor=white)](https://nextjs.org)
@@ -15,10 +15,13 @@ A modern, full-stack IT Asset Management System that helps IT teams track hardwa
 [![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)](https://jwt.io)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
 [![Nginx](https://img.shields.io/badge/Nginx-Reverse_Proxy-009639?logo=nginx&logoColor=white)](https://nginx.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#-license)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing-guidelines)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#-license)
+[![Made for Miles Education](https://img.shields.io/badge/Built_for-Miles_Education-1d4ed8.svg)](https://www.mileseducation.com)
+[![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://it-asset-hub-a7rf.onrender.com)
 
-[🌐 Live Demo](https://it-asset-hub-a7rf.onrender.com) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-installation-steps) · [📡 API Docs](#-api-endpoints)
+[🌐 Live Portal](https://it-asset-hub-a7rf.onrender.com) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-installation-steps) · [📡 API Docs](#-api-endpoints)
+
+`Internal tool · Miles Education Pvt Ltd · Bengaluru, India 🇮🇳`
 
 </div>
 
@@ -49,10 +52,10 @@ A modern, full-stack IT Asset Management System that helps IT teams track hardwa
 
 ## 💡 Why This Project?
 
-Most IT teams still juggle assets in **Excel sheets, WhatsApp threads, and email approvals**.
+Before IT-Asset-Hub, the Miles Education IT team — like most growing companies — was juggling assets across **Excel sheets, WhatsApp threads, and email approvals**.
 That breaks down fast at 100+ employees: lost devices, expired warranties, untracked licenses, no audit trail.
 
-**IT-Asset-Hub** solves this with:
+**IT-Asset-Hub** was purpose-built for Miles Education to solve this with:
 
 - 🎯 A single, searchable inventory for **22 asset categories** (laptops, monitors, mobiles, peripherals, network gear, fixed assets)
 - 🔐 **Role-based access** so admins, helpdesk agents, and employees each see exactly what they need
@@ -60,7 +63,7 @@ That breaks down fast at 100+ employees: lost devices, expired warranties, untra
 - 📊 **Real-time reports** with one-click CSV / XLSX exports for finance & audit
 - 📨 Automated **assignment emails** with employee acknowledgement
 
-> Built as a portfolio-grade, production-ready showcase of modern full-stack engineering — REST API design, JWT auth, role-based authorization, containerized deployment, and clean React UX.
+> Deployed to production at Miles Education and actively managing the company's IT inventory across every office. Also serves as a portfolio-grade showcase of modern full-stack engineering — REST API design, JWT auth, role-based authorization, containerized deployment, and clean React UX.
 
 ---
 
@@ -629,14 +632,20 @@ npm run lint && npm test # frontend
 
 ## 📄 License
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for full text.
+This project is **proprietary software** built for and owned by **Miles Education Pvt Ltd**.
+The source is published for internal collaboration and portfolio reference only.
 
 ```
-MIT License — Copyright (c) 2026 Sheshadri Nagaraj
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction…
+Copyright © 2026 Miles Education Pvt Ltd. All rights reserved.
+
+This software is the confidential and proprietary information of
+Miles Education Pvt Ltd ("Confidential Information"). You shall not
+disclose such Confidential Information and shall use it only in
+accordance with the terms of the agreement you entered into with
+Miles Education.
 ```
+
+For commercial licensing or reuse outside Miles Education, please contact the maintainer below.
 
 ---
 
@@ -645,7 +654,8 @@ in the Software without restriction…
 <div align="center">
 
 **Sheshadri Nagaraj**
-IT Asset Management & Helpdesk Lead — Miles Education Pvt Ltd
+IT Asset Management & Helpdesk Lead
+**Miles Education Pvt Ltd** · [mileseducation.com](https://www.mileseducation.com)
 
 [![Email](https://img.shields.io/badge/Email-sheshadri.n%40mileseducation.com-D14836?logo=gmail&logoColor=white)](mailto:sheshadri.n@mileseducation.com)
 [![GitHub](https://img.shields.io/badge/GitHub-sheshadrin--web-181717?logo=github&logoColor=white)](https://github.com/sheshadrin-web)
