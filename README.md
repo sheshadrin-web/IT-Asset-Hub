@@ -6,6 +6,14 @@ Live: **https://it-asset-hub-a7rf.onrender.com**
 Track laptops, mobiles and 20 other asset categories across the org, assign them
 to employees, manage helpdesk tickets, and pull rich CSV / XLSX reports.
 
+## Screenshots
+
+### Sign-in
+![Login](docs/screenshots/01-login.png)
+
+> Additional screenshots (Dashboard, Assets list, Asset detail, Bulk Import,
+> Reports, Tickets) can be added to `docs/screenshots/` and referenced here.
+
 ---
 
 ## Features
