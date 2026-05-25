@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
 import LocationSelect from "@/components/LocationSelect";
 import { ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES } from "@/lib/assetEmoji";
+import { ASSET_OWNERSHIP_OPTIONS } from "@/data/mockData";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
@@ -48,6 +49,7 @@ export const assetFormSchema = z.object({
   warrantyEndDate: z.string().min(1, "Warranty end date is required"),
   vendor:          z.string().optional(),
   invoice:         z.string().optional(),
+  ownership:       z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
   location:        z.string().min(1, "Location is required"),
   department:      z.string().optional(),
   accessories:     z.string().optional(),
@@ -128,7 +130,8 @@ export default function AssetForm({
       monitorBrand: "", monitorModel: "", monitorSize: "",
       keyboard: "", mouse: "", cpu: "", others: "",
       storage: "", purchaseDate: "", warrantyEndDate: "",
-      vendor: "", invoice: "", location: "", department: "",
+      vendor: "", invoice: "", ownership: "Company Owned",
+      location: "", department: "",
       accessories: "", remarks: "",
       ...defaultValues,
     },
@@ -622,6 +625,23 @@ export default function AssetForm({
               <FormItem>
                 <FormLabel>Invoice Number</FormLabel>
                 <FormControl><Input {...field} placeholder="Invoice or PO number" /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="ownership" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Ownership</FormLabel>
+                <Select value={field.value || "Company Owned"} onValueChange={field.onChange}>
+                  <FormControl>
+                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Company Owned" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {ASSET_OWNERSHIP_OPTIONS.map(o => (
+                      <SelectItem key={o} value={o}>{o}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormDescription className="text-xs">Who owns this asset</FormDescription>
                 <FormMessage />
               </FormItem>
             )} />
