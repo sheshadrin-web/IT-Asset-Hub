@@ -284,8 +284,10 @@ CREATE POLICY "assignment_history_insert" ON public.asset_assignment_history
 -- Tracks who owns the asset (Miles, Miles-GCC, Mojo, Rented, Employee Owned,
 -- or Company Owned — default). Safe to re-run.
 ALTER TABLE public.assets
-  ADD COLUMN IF NOT EXISTS ownership TEXT DEFAULT 'Company Owned';
+  ADD COLUMN IF NOT EXISTS ownership TEXT DEFAULT 'Miles';
+
+ALTER TABLE public.assets ALTER COLUMN ownership SET DEFAULT 'Miles';
 
 UPDATE public.assets
-  SET ownership = 'Company Owned'
+  SET ownership = 'Miles'
   WHERE ownership IS NULL OR ownership = '';
