@@ -518,7 +518,7 @@ export default function AssetDetail() {
                   {[
                     { icon: <Calendar />, label: "Purchase Date", value: asset.purchaseDate },
                     { icon: <MapPin />,   label: "Location",      value: asset.location },
-                    { icon: <Building />, label: "Ownership",     value: asset.ownership ?? "Company Owned" },
+                    { icon: <Building />, label: "Ownership",     value: asset.ownership ?? "Miles" },
                     ...(asset.vendor   ? [{ icon: <Building />, label: "Vendor",      value: asset.vendor }]  : []),
                     ...(asset.invoice  ? [{ icon: <Tag />,      label: "Invoice No.", value: asset.invoice }] : []),
                   ].map(f => (
