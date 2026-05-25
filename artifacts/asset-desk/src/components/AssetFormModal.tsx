@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Asset } from "@/data/mockData";
+import { Asset, ASSET_OWNERSHIP_OPTIONS } from "@/data/mockData";
 import { ALL_ASSET_TYPES } from "@/lib/assetEmoji";
 
 const schema = z.object({
@@ -40,6 +40,7 @@ const schema = z.object({
   purchaseDate: z.string().min(1, "Required"),
   warrantyEndDate: z.string().min(1, "Required"),
   status: z.enum(["In Procurement", "Available", "Assigned", "Recovery Stage", "Under Repair", "Lost", "Retired"]),
+  ownership: z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
   assignedTo: z.string().optional(),
   department: z.string().optional(),
   location: z.string().min(1, "Required"),
@@ -72,6 +73,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
       purchaseDate: "",
       warrantyEndDate: "",
       status: "Available",
+      ownership: "Company Owned",
       assignedTo: "",
       department: "",
       location: "",
@@ -92,6 +94,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
         purchaseDate: asset.purchaseDate,
         warrantyEndDate: asset.warrantyEndDate,
         status: asset.status,
+        ownership: asset.ownership ?? "Company Owned",
         assignedTo: asset.assignedTo ?? "",
         department: asset.department ?? "",
         location: asset.location,
@@ -110,6 +113,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
         purchaseDate: "",
         warrantyEndDate: "",
         status: "Available",
+        ownership: "Company Owned",
         assignedTo: "",
         department: "",
         location: "",
@@ -123,6 +127,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
     onSave({
       ...values,
       assetType: values.assetType as Asset["assetType"],
+      ownership: (values.ownership ?? "Company Owned") as Asset["ownership"],
       imeiNumber: values.imeiNumber || undefined,
       assignedTo: values.assignedTo || undefined,
       department: values.department || undefined,
@@ -276,6 +281,28 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
                         <SelectItem value="Under Repair">Under Repair</SelectItem>
                         <SelectItem value="Lost">Lost</SelectItem>
                         <SelectItem value="Retired">Retired</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="ownership"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Ownership</FormLabel>
+                    <Select value={field.value || "Company Owned"} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-ownership-form">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {ASSET_OWNERSHIP_OPTIONS.map(o => (
+                          <SelectItem key={o} value={o}>{o}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
