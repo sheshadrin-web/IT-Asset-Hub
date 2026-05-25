@@ -60,7 +60,7 @@ function exportAssetsCsv(assets: Asset[], filenameSuffix = "") {
     a.assetId, a.assetType, a.brand, a.model, a.serialNumber, a.productNumber ?? "",
     a.processor ?? "", a.ram ?? "", a.storage ?? "", a.operatingSystem ?? "",
     a.imeiNumber ?? "", a.imei2 ?? "", a.simNumber ?? "", a.phoneNumber ?? "",
-    a.status, a.ownership ?? "Company Owned", a.assignedTo ?? "", a.assignedEcode ?? "", a.assignedEmail ?? "", a.department ?? "",
+    a.status, a.ownership ?? "Miles", a.assignedTo ?? "", a.assignedEcode ?? "", a.assignedEmail ?? "", a.department ?? "",
     a.location, a.purchaseDate, a.warrantyEndDate, a.vendor ?? "", a.invoice ?? "",
     a.accessories ?? "", a.remarks ?? "",
   ]);
@@ -213,7 +213,7 @@ async function exportFullXlsx(
       fmt(a.operatingSystem), fmt(a.storage),
       fmt(a.imeiNumber), fmt(a.imei2),
       fmtDate(a.purchaseDate), fmtDate(a.warrantyEndDate),
-      fmt(a.vendor), fmt(a.invoice), fmt(a.ownership ?? "Company Owned"),
+      fmt(a.vendor), fmt(a.invoice), fmt(a.ownership ?? "Miles"),
       fmt(a.status), fmt(a.location), fmt(a.accessories), fmt(a.remarks),
     ]);
     addSheet(wb, "2 - Assets Master", [assetsHeader, ...assetsRows],
