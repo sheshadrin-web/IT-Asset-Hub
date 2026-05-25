@@ -91,7 +91,8 @@ const COL_ALIASES: Record<string, string[]> = {
   warranty:        ["warranty","warrantyend","warrantyexpiry","warrantyenddate","warrantystatus","warrantyperiod","warrantytype"],
   status:          ["assetstatus","status","currentstatus","assetcurrentstatus","assetstate"],
   condition:       ["assetcondition","condition","physicalcondition","assetstate","devicecondition"],
-  vendor:          ["ownership","vendor","supplier","ownedby","owner","ownedunder","ownershiptag"],
+  vendor:          ["vendor","supplier","vendorname","suppliername"],
+  ownership:       ["ownership","ownedby","owner","ownedunder","ownershiptag","ownershiptype"],
   employeeName:    ["employeename","assignedto","username","empname","employeefullname","employeenameassigned","name","fullname","user"],
   employeeCode:    ["employeecode","empcode","employeeid","empid","ecode","employeeno","empno","mpe","mpecode","employeeidcode"],
   department:      ["employeedepartment","department","dept","empdepartment","division"],
@@ -174,6 +175,22 @@ function mapStatus(raw: string): { status: AssetStatus; warning?: string } {
   return { status: "Available", warning: `Unknown status "${raw}" → Available` };
 }
 
+const OWNERSHIP_VALUES = ["Miles","Miles-GCC","Mojo","Rented","Employee Owned","Company Owned"] as const;
+function mapOwnership(raw: string): string {
+  const v = (raw || "").trim();
+  if (!v) return "Company Owned";
+  const nv = nk(v);
+  const exact = OWNERSHIP_VALUES.find(o => nk(o) === nv);
+  if (exact) return exact;
+  if (nv.includes("gcc"))                      return "Miles-GCC";
+  if (nv.includes("mojo"))                     return "Mojo";
+  if (nv === "miles" || nv.startsWith("miles"))return "Miles";
+  if (nv.includes("rent") || nv.includes("lease")) return "Rented";
+  if (nv.includes("employee") || nv.includes("personal") || nv.includes("self") || nv.includes("byod")) return "Employee Owned";
+  if (nv.includes("company") || nv.includes("organisation") || nv.includes("organization") || nv.includes("corp")) return "Company Owned";
+  return "Company Owned";
+}
+
 function parsePurchaseDate(raw: string): string {
   const t = raw.trim();
   if (!t) return "";
@@ -248,6 +265,7 @@ interface MappedRow {
   assignedName:    string;
   department:      string;
   vendor:          string;
+  ownership:       string;
   remarks:         string;
   employeeCode:    string;
   warnings:        string[];
@@ -526,6 +544,7 @@ export default function BulkImport() {
           assignedName:    matchedUser?.full_name ?? empName,
           department:      matchedUser?.department ?? department,
           vendor:          get(row, "vendor"),
+          ownership:       mapOwnership(get(row, "ownership")),
           remarks:         [get(row, "condition"), rawStatus !== status ? `Original status: ${rawStatus}` : ""].filter(Boolean).join(" | "),
           employeeCode:    empCode,
           warnings,
@@ -577,6 +596,7 @@ export default function BulkImport() {
         sim_number:        "",
         phone_number:      "",
         vendor:            r.vendor           || "",
+        ownership:         r.ownership        || "Company Owned",
         invoice:           "",
         monitor_brand:     "",
         monitor_model:     "",
@@ -835,7 +855,8 @@ export default function BulkImport() {
                 ["Warranty",        "Under Warranty / Expired"],
                 ["Asset Status",    "Assigned / Available / etc."],
                 ["Asset Condition", "Good / Fair / Damaged"],
-                ["Ownership",       "Vendor / Ownership"],
+                ["Ownership",       "Miles / Miles-GCC / Mojo / Rented / Employee Owned / Company Owned"],
+                ["Vendor",          "Supplier name"],
                 ["Employee Name",   "For assigned assets"],
                 ["Employee Code",   "Matches app user ecode"],
                 ["Department",      "Employee department"],
