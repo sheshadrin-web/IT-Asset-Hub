@@ -73,7 +73,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
       purchaseDate: "",
       warrantyEndDate: "",
       status: "Available",
-      ownership: "Company Owned",
+      ownership: "Miles",
       assignedTo: "",
       department: "",
       location: "",
@@ -94,7 +94,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
         purchaseDate: asset.purchaseDate,
         warrantyEndDate: asset.warrantyEndDate,
         status: asset.status,
-        ownership: asset.ownership ?? "Company Owned",
+        ownership: asset.ownership ?? "Miles",
         assignedTo: asset.assignedTo ?? "",
         department: asset.department ?? "",
         location: asset.location,
@@ -113,7 +113,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
         purchaseDate: "",
         warrantyEndDate: "",
         status: "Available",
-        ownership: "Company Owned",
+        ownership: "Miles",
         assignedTo: "",
         department: "",
         location: "",
@@ -127,7 +127,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
     onSave({
       ...values,
       assetType: values.assetType as Asset["assetType"],
-      ownership: (values.ownership ?? "Company Owned") as Asset["ownership"],
+      ownership: (values.ownership ?? "Miles") as Asset["ownership"],
       imeiNumber: values.imeiNumber || undefined,
       assignedTo: values.assignedTo || undefined,
       department: values.department || undefined,
@@ -293,7 +293,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Ownership</FormLabel>
-                    <Select value={field.value || "Company Owned"} onValueChange={field.onChange}>
+                    <Select value={field.value || "Miles"} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger data-testid="select-ownership-form">
                           <SelectValue />
