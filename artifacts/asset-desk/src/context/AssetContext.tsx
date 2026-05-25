@@ -30,7 +30,7 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     warrantyEndDate: String(row.warranty_end_date ?? ""),
     vendor:          row.vendor           ? String(row.vendor)           : undefined,
     invoice:         row.invoice          ? String(row.invoice)          : undefined,
-    ownership:       (row.ownership as AssetOwnership) ?? "Company Owned",
+    ownership:       (row.ownership as AssetOwnership) ?? "Miles",
     status:          (row.status as AssetStatus) ?? "Available",
     assignedTo:    row.assigned_to_name
       ? String(row.assigned_to_name)
@@ -84,7 +84,7 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
     warranty_end_date: data.warrantyEndDate,
     vendor:            data.vendor           ?? null,
     invoice:           data.invoice          ?? null,
-    ownership:         data.ownership        ?? "Company Owned",
+    ownership:         data.ownership        ?? "Miles",
     status:            data.status,
     // NOTE: assigned_to / assigned_email / assigned_to_name are intentionally
     // excluded here. Assignment state is managed exclusively by assignAsset,
