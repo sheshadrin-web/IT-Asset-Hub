@@ -36,7 +36,7 @@ export default function EditAsset() {
         ...asset,
         ...values,
         assetType:   values.assetType as Asset["assetType"],
-        ownership:   (values.ownership ?? "Company Owned") as Asset["ownership"],
+        ownership:   (values.ownership ?? "Miles") as Asset["ownership"],
         assetId:     asset.assetId,          // ID is immutable after creation
         imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
@@ -98,7 +98,7 @@ export default function EditAsset() {
               warrantyEndDate: asset.warrantyEndDate,
               vendor:          asset.vendor          ?? "",
               invoice:         asset.invoice         ?? "",
-              ownership:       asset.ownership       ?? "Company Owned",
+              ownership:       asset.ownership       ?? "Miles",
               location:        asset.location,
               department:      asset.department      ?? "",
               accessories:     asset.accessories,
