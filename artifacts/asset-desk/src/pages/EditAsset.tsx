@@ -97,6 +97,7 @@ export default function EditAsset() {
               warrantyEndDate: asset.warrantyEndDate,
               vendor:          asset.vendor          ?? "",
               invoice:         asset.invoice         ?? "",
+              ownership:       asset.ownership       ?? "Company Owned",
               location:        asset.location,
               department:      asset.department      ?? "",
               accessories:     asset.accessories,
