@@ -36,6 +36,7 @@ export default function EditAsset() {
         ...asset,
         ...values,
         assetType:   values.assetType as Asset["assetType"],
+        ownership:   (values.ownership ?? "Company Owned") as Asset["ownership"],
         assetId:     asset.assetId,          // ID is immutable after creation
         imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
