@@ -279,3 +279,13 @@ CREATE POLICY "assignment_history_select" ON public.asset_assignment_history
 CREATE POLICY "assignment_history_insert" ON public.asset_assignment_history
   FOR INSERT TO authenticated
   WITH CHECK (current_user_role() IN ('super_admin', 'it_admin'));
+
+-- ─── Asset Ownership ──────────────────────────────────────────────────────────
+-- Tracks who owns the asset (Miles, Miles-GCC, Mojo, Rented, Employee Owned,
+-- or Company Owned — default). Safe to re-run.
+ALTER TABLE public.assets
+  ADD COLUMN IF NOT EXISTS ownership TEXT DEFAULT 'Company Owned';
+
+UPDATE public.assets
+  SET ownership = 'Company Owned'
+  WHERE ownership IS NULL OR ownership = '';
