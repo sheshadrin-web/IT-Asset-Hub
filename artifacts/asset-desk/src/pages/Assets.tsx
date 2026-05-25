@@ -80,7 +80,7 @@ function getColValue(a: Asset, col: ColKey): string {
     case "assignedTo":      return a.assignedTo || "—";
     case "department":      return a.department || "—";
     case "status":          return a.status || "";
-    case "ownership":       return a.ownership || "Company Owned";
+    case "ownership":       return a.ownership || "Miles";
     case "assignedAt":      return a.assignedAt
       ? new Date(a.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
       : "—";
@@ -730,9 +730,9 @@ export default function Assets() {
                       {/* Ownership — col 7 */}
                       <td className="px-4 py-3">
                         {(() => {
-                          const own = asset.ownership || "Company Owned";
+                          const own = asset.ownership || "Miles";
                           return (
-                            <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap", OWNERSHIP_BADGE[own] ?? OWNERSHIP_BADGE["Company Owned"])}>
+                            <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap", OWNERSHIP_BADGE[own] ?? OWNERSHIP_BADGE["Miles"])}>
                               {own}
                             </span>
                           );
