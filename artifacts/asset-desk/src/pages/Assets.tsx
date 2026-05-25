@@ -561,7 +561,7 @@ export default function Assets() {
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
                 {(["In Procurement","Available","Assigned","Recovery Stage","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
                   <SelectItem key={s} value={s}>
                     <span className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} />{s}</span>
