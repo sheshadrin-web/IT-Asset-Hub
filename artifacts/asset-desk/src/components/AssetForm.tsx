@@ -130,7 +130,7 @@ export default function AssetForm({
       monitorBrand: "", monitorModel: "", monitorSize: "",
       keyboard: "", mouse: "", cpu: "", others: "",
       storage: "", purchaseDate: "", warrantyEndDate: "",
-      vendor: "", invoice: "", ownership: "Company Owned",
+      vendor: "", invoice: "", ownership: "Miles",
       location: "", department: "",
       accessories: "", remarks: "",
       ...defaultValues,
@@ -631,9 +631,9 @@ export default function AssetForm({
             <FormField control={form.control} name="ownership" render={({ field }) => (
               <FormItem>
                 <FormLabel>Ownership</FormLabel>
-                <Select value={field.value || "Company Owned"} onValueChange={field.onChange}>
+                <Select value={field.value || "Miles"} onValueChange={field.onChange}>
                   <FormControl>
-                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Company Owned" /></SelectTrigger>
+                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Miles" /></SelectTrigger>
                   </FormControl>
                   <SelectContent>
                     {ASSET_OWNERSHIP_OPTIONS.map(o => (
