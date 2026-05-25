@@ -503,15 +503,33 @@ Every transition writes a row in `asset_assignment_history` with **who, when, wh
 ### 🔐 Sign-in
 ![Login](docs/screenshots/01-login.png)
 
-| Dashboard | Assets List | Asset Detail |
-|-----------|-------------|--------------|
-| _coming soon_ | _coming soon_ | _coming soon_ |
+### 🏠 Admin Dashboard
+At-a-glance KPIs across all 129 assets, with status distribution, tickets by category, and active ticket queue.
+![Dashboard](docs/screenshots/02-dashboard.png)
 
-| Bulk Import | Reports | Ticket Detail |
-|-------------|---------|---------------|
-| _coming soon_ | _coming soon_ | _coming soon_ |
+### 🖥️ Asset Management
+Searchable, filterable inventory across all asset types with auto-generated asset IDs, assignee, warranty, and acknowledgement status.
+![Assets List](docs/screenshots/03-assets-list.png)
 
-> Drop additional screenshots into `docs/screenshots/` and reference them above.
+### ➕ Add Asset
+Full-form asset creation with type-specific fields (processor, RAM, OS, IMEI, vendor, invoice, …).
+![Add Asset](docs/screenshots/04-add-asset.png)
+
+### 📥 Bulk Import
+Per-type CSV templates for all 22 categories with row-level validation.
+![Bulk Import](docs/screenshots/05-bulk-import.png)
+
+### 📊 Reports & Analytics
+Asset status breakdown, tickets by status / category / priority, with one-click CSV / XLSX export.
+![Reports](docs/screenshots/06-reports.png)
+
+### 🎫 Helpdesk Tickets
+Ticket queue linked to assets, with priority, status, and assignee tracking.
+![Tickets](docs/screenshots/07-tickets.png)
+
+### 👥 User Management
+Manage IT staff, helpdesk agents, and end-users with role-based access control.
+![Users](docs/screenshots/08-users.png)
 
 ---
 
