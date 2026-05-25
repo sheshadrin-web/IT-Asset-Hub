@@ -59,7 +59,16 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   Retired:          "bg-gray-400",
 };
 
-type ColKey = "assetId" | "location" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate";
+type ColKey = "assetId" | "location" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate" | "ownership";
+
+const OWNERSHIP_BADGE: Record<string, string> = {
+  "Miles":           "bg-blue-50 text-blue-700 border-blue-200",
+  "Miles-GCC":       "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "Mojo":            "bg-violet-50 text-violet-700 border-violet-200",
+  "Rented":          "bg-amber-50 text-amber-700 border-amber-200",
+  "Employee Owned":  "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "Company Owned":   "bg-slate-50 text-slate-700 border-slate-200",
+};
 
 function getColValue(a: Asset, col: ColKey): string {
   switch (col) {
@@ -71,6 +80,7 @@ function getColValue(a: Asset, col: ColKey): string {
     case "assignedTo":      return a.assignedTo || "—";
     case "department":      return a.department || "—";
     case "status":          return a.status || "";
+    case "ownership":       return a.ownership || "Company Owned";
     case "assignedAt":      return a.assignedAt
       ? new Date(a.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
       : "—";
@@ -83,6 +93,7 @@ function makeEmptyColFilters(): Record<ColKey, Set<string>> {
     assetId: new Set(), location: new Set(), assetType: new Set(), brand: new Set(),
     serialNumber: new Set(), assignedTo: new Set(), department: new Set(),
     status: new Set(), assignedAt: new Set(), warrantyEndDate: new Set(),
+    ownership: new Set(),
   };
 }
 
@@ -94,6 +105,7 @@ const COL_DEFS: { label: string; key?: ColKey; align?: "left" | "right" }[] = [
   { label: "Serial Number", key: "serialNumber" },
   { label: "Status",        key: "status" },
   { label: "Warranty End",  key: "warrantyEndDate", align: "right" },
+  { label: "Ownership",     key: "ownership" },
   { label: "Assigned To",   key: "assignedTo" },
   { label: "Department",    key: "department" },
   { label: "Assigned Date", key: "assignedAt",      align: "right" },
@@ -715,7 +727,18 @@ export default function Assets() {
                       </td>
                       {/* Warranty End — col 6 */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
-                      {/* Assigned To — col 7 */}
+                      {/* Ownership — col 7 */}
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const own = asset.ownership || "Company Owned";
+                          return (
+                            <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap", OWNERSHIP_BADGE[own] ?? OWNERSHIP_BADGE["Company Owned"])}>
+                              {own}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      {/* Assigned To — col 8 */}
                       <td className="px-4 py-3">
                         {(() => {
                           const displayName = asset.assignedTo;
