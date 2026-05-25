@@ -178,7 +178,7 @@ function mapStatus(raw: string): { status: AssetStatus; warning?: string } {
 const OWNERSHIP_VALUES = ["Miles","Miles-GCC","Mojo","Rented","Employee Owned","Company Owned"] as const;
 function mapOwnership(raw: string): string {
   const v = (raw || "").trim();
-  if (!v) return "Company Owned";
+  if (!v) return "Miles";
   const nv = nk(v);
   const exact = OWNERSHIP_VALUES.find(o => nk(o) === nv);
   if (exact) return exact;
@@ -188,7 +188,7 @@ function mapOwnership(raw: string): string {
   if (nv.includes("rent") || nv.includes("lease")) return "Rented";
   if (nv.includes("employee") || nv.includes("personal") || nv.includes("self") || nv.includes("byod")) return "Employee Owned";
   if (nv.includes("company") || nv.includes("organisation") || nv.includes("organization") || nv.includes("corp")) return "Company Owned";
-  return "Company Owned";
+  return "Miles";
 }
 
 function parsePurchaseDate(raw: string): string {
@@ -596,7 +596,7 @@ export default function BulkImport() {
         sim_number:        "",
         phone_number:      "",
         vendor:            r.vendor           || "",
-        ownership:         r.ownership        || "Company Owned",
+        ownership:         r.ownership        || "Miles",
         invoice:           "",
         monitor_brand:     "",
         monitor_model:     "",
