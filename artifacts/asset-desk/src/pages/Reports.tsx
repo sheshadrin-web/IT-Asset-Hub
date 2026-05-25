@@ -52,7 +52,7 @@ function exportAssetsCsv(assets: Asset[], filenameSuffix = "") {
     "Asset ID","Type","Brand","Model","Serial Number","Product No.",
     "Processor","RAM","Storage","Operating System",
     "IMEI 1","IMEI 2","SIM Number","Phone Number",
-    "Status","Assigned To","E-Code","Assigned Email","Department",
+    "Status","Ownership","Assigned To","E-Code","Assigned Email","Department",
     "Location","Purchase Date","Warranty End","Vendor","Invoice",
     "Accessories","Remarks",
   ];
@@ -60,7 +60,7 @@ function exportAssetsCsv(assets: Asset[], filenameSuffix = "") {
     a.assetId, a.assetType, a.brand, a.model, a.serialNumber, a.productNumber ?? "",
     a.processor ?? "", a.ram ?? "", a.storage ?? "", a.operatingSystem ?? "",
     a.imeiNumber ?? "", a.imei2 ?? "", a.simNumber ?? "", a.phoneNumber ?? "",
-    a.status, a.assignedTo ?? "", a.assignedEcode ?? "", a.assignedEmail ?? "", a.department ?? "",
+    a.status, a.ownership ?? "Company Owned", a.assignedTo ?? "", a.assignedEcode ?? "", a.assignedEmail ?? "", a.department ?? "",
     a.location, a.purchaseDate, a.warrantyEndDate, a.vendor ?? "", a.invoice ?? "",
     a.accessories ?? "", a.remarks ?? "",
   ]);
@@ -203,7 +203,7 @@ async function exportFullXlsx(
     const assetsHeader = [
       "Asset ID","Type","Brand","Model","Serial Number","Product No.",
       "Processor","RAM","OS","Storage","IMEI 1","IMEI 2",
-      "Purchase Date","Warranty End","Vendor","Invoice",
+      "Purchase Date","Warranty End","Vendor","Invoice","Ownership",
       "Status","Location","Accessories","Remarks",
     ];
     const assetsRows: unknown[][] = assets.map((a) => [
@@ -213,11 +213,11 @@ async function exportFullXlsx(
       fmt(a.operatingSystem), fmt(a.storage),
       fmt(a.imeiNumber), fmt(a.imei2),
       fmtDate(a.purchaseDate), fmtDate(a.warrantyEndDate),
-      fmt(a.vendor), fmt(a.invoice),
+      fmt(a.vendor), fmt(a.invoice), fmt(a.ownership ?? "Company Owned"),
       fmt(a.status), fmt(a.location), fmt(a.accessories), fmt(a.remarks),
     ]);
     addSheet(wb, "2 - Assets Master", [assetsHeader, ...assetsRows],
-      [14,10,12,18,18,14,16,8,14,10,16,16,14,14,16,14,14,16,20,30]);
+      [14,10,12,18,18,14,16,8,14,10,16,16,14,14,16,14,16,14,16,20,30]);
 
     // ── Sheet 3: Users Master Data ─────────────────────────────────────────────
     const usersHeader = ["E-Code","Full Name","Email","Role","Department","Location","Reporting Manager","Status"];
