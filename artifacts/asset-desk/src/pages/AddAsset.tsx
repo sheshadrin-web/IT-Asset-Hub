@@ -20,6 +20,7 @@ export default function AddAsset() {
       const newAsset = await addAsset({
         ...values,
         assetType:   values.assetType as Asset["assetType"],
+        ownership:   (values.ownership ?? "Company Owned") as Asset["ownership"],
         status:      "Available",
         imeiNumber:  values.imeiNumber  || undefined,
         accessories: values.accessories ?? "",
