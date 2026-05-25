@@ -64,6 +64,8 @@ export type AssetType   =
   // Fixed Assets
   | "Printer" | "Router" | "Server" | "CCTV" | "Smart TV" | "Projector" | "Network Device" | "Firewall";
 export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Recovery Stage" | "Under Repair" | "Lost" | "Retired";
+export type AssetOwnership = "Miles" | "Miles-GCC" | "Mojo" | "Rented" | "Employee Owned" | "Company Owned";
+export const ASSET_OWNERSHIP_OPTIONS: AssetOwnership[] = ["Miles", "Miles-GCC", "Mojo", "Rented", "Employee Owned", "Company Owned"];
 
 export interface Asset {
   id?:              string;   // Supabase UUID
@@ -96,6 +98,7 @@ export interface Asset {
   warrantyEndDate:  string;
   vendor?:          string;
   invoice?:         string;
+  ownership?:       AssetOwnership;
   status:           AssetStatus;
   assignedTo?:      string;
   assignedEmail?:   string;
