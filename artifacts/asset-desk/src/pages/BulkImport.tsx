@@ -597,15 +597,23 @@ export default function BulkImport() {
     let failed  = 0;
     const errorMessages: string[] = [];
     const CHUNK = 50;
-    const tokens: Record<string, string> = {};
     const importedOk: ImportedAssigned[] = [];
 
     for (let i = 0; i < validRows.length; i += CHUNK) {
       const chunk = validRows.slice(i, i + CHUNK);
-      const dbRows = chunk.map(r => {
-        const isAssignedWithEmail = r.status === "Assigned" && !!r.assignedEmail && r.assignedEmail.includes("@");
-        const token = isAssignedWithEmail ? crypto.randomUUID() : "";
-        if (token) tokens[r.assetId] = token;
+      // Per-row token, parallel-indexed with chunk/dbRows so duplicate asset IDs
+      // (or any other collisions) cannot cross-contaminate ack tokens.
+      const rowTokens: string[] = chunk.map(r => {
+        // Require a matched user — `assigned_email` is only persisted when
+        // `assignedToId` is set, so we must mirror that condition to keep the
+        // DB row's `ack_token` consistent with what we use for the email link.
+        const isAssignedWithEmail =
+          r.status === "Assigned" && !!r.assignedToId && !!r.assignedEmail && r.assignedEmail.includes("@");
+        return isAssignedWithEmail ? crypto.randomUUID() : "";
+      });
+      const dbRows = chunk.map((r, idx) => {
+        const token = rowTokens[idx];
+        const isAssignedWithEmail = !!token;
         return ({
         asset_id:          r.assetId,
         asset_type:        r.assetType,
@@ -650,8 +658,10 @@ export default function BulkImport() {
         remarks:           r.remarks          || "",
       });
       });
-      const recordOk = (r: typeof chunk[number]) => {
-        if (!tokens[r.assetId]) return;
+      const recordOk = (idx: number) => {
+        const token = rowTokens[idx];
+        if (!token) return;
+        const r = chunk[idx];
         importedOk.push({
           assetId:         r.assetId,
           assetType:       r.assetType,
@@ -667,7 +677,7 @@ export default function BulkImport() {
           accessories:     "",
           assignedEmail:   r.assignedEmail,
           assignedName:    r.assignedName,
-          ackToken:        tokens[r.assetId],
+          ackToken:        token,
           emailState:      "idle",
           ackState:        "idle",
         });
@@ -683,12 +693,12 @@ export default function BulkImport() {
             if (errorMessages.length < 3) errorMessages.push(`${row.asset_id}: ${e2.message}`);
           } else {
             success++;
-            recordOk(chunk[j]);
+            recordOk(j);
           }
         }
       } else {
         success += chunk.length;
-        chunk.forEach(recordOk);
+        chunk.forEach((_r, j) => recordOk(j));
       }
       setProgress(Math.round(((i + chunk.length) / validRows.length) * 100));
     }
