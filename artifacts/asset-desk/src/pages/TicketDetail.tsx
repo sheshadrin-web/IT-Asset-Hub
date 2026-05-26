@@ -70,7 +70,8 @@ export default function TicketDetail() {
   const [newComment,      setNewComment]      = useState("");
   const [draftStatus,     setDraftStatus]     = useState<TicketStatus | "">("");
   const [draftPriority,   setDraftPriority]   = useState<TicketPriority | "">("");
-  const [draftAgent,      setDraftAgent]      = useState("");
+  // null = untouched (fall back to ticket value); "" = explicit "Unassigned"; otherwise = agent id
+  const [draftAgent,      setDraftAgent]      = useState<string | null>(null);
   const [draftResolution, setDraftResolution] = useState("");
   const [deleteOpen,      setDeleteOpen]      = useState(false);
   const [rejectOpen,      setRejectOpen]      = useState(false);
@@ -99,7 +100,7 @@ export default function TicketDetail() {
 
   const effectiveStatus     = (draftStatus     || ticket?.status)     as TicketStatus;
   const effectivePriority   = (draftPriority   || ticket?.priority)   as TicketPriority;
-  const effectiveAgent      = draftAgent !== "" ? draftAgent : (ticket?.assignedAgentId ?? "");
+  const effectiveAgent      = draftAgent !== null ? draftAgent : (ticket?.assignedAgentId ?? "");
   const effectiveResolution = draftResolution !== "" ? draftResolution : (ticket?.resolutionNote ?? "");
 
   // Agent status options — agents can only progress forward, not close/reject
@@ -533,6 +534,7 @@ export default function TicketDetail() {
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Assigned Agent</label>
                     <Select value={effectiveAgent || "unassigned"} onValueChange={v => setDraftAgent(v === "unassigned" ? "" : v)}>
+                      {/* draftAgent: null=untouched, ""=explicit unassign, otherwise=agent id */}
                       <SelectTrigger className="text-sm" data-testid="select-assigned-agent"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
