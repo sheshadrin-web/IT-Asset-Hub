@@ -109,12 +109,67 @@ export default function TicketDetail() {
   const handleSaveChanges = async () => {
     if (!ticket) return;
     try {
+      // Detect what changed (compared to the current ticket) so we can post
+      // system comments that narrate the action.
+      const prevStatus  = ticket.status as TicketStatus;
+      const prevAgentId = ticket.assignedAgentId ?? "";
+      const nextAgentId = effectiveAgent || "";
+
+      const statusChanged = effectiveStatus !== prevStatus;
+      const agentChanged  = nextAgentId !== prevAgentId;
+
+      // Resolve display names for agent transitions
+      const agentName = (id: string): string => {
+        if (!id) return "Unassigned";
+        const u = users.find(x => x.id === id);
+        if (u) return u.full_name;
+        if (!UUID_RE.test(id)) return id; // legacy display-name value
+        return "Unknown agent";
+      };
+
       await updateTicket(ticket.ticketId, {
         status:          effectiveStatus,
         priority:        effectivePriority,
         assignedAgentId: effectiveAgent || undefined,
         resolutionNote:  effectiveResolution,
       });
+
+      // Post system comments AFTER the update so they reflect the new state.
+      // Each system comment is authored by the acting user with their role,
+      // matching the existing comment schema (no schema change required).
+      if (currentUser) {
+        const today = new Date().toISOString().split("T")[0];
+        const baseAuthor = currentUser.name;
+        const baseRole   = currentUser.role;
+        let seq = 0;
+
+        if (statusChanged) {
+          const c: TicketComment = {
+            id:     `sys-status-${Date.now()}-${seq++}`,
+            author: baseAuthor,
+            role:   baseRole,
+            text:   `🔄 Status changed from "${prevStatus}" to "${effectiveStatus}".`,
+            date:   today,
+          };
+          try { await addComment(ticket.ticketId, c); } catch { /* non-blocking */ }
+        }
+
+        if (agentChanged) {
+          const fromName = agentName(prevAgentId);
+          const toName   = agentName(nextAgentId);
+          const c: TicketComment = {
+            id:     `sys-assign-${Date.now()}-${seq++}`,
+            author: baseAuthor,
+            role:   baseRole,
+            text:   prevAgentId
+              ? `👤 Reassigned from ${fromName} to ${toName}.`
+              : `👤 Assigned to ${toName}.`,
+            date:   today,
+          };
+          try { await addComment(ticket.ticketId, c); } catch { /* non-blocking */ }
+        }
+      }
+
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       toast({ title: "Ticket updated", description: "Changes saved successfully." });
