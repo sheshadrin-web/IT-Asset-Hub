@@ -5,8 +5,9 @@ import {
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
   RotateCcw, ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, CheckSquare, Package,
+  Users, CheckSquare, Package, Mail, Loader2,
 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -187,6 +188,8 @@ export default function Assets() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [locationFilter, setLocationFilter] = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
+  const [ackFilter, setAckFilter]       = useState<"all" | "acknowledged" | "pending">("all");
+  const [sendingReminders, setSendingReminders] = useState(false);
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
   const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
@@ -203,11 +206,11 @@ export default function Assets() {
 
   const hasColFilters = Object.values(colFilters).some(s => s.size > 0);
   const hasAnyFilter  = search !== "" || typeFilter !== "all" || statusFilter !== "all"
-    || locationFilter !== "all" || deptFilter !== "all" || hasColFilters;
+    || locationFilter !== "all" || deptFilter !== "all" || ackFilter !== "all" || hasColFilters;
 
   const clearAllFilters = () => {
     setSearch(""); setTypeFilter("all"); setStatusFilter("all");
-    setLocationFilter("all"); setDeptFilter("all");
+    setLocationFilter("all"); setDeptFilter("all"); setAckFilter("all");
     setColFilters(makeEmptyColFilters());
   };
 
@@ -316,7 +319,12 @@ export default function Assets() {
     const matchStatus = statusFilter === "all" || a.status    === statusFilter;
     const matchLocation = locationFilter === "all" || (a.location ?? "") === locationFilter;
     const matchDept     = deptFilter     === "all" || (a.department ?? "") === deptFilter;
-    return matchSearch && matchType && matchStatus && matchLocation && matchDept;
+    // Ack filter only applies to Assigned assets; other statuses are excluded when filtering by ack state.
+    const matchAck =
+      ackFilter === "all"        ? true :
+      ackFilter === "acknowledged" ? (a.status === "Assigned" && !!a.acknowledged) :
+      /* pending */                  (a.status === "Assigned" && !a.acknowledged);
+    return matchSearch && matchType && matchStatus && matchLocation && matchDept && matchAck;
   });
 
   const filtered = baseFiltered.filter(a =>
@@ -338,7 +346,7 @@ export default function Assets() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, colFilters]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, ackFilter, colFilters]);
 
   const paged          = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const pagedIds       = paged.map(a => a.assetId);
@@ -361,6 +369,81 @@ export default function Assets() {
   };
   const toggleRow = (id: string) => {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  // Selected assets that are Assigned + pending acknowledgement + have an email & ack token
+  const selectedPendingAck = paged
+    .concat(filtered.filter(a => selected.has(a.assetId) && !paged.some(p => p.assetId === a.assetId)))
+    .filter(a =>
+      selected.has(a.assetId) &&
+      a.status === "Assigned" &&
+      !a.acknowledged &&
+      !!a.assignedEmail &&
+      !!a.ackToken,
+    );
+
+  const handleSendReminders = async () => {
+    if (selectedPendingAck.length === 0) return;
+    setSendingReminders(true);
+    // Group by assignee email — one reminder per assignee covering all their pending assets
+    const groups = selectedPendingAck.reduce<Record<string, typeof selectedPendingAck>>((acc, a) => {
+      const key = (a.assignedEmail ?? "").toLowerCase();
+      (acc[key] ||= []).push(a);
+      return acc;
+    }, {});
+    let okGroups = 0;
+    let failGroups = 0;
+    const failReasons: string[] = [];
+    for (const [, groupAssets] of Object.entries(groups)) {
+      const first = groupAssets[0];
+      try {
+        const { data, error } = await supabase.functions.invoke("send-bulk-assignment-email", {
+          body: {
+            toEmail:    first.assignedEmail,
+            toName:     first.assignedTo ?? first.assignedEmail,
+            reason:     "Reminder: pending acknowledgement",
+            isReminder: "true",
+            assets: groupAssets.map(a => ({
+              assetId:         a.assetId,
+              assetType:       a.assetType,
+              brand:           a.brand,
+              model:           a.model,
+              serialNumber:    a.serialNumber,
+              processor:       a.processor,
+              ram:             a.ram,
+              storage:         a.storage,
+              operatingSystem: a.operatingSystem,
+              imei1:           a.imeiNumber,
+              imei2:           a.imei2,
+              accessories:     a.accessories,
+              ackToken:        a.ackToken,
+            })),
+          },
+        });
+        if (error) throw new Error(error.message);
+        const d = data as { success?: boolean; error?: string } | null;
+        if (d?.error) throw new Error(d.error);
+        okGroups++;
+      } catch (err) {
+        failGroups++;
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        if (failReasons.length < 2) failReasons.push(`${first.assignedEmail}: ${msg}`);
+      }
+    }
+    setSendingReminders(false);
+    if (failGroups === 0) {
+      toast({
+        title: `Reminder${okGroups > 1 ? "s" : ""} sent`,
+        description: `Sent to ${okGroups} assignee${okGroups > 1 ? "s" : ""} for ${selectedPendingAck.length} pending asset${selectedPendingAck.length > 1 ? "s" : ""}.`,
+      });
+      setSelected(new Set());
+    } else {
+      toast({
+        title: `Sent to ${okGroups}, failed for ${failGroups}`,
+        description: failReasons.join(" · ") || "Some reminders could not be sent.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -597,6 +680,25 @@ export default function Assets() {
                   ))}
               </SelectContent>
             </Select>
+            {/* Acknowledgement filter */}
+            <Select value={ackFilter} onValueChange={(v) => setAckFilter(v as typeof ackFilter)}>
+              <SelectTrigger className="w-full sm:w-56" data-testid="select-ack-filter">
+                <SelectValue placeholder="Acknowledgement" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Acknowledgement</SelectItem>
+                <SelectItem value="acknowledged">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Acknowledged
+                  </span>
+                </SelectItem>
+                <SelectItem value="pending">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-orange-500" /> Pending Acknowledgement
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {hasAnyFilter && (
@@ -762,8 +864,8 @@ export default function Assets() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-0.5 mt-0.5">
-                                    <svg className="h-2.5 w-2.5 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
-                                    <span className="text-[10px] text-amber-600 font-semibold">Pending Ack</span>
+                                    <svg className="h-2.5 w-2.5 text-orange-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                                    <span className="text-[10px] text-orange-600 font-semibold">Pending Acknowledgement</span>
                                   </div>
                                 )}
                               </div>
@@ -878,6 +980,24 @@ export default function Assets() {
           </div>
           <div className="h-4 w-px bg-border" />
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>Clear</Button>
+          {ackFilter === "pending" && (
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-2 bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={handleSendReminders}
+              disabled={sendingReminders || selectedPendingAck.length === 0}
+              data-testid="button-send-reminder-emails"
+            >
+              {sendingReminders
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Mail className="h-3.5 w-3.5" />}
+              {sendingReminders
+                ? "Sending…"
+                : `Send Reminder Email${selectedPendingAck.length > 1 ? "s" : ""}` +
+                  (selectedPendingAck.length ? ` (${selectedPendingAck.length})` : "")}
+            </Button>
+          )}
           <Button size="sm" variant="destructive" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
             <Trash2 className="h-3.5 w-3.5" /> Delete {selectedCount}
           </Button>
