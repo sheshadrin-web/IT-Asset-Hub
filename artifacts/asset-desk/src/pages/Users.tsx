@@ -6,6 +6,7 @@ import {
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
   Upload, CheckSquare, User, KeyRound,
   ChevronUp, ChevronDown, ChevronsUpDown,
+  Mail, Building2, MapPin, Hash, Briefcase, UserCircle, Monitor, CalendarDays,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
@@ -1139,126 +1140,187 @@ export default function Users() {
         </CardContent>
       </Card>
 
-      {/* ── View User Dialog ─────────────────────────────────────────────────── */}
+      {/* ── View User Dialog (TechOps-style two-column profile page) ────────── */}
       <Dialog open={!!viewingUser} onOpenChange={v => !v && setViewingUser(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0 gap-0">
           {viewingUser && (() => {
             const vu = viewingUser;
             const initials = vu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
             const isSelf = vu.id === currentUser?.userId;
             const userAssets = assets.filter(a => a.assignedEmail === vu.email);
+            const resolvedManager = (() => {
+              const rm = vu.reporting_manager;
+              if (!rm) return "—";
+              if (rm.includes("@")) {
+                const mgr = users.find(u => u.email === rm);
+                return mgr ? mgr.full_name : rm;
+              }
+              return rm;
+            })();
+            const addedDate = vu.created_at
+              ? new Date(vu.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+              : null;
+            const statusPill = vu.status === "active"
+              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              : "bg-slate-100 text-slate-600 border-slate-200";
+            const assetTypePill = "bg-violet-50 text-violet-700 border-violet-200";
+            const assetStatusPillFor = (s: string) =>
+              s === "Assigned"      ? "bg-blue-50 text-blue-700 border-blue-200" :
+              s === "Available"     ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+              s === "Under Repair"  ? "bg-amber-50 text-amber-700 border-amber-200" :
+              s === "Retired"       ? "bg-slate-100 text-slate-600 border-slate-200" :
+                                      "bg-muted text-muted-foreground border-border";
+
             return (
               <>
-                <DialogHeader>
-                  <div className="flex items-center gap-4">
-                    <div className="h-14 w-14 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xl font-bold text-primary">{initials}</span>
+                {/* ── Header bar ──────────────────────────────────────────────── */}
+                <DialogHeader className="px-6 pt-6 pb-5 border-b border-border/70">
+                  {/* a11y title (visually represented by the name row below) */}
+                  <DialogTitle className="sr-only">{vu.full_name} — User details</DialogTitle>
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewingUser(null)}
+                        className="h-9 w-9 rounded-lg border border-border bg-background hover:bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Close"
+                        data-testid="button-view-user-back"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <div className="h-14 w-14 rounded-full bg-primary/15 ring-1 ring-primary/20 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xl font-bold text-primary">{initials}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-2xl font-bold text-foreground tracking-tight truncate">{vu.full_name}</h2>
+                          <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", statusPill)}>
+                            {statusLabel[vu.status]}
+                          </span>
+                          {isSelf && (
+                            <span className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-medium">You</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-0.5 truncate">
+                          {ROLE_LABELS[vu.role]}{vu.department ? ` in ${vu.department}` : ""}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <DialogTitle className="flex items-center gap-2 flex-wrap">
-                        {vu.full_name}
-                        {isSelf && <span className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-medium">You</span>}
-                      </DialogTitle>
-                      <p className="text-sm text-muted-foreground mt-0.5">{vu.email}</p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isAdmin && !isSelf && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400"
+                          onClick={() => { setViewingUser(null); setResetPassTarget(vu); setNewPassword(""); setShowNewPw(false); setResetPassOpen(true); }}
+                          data-testid="button-view-user-reset-password"
+                        >
+                          <KeyRound className="h-3.5 w-3.5" /> Reset Password
+                        </Button>
+                      )}
+                      {isAdmin && (
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => { setViewingUser(null); openEdit(vu); }}
+                          data-testid="button-view-user-edit"
+                        >
+                          <Edit className="h-3.5 w-3.5" /> Edit Profile
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </DialogHeader>
 
-                {/* Profile fields */}
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {[
-                    { label: "E-Code",            value: vu.ecode || "—" },
-                    { label: "Role",              value: ROLE_LABELS[vu.role], badge: roleColors[vu.role] },
-                    { label: "Department",        value: vu.department || "—" },
-                    { label: "Location",          value: vu.location || "—" },
-                    { label: "Reporting Manager", value: (() => {
-                        const rm = vu.reporting_manager;
-                        if (!rm) return "—";
-                        if (rm.includes("@")) {
-                          const mgr = users.find(u => u.email === rm);
-                          return mgr ? mgr.full_name : rm;
-                        }
-                        return rm;
-                      })() },
-                    { label: "Status",            value: statusLabel[vu.status], badge: statusColors[vu.status] },
-                  ].map(({ label, value, badge }) => (
-                    <div key={label} className="space-y-1">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
-                      {badge ? (
-                        <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", badge)}>{value}</span>
-                      ) : (
-                        <p className="font-medium text-foreground">{value}</p>
+                {/* ── Body: two-column layout ─────────────────────────────────── */}
+                <div className="px-6 py-6 grid gap-5 lg:grid-cols-[300px_1fr]">
+                  {/* Left — Contact & Details */}
+                  <Card className="self-start">
+                    <CardContent className="p-5">
+                      <h3 className="text-base font-semibold text-foreground mb-4">Contact &amp; Details</h3>
+                      <div className="space-y-4">
+                        {[
+                          { icon: Mail,         label: "Email",             value: vu.email,              mono: true  },
+                          { icon: Hash,         label: "E-Code",            value: vu.ecode || "—",       mono: true  },
+                          { icon: Building2,    label: "Department",        value: vu.department || "—" },
+                          { icon: Briefcase,    label: "Role",              value: ROLE_LABELS[vu.role] },
+                          { icon: MapPin,       label: "Location",          value: vu.location || "—" },
+                          { icon: UserCircle,   label: "Reporting Manager", value: resolvedManager },
+                        ].map(({ icon: Icon, label, value, mono }) => (
+                          <div key={label} className="flex items-start gap-3">
+                            <div className="h-8 w-8 rounded-md bg-muted/70 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <Icon className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+                              <p className={cn("text-sm text-foreground leading-snug break-words", mono && "font-mono")}>{value}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {addedDate && (
+                        <div className="mt-5 pt-4 border-t border-border/70 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          <span>Added {addedDate}</span>
+                        </div>
                       )}
-                    </div>
-                  ))}
-                </div>
+                    </CardContent>
+                  </Card>
 
-                {/* Assigned Assets section */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center gap-2 border-b border-border pb-2">
-                    <h3 className="text-sm font-semibold text-foreground">Assigned Assets</h3>
-                    <span className={cn(
-                      "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold",
-                      userAssets.length > 0
-                        ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
-                        : "bg-muted text-muted-foreground border-border"
-                    )}>{userAssets.length}</span>
-                  </div>
-                  {userAssets.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-4 text-center border rounded-lg bg-muted/30">
-                      No assets currently assigned to this user.
-                    </p>
-                  ) : (
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-muted/50 border-b border-border">
-                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Asset ID</th>
-                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
-                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Device</th>
-                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
-                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">Warranty Until</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {userAssets.map((a, i) => (
-                            <tr key={a.assetId} className={cn("border-b border-border last:border-0", i % 2 === 0 ? "" : "bg-muted/20")}>
-                              <td className="px-3 py-2 font-mono font-semibold text-primary">{a.assetId}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{a.assetType}</td>
-                              <td className="px-3 py-2 font-medium text-foreground">{a.brand} {a.model}</td>
-                              <td className="px-3 py-2">
-                                <span className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium bg-blue-500/10 text-blue-600 border-blue-500/20">
+                  {/* Right — Assigned Hardware */}
+                  <div className="min-w-0">
+                    {/* Tab-style header */}
+                    <div className="flex items-center gap-2 mb-4 border-b border-border/70">
+                      <div className="inline-flex items-center gap-2 px-4 py-2.5 border-b-2 border-primary text-sm font-semibold text-foreground -mb-px">
+                        <Monitor className="h-4 w-4 text-primary" />
+                        Assigned Hardware ({userAssets.length})
+                      </div>
+                    </div>
+
+                    {userAssets.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
+                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                          <Monitor className="h-5 w-5 text-muted-foreground/60" />
+                        </div>
+                        <p className="text-sm font-medium text-foreground">No assigned hardware</p>
+                        <p className="text-xs text-muted-foreground">This user has no assets currently assigned.</p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {userAssets.map(a => (
+                          <Card key={a.assetId} className="hover:shadow-md transition-shadow">
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between gap-2 mb-3">
+                                <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetTypePill)}>
+                                  {a.assetType}
+                                </span>
+                                <span className="text-[11px] font-mono text-muted-foreground tracking-wide truncate">
+                                  {a.assetId}
+                                </span>
+                              </div>
+                              <p className="text-base font-semibold text-foreground leading-tight">
+                                {a.brand} {a.model}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
+                                SN: {a.serialNumber || "—"}
+                              </p>
+                              <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between gap-2">
+                                <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetStatusPillFor(a.status))}>
                                   {a.status}
                                 </span>
-                              </td>
-                              <td className="px-3 py-2 text-muted-foreground">
-                                {a.warrantyEndDate ? new Date(a.warrantyEndDate).toLocaleDateString("en-IN") : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                                {a.warrantyEndDate && (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    Warranty {new Date(a.warrantyEndDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                  </span>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-
-                <DialogFooter className="gap-2 flex-wrap">
-                  <Button variant="outline" onClick={() => setViewingUser(null)} className="sm:mr-auto">Close</Button>
-                  {isAdmin && !isSelf && (
-                    <Button
-                      variant="outline"
-                      className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400"
-                      onClick={() => { setViewingUser(null); setResetPassTarget(vu); setNewPassword(""); setShowNewPw(false); setResetPassOpen(true); }}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" /> Reset Password
-                    </Button>
-                  )}
-                  {isAdmin && (
-                    <Button onClick={() => { setViewingUser(null); openEdit(vu); }} className="gap-2">
-                      <Edit className="h-4 w-4" /> Edit Profile
-                    </Button>
-                  )}
-                </DialogFooter>
               </>
             );
           })()}
