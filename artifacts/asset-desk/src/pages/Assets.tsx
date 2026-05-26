@@ -610,12 +610,12 @@ export default function Assets() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <div className="relative flex-1 min-w-[260px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by Asset ID, serial, model, or assigned user…"
-                className="pl-9" value={search}
+                className="pl-9 h-10 text-sm" value={search}
                 onChange={e => setSearch(e.target.value)}
                 data-testid="input-search-assets"
               />
@@ -626,7 +626,7 @@ export default function Assets() {
               )}
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full sm:w-40" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
+              <SelectTrigger className="w-[160px] h-10 text-sm" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
@@ -642,7 +642,7 @@ export default function Assets() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectTrigger className="w-[170px] h-10 text-sm" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 {(["In Procurement","Available","Assigned","Recovery Stage","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
@@ -654,7 +654,7 @@ export default function Assets() {
             </Select>
             {/* Location filter — only shows locations that have ≥1 asset */}
             <Select value={locationFilter} onValueChange={setLocationFilter}>
-              <SelectTrigger className="w-full sm:w-52" data-testid="select-location-filter">
+              <SelectTrigger className="w-[190px] h-10 text-sm" data-testid="select-location-filter">
                 <SelectValue placeholder="Location" />
               </SelectTrigger>
               <SelectContent>
@@ -668,7 +668,7 @@ export default function Assets() {
             </Select>
             {/* Department filter — only shows departments that have ≥1 asset */}
             <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger className="w-full sm:w-48" data-testid="select-dept-filter">
+              <SelectTrigger className="w-[190px] h-10 text-sm" data-testid="select-dept-filter">
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
               <SelectContent>
@@ -682,7 +682,7 @@ export default function Assets() {
             </Select>
             {/* Acknowledgement filter */}
             <Select value={ackFilter} onValueChange={(v) => setAckFilter(v as typeof ackFilter)}>
-              <SelectTrigger className="w-full sm:w-56" data-testid="select-ack-filter">
+              <SelectTrigger className="w-[220px] h-10 text-sm" data-testid="select-ack-filter">
                 <SelectValue placeholder="Acknowledgement" />
               </SelectTrigger>
               <SelectContent>
