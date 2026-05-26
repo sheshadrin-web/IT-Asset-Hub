@@ -142,18 +142,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 flex w-64 flex-col bg-sidebar transition-transform duration-300 ease-in-out lg:static lg:translate-x-0",
+          "bg-[radial-gradient(120%_60%_at_0%_0%,hsl(221_83%_22%/0.55),transparent_55%),radial-gradient(80%_50%_at_100%_100%,hsl(221_83%_30%/0.25),transparent_60%)] bg-sidebar",
+          "border-r border-sidebar-border/60 shadow-[inset_-1px_0_0_0_rgba(255,255,255,0.02)]",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Logo area */}
         <div className="relative flex h-16 items-center gap-3 px-4 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-900/40 to-transparent pointer-events-none" />
-          <div className="relative h-10 w-10 rounded-xl overflow-hidden flex-shrink-0 bg-white shadow-md flex items-center justify-center">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/15 via-blue-500/5 to-transparent pointer-events-none" />
+          <div className="relative h-10 w-10 rounded-xl overflow-hidden flex-shrink-0 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.35)] ring-1 ring-white/20 flex items-center justify-center">
             <img src={milesLogo} alt="Miles Education" className="h-full w-full object-contain" />
           </div>
           <div className="relative min-w-0 flex-1">
             <div className="text-[11px] font-bold text-white leading-tight tracking-wide truncate">Miles Education Pvt Ltd</div>
-            <div className="text-[10px] text-sidebar-foreground/50 mt-0.5 truncate">IT Asset &amp; Helpdesk Portal</div>
+            <div className="text-[10px] text-sidebar-foreground/55 mt-0.5 truncate">IT Asset &amp; Helpdesk Portal</div>
           </div>
           <button
             className="relative ml-auto lg:hidden text-sidebar-foreground/60 hover:text-white transition-colors flex-shrink-0"
@@ -164,11 +166,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Thin accent line under logo */}
-        <div className="h-px bg-gradient-to-r from-blue-500/50 via-blue-400/20 to-transparent mx-4" />
+        <div className="h-px bg-gradient-to-r from-blue-400/40 via-blue-400/15 to-transparent mx-4" />
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-          <p className="px-3 mb-2 text-[10px] font-semibold text-sidebar-foreground/35 uppercase tracking-widest">Menu</p>
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+          <p className="px-3 mb-2 text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-[0.18em]">Menu</p>
           {visibleItems.map((item, idx) => {
             const Icon = item.icon;
             const isActive =
@@ -182,15 +184,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 onClick={() => setSidebarOpen(false)}
                 data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                  "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
                   isActive
-                    ? "bg-white/10 text-white border-l-2 border-blue-400 pl-[10px] shadow-sm"
-                    : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-white border-l-2 border-transparent pl-[10px]"
+                    ? "bg-gradient-to-r from-blue-500/20 via-blue-500/10 to-transparent text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] ring-1 ring-inset ring-blue-400/20"
+                    : "text-sidebar-foreground/75 hover:bg-white/5 hover:text-white"
                 )}
               >
-                <Icon className={cn("h-4 w-4 flex-shrink-0 transition-colors", isActive ? "text-blue-300" : "text-sidebar-foreground/50 group-hover:text-white")} />
+                {isActive && (
+                  <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-blue-300 to-blue-500 shadow-[0_0_8px_0_rgba(96,165,250,0.5)]" />
+                )}
+                <Icon className={cn("h-[18px] w-[18px] flex-shrink-0 transition-colors", isActive ? "text-blue-300" : "text-sidebar-foreground/55 group-hover:text-white")} />
                 <span className="flex-1 truncate">{item.label}</span>
-                {isActive && <ChevronRight className="h-3 w-3 text-blue-300/70" />}
+                {isActive && <ChevronRight className="h-3 w-3 text-blue-300/80" />}
               </Link>
             );
           })}
@@ -227,16 +232,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden">
 
         {/* Top header */}
-        <header className="flex h-14 items-center border-b border-border bg-card/80 backdrop-blur px-4 gap-3 shadow-sm">
+        <header className="sticky top-0 z-10 flex h-14 items-center border-b border-border/70 bg-card/70 backdrop-blur-md supports-[backdrop-filter]:bg-card/60 px-4 gap-3">
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)} data-testid="button-menu">
             <Menu className="h-4 w-4" />
           </Button>
 
           {/* Breadcrumb-style page label */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span className="text-xs text-muted-foreground hidden sm:inline">IT Portal</span>
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-md bg-primary/8 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+              IT Portal
+            </span>
             <ChevronRight className="h-3 w-3 text-muted-foreground/40 hidden sm:inline" />
-            <p className="text-sm font-semibold text-foreground truncate">{activeLabel}</p>
+            <p className="text-sm font-semibold text-foreground truncate tracking-tight">{activeLabel}</p>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -318,7 +326,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 pt-4 pb-0 bg-muted/20">{children}</main>
+        <main className="flex-1 overflow-y-auto px-6 pt-6 pb-0">{children}</main>
       </div>
 
       <ProfileSettingsModal open={profileSettingsOpen} onClose={() => setProfileSettingsOpen(false)} />
