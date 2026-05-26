@@ -6,7 +6,7 @@ import {
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
   Upload, CheckSquare, User, KeyRound,
   ChevronUp, ChevronDown, ChevronsUpDown,
-  Mail, Building2, MapPin, Hash, Briefcase, UserCircle, Monitor, CalendarDays,
+  Mail, Building2, MapPin, Hash, Briefcase, UserCircle, Monitor, CalendarDays, Ticket as TicketIcon,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
@@ -36,10 +36,12 @@ import { z } from "zod";
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
+import { Link } from "wouter";
 import { useUsers } from "@/context/UsersContext";
 import { useAssets } from "@/context/AssetContext";
+import { useTickets } from "@/context/TicketContext";
 import { useAuth } from "@/context/AuthContext";
-import { Profile, UserRole, UserStatus, ROLE_LABELS } from "@/data/mockData";
+import { Profile, UserRole, UserStatus, ROLE_LABELS, Ticket } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { adminUsersApi } from "@/lib/adminUsersApi";
 import { cn } from "@/lib/utils";
@@ -140,6 +142,7 @@ function exportUsers(users: Profile[]) {
 export default function Users() {
   const { users, loading, refresh, updateUser, deleteUser } = useUsers();
   const { assets, refresh: refreshAssets } = useAssets();
+  const { tickets } = useTickets();
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
@@ -169,6 +172,7 @@ export default function Users() {
   const [editingUser,      setEditingUser]       = useState<Profile | null>(null);
   const [editOpen,         setEditOpen]          = useState(false);
   const [viewingUser,      setViewingUser]       = useState<Profile | null>(null);
+  const [viewUserTab,      setViewUserTab]       = useState<"hardware" | "tickets">("hardware");
   const [deactivateTarget, setDeactivateTarget] = useState<Profile | null>(null);
   const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
@@ -647,7 +651,7 @@ export default function Users() {
   };
 
   // ── View user ──────────────────────────────────────────────────────────────
-  const openView = (user: Profile) => setViewingUser(user);
+  const openView = (user: Profile) => { setViewUserTab("hardware"); setViewingUser(user); };
 
   // ── Edit user ──────────────────────────────────────────────────────────────
   const openEdit = (user: Profile) => {
@@ -1148,6 +1152,24 @@ export default function Users() {
             const initials = vu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
             const isSelf = vu.id === currentUser?.userId;
             const userAssets = assets.filter(a => a.assignedEmail === vu.email);
+            const userTickets = tickets.filter((t: Ticket) =>
+              t.raisedBy === vu.email || t.employeeEmail === vu.email
+            );
+            const activeTab = viewUserTab;
+            const ticketPriorityPill = (p: string) =>
+              p === "Critical" ? "bg-red-50 text-red-700 border-red-200" :
+              p === "High"     ? "bg-orange-50 text-orange-700 border-orange-200" :
+              p === "Medium"   ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                 "bg-slate-100 text-slate-600 border-slate-200";
+            const ticketStatusPill = (s: string) =>
+              s === "Open"             ? "bg-blue-50 text-blue-700 border-blue-200" :
+              s === "Assigned"         ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+              s === "In Progress"      ? "bg-violet-50 text-violet-700 border-violet-200" :
+              s === "Waiting for User" ? "bg-amber-50 text-amber-700 border-amber-200" :
+              s === "Resolved"         ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+              s === "Closed"           ? "bg-slate-100 text-slate-600 border-slate-200" :
+              s === "Rejected"         ? "bg-rose-50 text-rose-700 border-rose-200" :
+                                         "bg-muted text-muted-foreground border-border";
             const resolvedManager = (() => {
               const rm = vu.reporting_manager;
               if (!rm) return "—";
@@ -1267,57 +1289,147 @@ export default function Users() {
                     </CardContent>
                   </Card>
 
-                  {/* Right — Assigned Hardware */}
+                  {/* Right — Tabs: Assigned Hardware / Tickets */}
                   <div className="min-w-0">
-                    {/* Tab-style header */}
-                    <div className="flex items-center gap-2 mb-4 border-b border-border/70">
-                      <div className="inline-flex items-center gap-2 px-4 py-2.5 border-b-2 border-primary text-sm font-semibold text-foreground -mb-px">
-                        <Monitor className="h-4 w-4 text-primary" />
+                    {/* Tab switcher */}
+                    <div className="flex items-center gap-1 mb-4 border-b border-border/70">
+                      <button
+                        type="button"
+                        onClick={() => setViewUserTab("hardware")}
+                        data-testid="tab-user-hardware"
+                        className={cn(
+                          "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-colors",
+                          activeTab === "hardware"
+                            ? "border-b-2 border-primary text-foreground"
+                            : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <Monitor className={cn("h-4 w-4", activeTab === "hardware" ? "text-primary" : "text-muted-foreground")} />
                         Assigned Hardware ({userAssets.length})
-                      </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewUserTab("tickets")}
+                        data-testid="tab-user-tickets"
+                        className={cn(
+                          "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-colors",
+                          activeTab === "tickets"
+                            ? "border-b-2 border-primary text-foreground"
+                            : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <TicketIcon className={cn("h-4 w-4", activeTab === "tickets" ? "text-primary" : "text-muted-foreground")} />
+                        Tickets ({userTickets.length})
+                      </button>
                     </div>
 
-                    {userAssets.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
-                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                          <Monitor className="h-5 w-5 text-muted-foreground/60" />
+                    {/* Hardware tab */}
+                    {activeTab === "hardware" && (
+                      userAssets.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
+                          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                            <Monitor className="h-5 w-5 text-muted-foreground/60" />
+                          </div>
+                          <p className="text-sm font-medium text-foreground">No assigned hardware</p>
+                          <p className="text-xs text-muted-foreground">This user has no assets currently assigned.</p>
                         </div>
-                        <p className="text-sm font-medium text-foreground">No assigned hardware</p>
-                        <p className="text-xs text-muted-foreground">This user has no assets currently assigned.</p>
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {userAssets.map(a => (
-                          <Card key={a.assetId} className="hover:shadow-md transition-shadow">
-                            <CardContent className="p-4">
-                              <div className="flex items-start justify-between gap-2 mb-3">
-                                <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetTypePill)}>
-                                  {a.assetType}
-                                </span>
-                                <span className="text-[11px] font-mono text-muted-foreground tracking-wide truncate">
-                                  {a.assetId}
-                                </span>
-                              </div>
-                              <p className="text-base font-semibold text-foreground leading-tight">
-                                {a.brand} {a.model}
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
-                                SN: {a.serialNumber || "—"}
-                              </p>
-                              <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between gap-2">
-                                <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetStatusPillFor(a.status))}>
-                                  {a.status}
-                                </span>
-                                {a.warrantyEndDate && (
-                                  <span className="text-[11px] text-muted-foreground">
-                                    Warranty {new Date(a.warrantyEndDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                                  </span>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {userAssets.map(a => (
+                            <Link
+                              key={a.assetId}
+                              href={`/assets/${a.assetId}`}
+                              onClick={() => setViewingUser(null)}
+                              data-testid={`link-user-asset-${a.assetId}`}
+                              className="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
+                            >
+                              <Card className="hover:shadow-md hover:border-primary/40 transition-all cursor-pointer h-full">
+                                <CardContent className="p-4">
+                                  <div className="flex items-start justify-between gap-2 mb-3">
+                                    <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetTypePill)}>
+                                      {a.assetType}
+                                    </span>
+                                    <span className="text-[11px] font-mono text-muted-foreground tracking-wide truncate group-hover:text-primary transition-colors">
+                                      {a.assetId}
+                                    </span>
+                                  </div>
+                                  <p className="text-base font-semibold text-foreground leading-tight group-hover:text-primary transition-colors">
+                                    {a.brand} {a.model}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
+                                    SN: {a.serialNumber || "—"}
+                                  </p>
+                                  <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between gap-2">
+                                    <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium", assetStatusPillFor(a.status))}>
+                                      {a.status}
+                                    </span>
+                                    {a.warrantyEndDate && (
+                                      <span className="text-[11px] text-muted-foreground">
+                                        Warranty {new Date(a.warrantyEndDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                      </span>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </Link>
+                          ))}
+                        </div>
+                      )
+                    )}
+
+                    {/* Tickets tab */}
+                    {activeTab === "tickets" && (
+                      userTickets.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
+                          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                            <TicketIcon className="h-5 w-5 text-muted-foreground/60" />
+                          </div>
+                          <p className="text-sm font-medium text-foreground">No tickets raised</p>
+                          <p className="text-xs text-muted-foreground">This user hasn't raised any support tickets yet.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {[...userTickets]
+                            .sort((a, b) => (b.createdDate || "").localeCompare(a.createdDate || ""))
+                            .map((t: Ticket) => (
+                              <Link
+                                key={t.ticketId}
+                                href={`/tickets/${t.ticketId}`}
+                                onClick={() => setViewingUser(null)}
+                                data-testid={`link-user-ticket-${t.ticketId}`}
+                                className="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
+                              >
+                                <Card className="hover:shadow-md hover:border-primary/40 transition-all cursor-pointer">
+                                  <CardContent className="p-3.5">
+                                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                                          <span className="text-xs font-mono font-semibold text-primary group-hover:underline">{t.ticketId}</span>
+                                          <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium", ticketPriorityPill(t.priority))}>
+                                            {t.priority}
+                                          </span>
+                                          <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium", ticketStatusPill(t.status))}>
+                                            {t.status}
+                                          </span>
+                                        </div>
+                                        <p className="text-sm font-medium text-foreground truncate">{t.category}{t.subcategory ? ` — ${t.subcategory}` : ""}</p>
+                                        {t.description && (
+                                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{t.description}</p>
+                                        )}
+                                      </div>
+                                      <div className="text-right text-[11px] text-muted-foreground flex-shrink-0">
+                                        {t.assetId && <p className="font-mono">{t.assetId}</p>}
+                                        {t.createdDate && (
+                                          <p className="mt-0.5">{new Date(t.createdDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              </Link>
+                            ))}
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
