@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import {
   ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle,
   AlertCircle, Download, Info, Loader2, X, UserCheck,
-  Monitor, Smartphone, Server, Package,
+  Monitor, Smartphone, Server, Package, Mail, Check,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -419,8 +419,28 @@ function getTypeStyle(type: AssetType): TypeStyle {
 // ─── Component ────────────────────────────────────────────────────────────────
 type Step = "select" | "upload" | "preview" | "importing" | "done";
 
+interface ImportedAssigned {
+  assetId:         string;
+  assetType:       AssetType;
+  brand:           string;
+  model:           string;
+  serialNumber:    string;
+  processor:       string;
+  ram:             string;
+  storage:         string;
+  operatingSystem: string;
+  imei1:           string;
+  imei2:           string;
+  accessories:     string;
+  assignedEmail:   string;
+  assignedName:    string;
+  ackToken:        string;
+  emailState:      "idle" | "sending" | "sent" | "error";
+  ackState:        "idle" | "saving" | "done";
+}
+
 export default function BulkImport() {
-  const { refresh } = useAssets();
+  const { refresh, markAcknowledged } = useAssets();
   const { users }   = useUsers();
   const { toast }   = useToast();
 
@@ -431,11 +451,12 @@ export default function BulkImport() {
   const [mappedRows,       setMappedRows]      = useState<MappedRow[]>([]);
   const [progress,         setProgress]        = useState(0);
   const [results,          setResults]         = useState<{ success: number; failed: number; skipped: number; errorMessages: string[] }>({ success: 0, failed: 0, skipped: 0, errorMessages: [] });
+  const [importedAssigned, setImportedAssigned] = useState<ImportedAssigned[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const resetToSelect = () => {
     setStep("select"); setAssetTypeFilter(null);
-    setFile(null); setMappedRows([]);
+    setFile(null); setMappedRows([]); setImportedAssigned([]);
   };
 
   // ── Parse file ──────────────────────────────────────────────────────────────
@@ -576,10 +597,16 @@ export default function BulkImport() {
     let failed  = 0;
     const errorMessages: string[] = [];
     const CHUNK = 50;
+    const tokens: Record<string, string> = {};
+    const importedOk: ImportedAssigned[] = [];
 
     for (let i = 0; i < validRows.length; i += CHUNK) {
       const chunk = validRows.slice(i, i + CHUNK);
-      const dbRows = chunk.map(r => ({
+      const dbRows = chunk.map(r => {
+        const isAssignedWithEmail = r.status === "Assigned" && !!r.assignedEmail && r.assignedEmail.includes("@");
+        const token = isAssignedWithEmail ? crypto.randomUUID() : "";
+        if (token) tokens[r.assetId] = token;
+        return ({
         asset_id:          r.assetId,
         asset_type:        r.assetType,
         brand:             r.brand,
@@ -612,32 +639,62 @@ export default function BulkImport() {
         assigned_email:    r.assignedToId ? (r.assignedEmail || null) : null,
         assigned_to_name:  r.assignedName     || null,
         assigned_at:       r.status === "Assigned" ? new Date().toISOString() : null,
-        acknowledged:      r.status === "Assigned" ? true : false,
-        acknowledged_at:   r.status === "Assigned" ? new Date().toISOString() : null,
+        // Auto-ack only when there is no email to send to. Otherwise leave pending
+        // so admins can either send the ack email or manually mark it acknowledged.
+        acknowledged:      r.status === "Assigned" && !isAssignedWithEmail ? true : false,
+        acknowledged_at:   r.status === "Assigned" && !isAssignedWithEmail ? new Date().toISOString() : null,
+        ack_token:         token || null,
         department:        r.department       || null,
         location:          r.location,
         accessories:       "",
         remarks:           r.remarks          || "",
-      }));
+      });
+      });
+      const recordOk = (r: typeof chunk[number]) => {
+        if (!tokens[r.assetId]) return;
+        importedOk.push({
+          assetId:         r.assetId,
+          assetType:       r.assetType,
+          brand:           r.brand,
+          model:           r.model,
+          serialNumber:    r.serialNumber,
+          processor:       r.processor,
+          ram:             r.ram,
+          storage:         r.storage,
+          operatingSystem: r.operatingSystem,
+          imei1:           r.imei1,
+          imei2:           r.imei2,
+          accessories:     "",
+          assignedEmail:   r.assignedEmail,
+          assignedName:    r.assignedName,
+          ackToken:        tokens[r.assetId],
+          emailState:      "idle",
+          ackState:        "idle",
+        });
+      };
       const { error } = await supabase.from("assets").insert(dbRows);
       if (error) {
         // Try row-by-row for partial success
-        for (const row of dbRows) {
+        for (let j = 0; j < dbRows.length; j++) {
+          const row = dbRows[j];
           const { error: e2 } = await supabase.from("assets").insert(row);
           if (e2) {
             failed++;
             if (errorMessages.length < 3) errorMessages.push(`${row.asset_id}: ${e2.message}`);
           } else {
             success++;
+            recordOk(chunk[j]);
           }
         }
       } else {
         success += chunk.length;
+        chunk.forEach(recordOk);
       }
       setProgress(Math.round(((i + chunk.length) / validRows.length) * 100));
     }
 
     await refresh();
+    setImportedAssigned(importedOk);
     setResults({ success, failed, skipped: mappedRows.filter(r => r.errors.length > 0).length, errorMessages });
     setStep("done");
     if (failed > 0 && errorMessages.length > 0) {
@@ -1085,6 +1142,16 @@ export default function BulkImport() {
               </Link>
             </div>
           </CardContent>
+          {importedAssigned.length > 0 && (
+            <CardContent className="border-t bg-muted/20 pt-6">
+              <PendingAckPanel
+                items={importedAssigned}
+                setItems={setImportedAssigned}
+                markAcknowledged={markAcknowledged}
+                toast={toast}
+              />
+            </CardContent>
+          )}
         </Card>
       )}
     </div>
@@ -1096,5 +1163,188 @@ function ChevronRight({ className }: { className?: string }) {
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
     </svg>
+  );
+}
+
+// ─── Pending acknowledgement panel (shown on Done step) ──────────────────────
+interface PendingAckPanelProps {
+  items: ImportedAssigned[];
+  setItems: React.Dispatch<React.SetStateAction<ImportedAssigned[]>>;
+  markAcknowledged: (assetId: string) => Promise<void>;
+  toast: ReturnType<typeof useToast>["toast"];
+}
+
+function PendingAckPanel({ items, setItems, markAcknowledged, toast }: PendingAckPanelProps) {
+  // Group by assignee email — one email is sent per assignee containing all their assets
+  const groups = items.reduce<Record<string, ImportedAssigned[]>>((acc, it) => {
+    const key = it.assignedEmail.toLowerCase();
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(it);
+    return acc;
+  }, {});
+
+  const pendingCount = items.filter(i => i.ackState !== "done").length;
+
+  const patch = (assetId: string, p: Partial<ImportedAssigned>) =>
+    setItems(prev => prev.map(i => i.assetId === assetId ? { ...i, ...p } : i));
+
+  const sendEmailForGroup = async (email: string, groupItems: ImportedAssigned[]) => {
+    const targets = groupItems.filter(i => i.emailState !== "sent" && i.ackState !== "done");
+    if (targets.length === 0) return;
+    targets.forEach(i => patch(i.assetId, { emailState: "sending" }));
+    try {
+      const first = targets[0];
+      const { data, error } = await supabase.functions.invoke("send-bulk-assignment-email", {
+        body: {
+          toEmail:   first.assignedEmail,
+          toName:    first.assignedName || first.assignedEmail,
+          reason:    "",
+          assets: targets.map(a => ({
+            assetId:         a.assetId,
+            assetType:       a.assetType,
+            brand:           a.brand,
+            model:           a.model,
+            serialNumber:    a.serialNumber,
+            processor:       a.processor,
+            ram:             a.ram,
+            storage:         a.storage,
+            operatingSystem: a.operatingSystem,
+            imei1:           a.imei1,
+            imei2:           a.imei2,
+            accessories:     a.accessories,
+            ackToken:        a.ackToken,
+          })),
+        },
+      });
+      if (error) throw new Error(error.message);
+      const d = data as { success?: boolean; error?: string };
+      if (d?.error) throw new Error(d.error);
+      targets.forEach(i => patch(i.assetId, { emailState: "sent" }));
+      toast({
+        title: "Acknowledgement email sent",
+        description: `Sent ${targets.length} asset${targets.length > 1 ? "s" : ""} to ${email}`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to send email";
+      targets.forEach(i => patch(i.assetId, { emailState: "error" }));
+      toast({ title: "Failed to send email", description: msg, variant: "destructive" });
+    }
+  };
+
+  const sendAllEmails = async () => {
+    for (const [email, groupItems] of Object.entries(groups)) {
+      await sendEmailForGroup(email, groupItems);
+    }
+  };
+
+  const markOneAcknowledged = async (it: ImportedAssigned) => {
+    patch(it.assetId, { ackState: "saving" });
+    try {
+      await markAcknowledged(it.assetId);
+      patch(it.assetId, { ackState: "done" });
+      toast({ title: "Marked acknowledged", description: `${it.assetId} acknowledged on behalf of ${it.assignedName || it.assignedEmail}` });
+    } catch (err) {
+      patch(it.assetId, { ackState: "idle" });
+      toast({
+        title: "Failed to mark acknowledged",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-4 text-left max-w-3xl mx-auto">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <UserCheck className="h-4 w-4 text-blue-600" />
+            Assigned assets awaiting acknowledgement
+            <Badge variant="outline" className="text-[10px]">{pendingCount}</Badge>
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Send the acknowledgement email so the assignee can confirm receipt, or mark each asset acknowledged manually if they already received it.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-2"
+          disabled={items.every(i => i.emailState === "sent" || i.ackState === "done" || i.emailState === "sending")}
+          onClick={sendAllEmails}
+          data-testid="button-send-all-ack-emails"
+        >
+          <Mail className="h-4 w-4" /> Send all ({Object.keys(groups).length})
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(groups).map(([email, groupItems]) => {
+          const groupSending = groupItems.some(i => i.emailState === "sending");
+          const groupSent = groupItems.every(i => i.emailState === "sent" || i.ackState === "done");
+          const firstName = groupItems[0].assignedName || email;
+          return (
+            <div key={email} className="border rounded-lg p-3 bg-background">
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <div className="text-xs">
+                  <p className="font-semibold text-foreground">{firstName}</p>
+                  <p className="text-muted-foreground font-mono">{email}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={groupSent ? "outline" : "default"}
+                  className="gap-1.5 h-7 text-xs"
+                  disabled={groupSending || groupSent}
+                  onClick={() => sendEmailForGroup(email, groupItems)}
+                  data-testid={`button-send-ack-${email}`}
+                >
+                  {groupSending ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                   groupSent    ? <CheckCircle2 className="h-3 w-3" /> :
+                                  <Mail className="h-3 w-3" />}
+                  {groupSending ? "Sending…" : groupSent ? "Email sent" : `Send (${groupItems.length})`}
+                </Button>
+              </div>
+
+              <ul className="divide-y divide-border/60">
+                {groupItems.map(it => (
+                  <li key={it.assetId} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-mono font-medium truncate">{it.assetId}</p>
+                      <p className="text-muted-foreground truncate">{it.assetType} · {it.brand} {it.model}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {it.emailState === "sent" && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+                          <Mail className="h-3 w-3" /> Sent
+                        </span>
+                      )}
+                      {it.ackState === "done" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                          <CheckCircle2 className="h-3 w-3" /> Acknowledged
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="gap-1 h-6 text-[10px] px-2"
+                          disabled={it.ackState === "saving"}
+                          onClick={() => markOneAcknowledged(it)}
+                          data-testid={`button-mark-ack-${it.assetId}`}
+                        >
+                          {it.ackState === "saving"
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Check className="h-3 w-3" />}
+                          Mark acknowledged
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
