@@ -1543,109 +1543,181 @@ export default function Users() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit User Dialog ─────────────────────────────────────────────────── */}
+      {/* ── Edit User Dialog (sectioned profile-style editor) ─────────────── */}
       <Dialog open={editOpen} onOpenChange={v => !editSaving && setEditOpen(v)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit User Profile</DialogTitle>
-            {editingUser && <DialogDescription>{editingUser.email}</DialogDescription>}
-          </DialogHeader>
-          <Form {...editForm}>
-            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={editForm.control} name="full_name" render={({ field }) => (
-                  <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} data-testid="input-user-name" /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={editForm.control} name="ecode" render={({ field }) => (
-                  <FormItem><FormLabel>E-Code</FormLabel><FormControl><Input placeholder="e.g. EMP-001" {...field} data-testid="input-user-ecode" /></FormControl><FormMessage /></FormItem>
-                )} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={editForm.control} name="role" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Role</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger data-testid="select-user-role"><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="super_admin">Super Admin</SelectItem>
-                        <SelectItem value="it_admin">IT Admin</SelectItem>
-                        <SelectItem value="it_agent">IT Agent</SelectItem>
-                        <SelectItem value="end_user">End User</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={editForm.control} name="status" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange} disabled={editingUser?.id === currentUser?.userId}>
-                      <FormControl><SelectTrigger data-testid="select-user-status"><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={editForm.control} name="department" render={({ field }) => (
-                  <FormItem><FormLabel>Department</FormLabel><FormControl><Input placeholder="Engineering, HR…" {...field} data-testid="input-user-department" /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={editForm.control} name="location" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl>
-                      <LocationSelect value={field.value ?? ""} onChange={field.onChange} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Reporting Manager</FormLabel>
-                  <FormControl>
-                    <ManagerSearchField
-                      value={field.value ?? ""}
-                      onChange={field.onChange}
-                      users={users}
-                      excludeEmail={editingUser?.email}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              {editingUser?.id === currentUser?.userId && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                  You cannot deactivate your own account from here.
-                </p>
-              )}
-              <DialogFooter className="flex-col sm:flex-row gap-2">
-                {/* Reset password — super_admin only, not for own account */}
-                {currentUser?.role === "super_admin" && editingUser?.id !== currentUser?.userId && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400 sm:mr-auto"
-                    disabled={resetSending || editSaving}
-                    onClick={handleResetPassword}
-                    title="Sends a password reset link to the user's email"
-                  >
-                    <KeyRound className="h-3.5 w-3.5" />
-                    {resetSending ? "Sending…" : "Send Reset Link"}
-                  </Button>
-                )}
-                <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving || resetSending}>Cancel</Button>
-                <Button type="submit" disabled={editSaving || resetSending} data-testid="button-save-user">
-                  {editSaving ? "Saving…" : "Save Changes"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0 gap-0">
+          {editingUser && (() => {
+            const eu = editingUser;
+            const editInitials = eu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+            const isEditingSelf = eu.id === currentUser?.userId;
+            return (
+              <>
+                {/* ── Header bar ──────────────────────────────────────────────── */}
+                <DialogHeader className="px-6 pt-6 pb-5 border-b border-border/70">
+                  <DialogTitle className="sr-only">Edit {eu.full_name} — User profile</DialogTitle>
+                  {eu.email && <DialogDescription className="sr-only">{eu.email}</DialogDescription>}
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="h-14 w-14 rounded-full bg-primary/15 ring-1 ring-primary/20 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xl font-bold text-primary">{editInitials}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-xl font-bold text-foreground tracking-tight truncate">{eu.full_name}</h2>
+                          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                            <Edit className="h-2.5 w-2.5" /> Editing
+                          </span>
+                          {isEditingSelf && (
+                            <span className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-medium">You</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-0.5 truncate font-mono">{eu.email}</p>
+                      </div>
+                    </div>
+                    {currentUser?.role === "super_admin" && !isEditingSelf && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50 hover:border-amber-400 flex-shrink-0"
+                        disabled={resetSending || editSaving}
+                        onClick={handleResetPassword}
+                        title="Sends a password reset link to the user's email"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        {resetSending ? "Sending…" : "Send Reset Link"}
+                      </Button>
+                    )}
+                  </div>
+                </DialogHeader>
+
+                {/* ── Form body ───────────────────────────────────────────────── */}
+                <Form {...editForm}>
+                  <form onSubmit={editForm.handleSubmit(onEditSubmit)}>
+                    <div className="px-6 py-6 space-y-5">
+                      {/* Section: Identity */}
+                      <Card>
+                        <CardContent className="p-5">
+                          <div className="flex items-center gap-2 mb-4">
+                            <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center">
+                              <User className="h-4 w-4 text-primary" />
+                            </div>
+                            <h3 className="text-sm font-semibold text-foreground">Identity</h3>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <FormField control={editForm.control} name="full_name" render={({ field }) => (
+                              <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} data-testid="input-user-name" /></FormControl><FormMessage /></FormItem>
+                            )} />
+                            <FormField control={editForm.control} name="ecode" render={({ field }) => (
+                              <FormItem><FormLabel>E-Code</FormLabel><FormControl><Input placeholder="e.g. EMP-001" {...field} data-testid="input-user-ecode" /></FormControl><FormMessage /></FormItem>
+                            )} />
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Section: Role & Access */}
+                      <Card>
+                        <CardContent className="p-5">
+                          <div className="flex items-center gap-2 mb-4">
+                            <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center">
+                              <Briefcase className="h-4 w-4 text-primary" />
+                            </div>
+                            <h3 className="text-sm font-semibold text-foreground">Role &amp; Access</h3>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <FormField control={editForm.control} name="role" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Role</FormLabel>
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <FormControl><SelectTrigger data-testid="select-user-role"><SelectValue /></SelectTrigger></FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="super_admin">Super Admin</SelectItem>
+                                    <SelectItem value="it_admin">IT Admin</SelectItem>
+                                    <SelectItem value="it_agent">IT Agent</SelectItem>
+                                    <SelectItem value="end_user">End User</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={editForm.control} name="status" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Status</FormLabel>
+                                <Select value={field.value} onValueChange={field.onChange} disabled={isEditingSelf}>
+                                  <FormControl><SelectTrigger data-testid="select-user-status"><SelectValue /></SelectTrigger></FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="active">Active</SelectItem>
+                                    <SelectItem value="inactive">Inactive</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                          </div>
+                          {isEditingSelf && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-center gap-1.5 mt-3">
+                              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                              You cannot deactivate your own account from here.
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      {/* Section: Organization */}
+                      <Card>
+                        <CardContent className="p-5">
+                          <div className="flex items-center gap-2 mb-4">
+                            <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center">
+                              <Building2 className="h-4 w-4 text-primary" />
+                            </div>
+                            <h3 className="text-sm font-semibold text-foreground">Organization</h3>
+                          </div>
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <FormField control={editForm.control} name="department" render={({ field }) => (
+                                <FormItem><FormLabel>Department</FormLabel><FormControl><Input placeholder="Engineering, HR…" {...field} data-testid="input-user-department" /></FormControl><FormMessage /></FormItem>
+                              )} />
+                              <FormField control={editForm.control} name="location" render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Location</FormLabel>
+                                  <FormControl>
+                                    <LocationSelect value={field.value ?? ""} onChange={field.onChange} />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )} />
+                            </div>
+                            <FormField control={editForm.control} name="reporting_manager" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Reporting Manager</FormLabel>
+                                <FormControl>
+                                  <ManagerSearchField
+                                    value={field.value ?? ""}
+                                    onChange={field.onChange}
+                                    users={users}
+                                    excludeEmail={eu.email}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* ── Footer ────────────────────────────────────────────── */}
+                    <DialogFooter className="px-6 py-4 border-t border-border/70 bg-muted/30 gap-2 sm:gap-2">
+                      <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving || resetSending}>Cancel</Button>
+                      <Button type="submit" disabled={editSaving || resetSending} data-testid="button-save-user" className="gap-2">
+                        {editSaving ? "Saving…" : (<><CheckSquare className="h-4 w-4" /> Save Changes</>)}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
