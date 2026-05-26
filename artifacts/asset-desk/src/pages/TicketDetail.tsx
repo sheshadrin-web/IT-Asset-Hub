@@ -128,10 +128,13 @@ export default function TicketDetail() {
         return "Unknown agent";
       };
 
+      // Note: pass effectiveAgent through as-is (including "") so the context
+      // can persist explicit "Unassigned" — `"" || null` maps to NULL in DB.
+      // Coercing to `undefined` here would silently skip the assignment update.
       await updateTicket(ticket.ticketId, {
         status:          effectiveStatus,
         priority:        effectivePriority,
-        assignedAgentId: effectiveAgent || undefined,
+        assignedAgentId: effectiveAgent,
         resolutionNote:  effectiveResolution,
       });
 
