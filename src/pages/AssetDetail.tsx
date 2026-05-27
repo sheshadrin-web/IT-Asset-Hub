@@ -41,6 +41,7 @@ const STATUS_COLORS: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
   Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
   Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Recovery Stage": "bg-red-500/15 text-red-600 border-red-500/30 font-semibold",
   "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
   Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
   Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
@@ -462,21 +463,46 @@ export default function AssetDetail() {
 
               {/* ── Mobile / Tab specific ────────────────── */}
               {(asset.assetType === "Mobile" || asset.assetType === "Tab") &&
-               (asset.imeiNumber || asset.imei2 || asset.simNumber || asset.phoneNumber) && (
+               (asset.imeiNumber || asset.imei2) && (
                 <div className="border-t border-border pt-4">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Mobile Details</p>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Device Identifiers</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                     {[
                       { label: "IMEI 1",        value: asset.imeiNumber },
                       { label: "IMEI 2",        value: asset.imei2 },
-                      { label: "SIM Number",    value: asset.simNumber },
-                      { label: "Phone Number",  value: asset.phoneNumber },
                     ].filter(f => f.value).map(f => (
                       <div key={f.label} className="flex items-start gap-3">
                         <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
                         <div>
                           <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
                           <p className="text-sm text-foreground mt-0.5 font-medium font-mono">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sim Card specific ────────────────────── */}
+              {asset.assetType === "Sim Card" && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sim Card Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "Provider",              value: asset.simProvider, mono: false },
+                      { label: "Official Mobile Number", value: asset.phoneNumber, mono: true },
+                      { label: "SIM Number (ICCID)",    value: asset.simNumber, mono: true },
+                      { label: "User Name",             value: asset.userName, mono: false },
+                      { label: "Use Case",              value: asset.useCase, mono: false },
+                      { label: "Billable Name",         value: asset.billableName, mono: false },
+                      { label: "Plan Name",             value: asset.planName, mono: false },
+                      { label: "Plan Amount",           value: asset.planAmount, mono: false },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className={cn("text-sm text-foreground mt-0.5 font-medium", f.mono && "font-mono")}>{f.value}</p>
                         </div>
                       </div>
                     ))}
@@ -517,6 +543,7 @@ export default function AssetDetail() {
                   {[
                     { icon: <Calendar />, label: "Purchase Date", value: asset.purchaseDate },
                     { icon: <MapPin />,   label: "Location",      value: asset.location },
+                    { icon: <Building />, label: "Ownership",     value: asset.ownership ?? "Miles" },
                     ...(asset.vendor   ? [{ icon: <Building />, label: "Vendor",      value: asset.vendor }]  : []),
                     ...(asset.invoice  ? [{ icon: <Tag />,      label: "Invoice No.", value: asset.invoice }] : []),
                   ].map(f => (

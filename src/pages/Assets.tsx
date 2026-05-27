@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { getAssetEmoji } from "@/lib/assetEmoji";
 import { Link } from "wouter";
 import {
   Plus, Search, Monitor, Smartphone, Tablet, Eye, Edit,
   UserPlus, Wrench, Archive, MoreHorizontal, X,
   Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
   RotateCcw, ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, CheckSquare, Package,
+  Users, CheckSquare, Package, Mail, Loader2,
 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,11 +37,15 @@ import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import {
+  ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES, MAIN_DEVICE_TYPES, getAssetEmoji,
+} from "@/lib/assetEmoji";
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
   Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
   Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Recovery Stage": "bg-red-500/15 text-red-600 border-red-500/30 font-semibold",
   "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
   Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
   Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
@@ -50,12 +54,22 @@ const STATUS_DOT: Record<AssetStatus, string> = {
   "In Procurement": "bg-orange-500",
   Available:        "bg-emerald-500",
   Assigned:         "bg-blue-500",
+  "Recovery Stage": "bg-red-600",
   "Under Repair":   "bg-amber-500",
   Lost:             "bg-red-500",
   Retired:          "bg-gray-400",
 };
 
-type ColKey = "assetId" | "location" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate";
+type ColKey = "assetId" | "location" | "assetType" | "brand" | "serialNumber" | "assignedTo" | "department" | "status" | "assignedAt" | "warrantyEndDate" | "ownership";
+
+const OWNERSHIP_BADGE: Record<string, string> = {
+  "Miles":           "bg-blue-50 text-blue-700 border-blue-200",
+  "Miles-GCC":       "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "Mojo":            "bg-violet-50 text-violet-700 border-violet-200",
+  "Rented":          "bg-amber-50 text-amber-700 border-amber-200",
+  "Employee Owned":  "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "Company Owned":   "bg-slate-50 text-slate-700 border-slate-200",
+};
 
 function getColValue(a: Asset, col: ColKey): string {
   switch (col) {
@@ -67,6 +81,7 @@ function getColValue(a: Asset, col: ColKey): string {
     case "assignedTo":      return a.assignedTo || "—";
     case "department":      return a.department || "—";
     case "status":          return a.status || "";
+    case "ownership":       return a.ownership || "Miles";
     case "assignedAt":      return a.assignedAt
       ? new Date(a.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
       : "—";
@@ -79,6 +94,7 @@ function makeEmptyColFilters(): Record<ColKey, Set<string>> {
     assetId: new Set(), location: new Set(), assetType: new Set(), brand: new Set(),
     serialNumber: new Set(), assignedTo: new Set(), department: new Set(),
     status: new Set(), assignedAt: new Set(), warrantyEndDate: new Set(),
+    ownership: new Set(),
   };
 }
 
@@ -90,6 +106,7 @@ const COL_DEFS: { label: string; key?: ColKey; align?: "left" | "right" }[] = [
   { label: "Serial Number", key: "serialNumber" },
   { label: "Status",        key: "status" },
   { label: "Warranty End",  key: "warrantyEndDate", align: "right" },
+  { label: "Ownership",     key: "ownership" },
   { label: "Assigned To",   key: "assignedTo" },
   { label: "Department",    key: "department" },
   { label: "Assigned Date", key: "assignedAt",      align: "right" },
@@ -124,7 +141,7 @@ function parseCsvText(text: string): ParsedRow[] {
     headers.forEach((h, j) => { row[h] = values[j] ?? ""; });
     const errors: string[] = [];
     if (!row.assetId) errors.push("assetId is required");
-    if (!["Laptop", "Mobile", "Desktop", "Tab"].includes(row.assetType ?? "")) errors.push("assetType must be Laptop, Mobile, Desktop, or Tab");
+    if (!ALL_ASSET_TYPES.includes(row.assetType as typeof ALL_ASSET_TYPES[number])) errors.push(`assetType must be one of: ${ALL_ASSET_TYPES.join(", ")}`);
     if (!row.brand) errors.push("brand is required");
     if (!row.model) errors.push("model is required");
     if (!row.serialNumber) errors.push("serialNumber is required");
@@ -135,11 +152,19 @@ function parseCsvText(text: string): ParsedRow[] {
       index: i + 1,
       data: {
         assetId:         row.assetId,
-        assetType:       (row.assetType as "Laptop" | "Mobile" | "Desktop" | "Tab") || "Laptop",
+        assetType:       (row.assetType as typeof ALL_ASSET_TYPES[number]) || "Laptop",
         brand:           row.brand,
         model:           row.model,
         serialNumber:    row.serialNumber,
         imeiNumber:      row.imeiNumber || undefined,
+        simProvider:     row.simProvider || undefined,
+        phoneNumber:     row.phoneNumber || undefined,
+        simNumber:       row.simNumber   || undefined,
+        userName:        row.userName    || undefined,
+        useCase:         row.useCase     || undefined,
+        billableName:    row.billableName || undefined,
+        planName:        row.planName    || undefined,
+        planAmount:      row.planAmount  || undefined,
         purchaseDate:    row.purchaseDate,
         warrantyEndDate: row.warrantyEndDate,
         status:          "Available" as AssetStatus,
@@ -161,7 +186,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement } = useAssets();
+  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -169,8 +194,10 @@ export default function Assets() {
   const [search, setSearch]           = useState("");
   const [typeFilter, setTypeFilter]     = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [userFilter, setUserFilter]     = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
+  const [ackFilter, setAckFilter]       = useState<"all" | "acknowledged" | "pending">("all");
+  const [sendingReminders, setSendingReminders] = useState(false);
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
   const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
@@ -187,11 +214,11 @@ export default function Assets() {
 
   const hasColFilters = Object.values(colFilters).some(s => s.size > 0);
   const hasAnyFilter  = search !== "" || typeFilter !== "all" || statusFilter !== "all"
-    || userFilter !== "all" || deptFilter !== "all" || hasColFilters;
+    || locationFilter !== "all" || deptFilter !== "all" || ackFilter !== "all" || hasColFilters;
 
   const clearAllFilters = () => {
     setSearch(""); setTypeFilter("all"); setStatusFilter("all");
-    setUserFilter("all"); setDeptFilter("all");
+    setLocationFilter("all"); setDeptFilter("all"); setAckFilter("all");
     setColFilters(makeEmptyColFilters());
   };
 
@@ -298,9 +325,14 @@ export default function Assets() {
       || (a.assignedEmail?.toLowerCase().includes(q) ?? false);
     const matchType   = typeFilter   === "all" || a.assetType === typeFilter;
     const matchStatus = statusFilter === "all" || a.status    === statusFilter;
-    const matchUser   = userFilter   === "all" || a.assignedEmail === userFilter || a.assignedEcode === userFilter;
-    const matchDept   = deptFilter   === "all" || (a.department ?? "") === deptFilter;
-    return matchSearch && matchType && matchStatus && matchUser && matchDept;
+    const matchLocation = locationFilter === "all" || (a.location ?? "") === locationFilter;
+    const matchDept     = deptFilter     === "all" || (a.department ?? "") === deptFilter;
+    // Ack filter only applies to Assigned assets; other statuses are excluded when filtering by ack state.
+    const matchAck =
+      ackFilter === "all"        ? true :
+      ackFilter === "acknowledged" ? (a.status === "Assigned" && !!a.acknowledged) :
+      /* pending */                  (a.status === "Assigned" && !a.acknowledged);
+    return matchSearch && matchType && matchStatus && matchLocation && matchDept && matchAck;
   });
 
   const filtered = baseFiltered.filter(a =>
@@ -322,7 +354,7 @@ export default function Assets() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, userFilter, deptFilter, colFilters]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, ackFilter, colFilters]);
 
   const paged          = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const pagedIds       = paged.map(a => a.assetId);
@@ -345,6 +377,83 @@ export default function Assets() {
   };
   const toggleRow = (id: string) => {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  // Selected assets that are Assigned + pending acknowledgement + have an email & ack token
+  const selectedPendingAck = paged
+    .concat(filtered.filter(a => selected.has(a.assetId) && !paged.some(p => p.assetId === a.assetId)))
+    .filter(a =>
+      selected.has(a.assetId) &&
+      a.status === "Assigned" &&
+      !a.acknowledged &&
+      !!a.assignedEmail &&
+      !!a.ackToken,
+    );
+
+  const handleSendReminders = async () => {
+    if (selectedPendingAck.length === 0) return;
+    setSendingReminders(true);
+    // Group by assignee email — one reminder per assignee covering all their pending assets
+    const groups = selectedPendingAck.reduce<Record<string, typeof selectedPendingAck>>((acc, a) => {
+      const key = (a.assignedEmail ?? "").toLowerCase();
+      (acc[key] ||= []).push(a);
+      return acc;
+    }, {});
+    let okGroups = 0;
+    let failGroups = 0;
+    const failReasons: string[] = [];
+    for (const [, groupAssets] of Object.entries(groups)) {
+      const first = groupAssets[0];
+      try {
+        const { data, error } = await supabase.functions.invoke("send-bulk-assignment-email", {
+          body: {
+            toEmail:    first.assignedEmail,
+            toName:     first.assignedTo ?? first.assignedEmail,
+            reason:     "Reminder: pending acknowledgement",
+            isReminder: "true",
+            assets: groupAssets.map(a => ({
+              assetId:         a.assetId,
+              assetType:       a.assetType,
+              brand:           a.brand,
+              model:           a.model,
+              serialNumber:    a.serialNumber,
+              processor:       a.processor,
+              ram:             a.ram,
+              storage:         a.storage,
+              operatingSystem: a.operatingSystem,
+              imei1:           a.imeiNumber,
+              imei2:           a.imei2,
+              phoneNumber:     a.phoneNumber,
+              simProvider:     a.simProvider,
+              accessories:     a.accessories,
+              ackToken:        a.ackToken,
+            })),
+          },
+        });
+        if (error) throw new Error(error.message);
+        const d = data as { success?: boolean; error?: string } | null;
+        if (d?.error) throw new Error(d.error);
+        okGroups++;
+      } catch (err) {
+        failGroups++;
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        if (failReasons.length < 2) failReasons.push(`${first.assignedEmail}: ${msg}`);
+      }
+    }
+    setSendingReminders(false);
+    if (failGroups === 0) {
+      toast({
+        title: `Reminder${okGroups > 1 ? "s" : ""} sent`,
+        description: `Sent to ${okGroups} assignee${okGroups > 1 ? "s" : ""} for ${selectedPendingAck.length} pending asset${selectedPendingAck.length > 1 ? "s" : ""}.`,
+      });
+      setSelected(new Set());
+    } else {
+      toast({
+        title: `Sent to ${okGroups}, failed for ${failGroups}`,
+        description: failReasons.join(" · ") || "Some reminders could not be sent.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -511,12 +620,12 @@ export default function Assets() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <div className="relative flex-1 min-w-[260px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by Asset ID, serial, model, or assigned user…"
-                className="pl-9" value={search}
+                className="pl-9 h-10 text-sm" value={search}
                 onChange={e => setSearch(e.target.value)}
                 data-testid="input-search-assets"
               />
@@ -527,49 +636,49 @@ export default function Assets() {
               )}
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-full sm:w-40" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
+              <SelectTrigger className="w-[160px] h-10 text-sm" data-testid="select-type-filter"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="Laptop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Laptop</span></SelectItem>
-                <SelectItem value="Mobile"><span className="flex items-center gap-2"><Smartphone className="h-3.5 w-3.5" /> Mobile</span></SelectItem>
-                <SelectItem value="Desktop"><span className="flex items-center gap-2"><Monitor className="h-3.5 w-3.5" /> Desktop</span></SelectItem>
-                <SelectItem value="Tab"><span className="flex items-center gap-2"><Tablet className="h-3.5 w-3.5" /> Tab</span></SelectItem>
+                {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                  <div key={label}>
+                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+                    {types.map(t => (
+                      <SelectItem key={t} value={t}>
+                        <span className="flex items-center gap-2"><span aria-hidden>{getAssetEmoji(t)}</span> {t}</span>
+                      </SelectItem>
+                    ))}
+                  </div>
+                ))}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectTrigger className="w-[170px] h-10 text-sm" data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {(["In Procurement","Available","Assigned","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
+                <SelectItem value="all">All Status</SelectItem>
+                {(["In Procurement","Available","Assigned","Recovery Stage","Under Repair","Lost","Retired"] as AssetStatus[]).map(s => (
                   <SelectItem key={s} value={s}>
                     <span className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", STATUS_DOT[s])} />{s}</span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {/* Assigned-to user filter — only shows users who have ≥1 assigned asset */}
-            <Select value={userFilter} onValueChange={setUserFilter}>
-              <SelectTrigger className="w-full sm:w-52" data-testid="select-user-filter">
-                <SelectValue placeholder="Assigned To" />
+            {/* Location filter — only shows locations that have ≥1 asset */}
+            <Select value={locationFilter} onValueChange={setLocationFilter}>
+              <SelectTrigger className="w-[190px] h-10 text-sm" data-testid="select-location-filter">
+                <SelectValue placeholder="Location" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Users</SelectItem>
-                {users
-                  .filter(u => assets.some(a => a.assignedEmail === u.email || a.assignedEcode === u.ecode))
-                  .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""))
-                  .map(u => (
-                    <SelectItem key={u.id} value={u.email}>
-                      <span className="flex flex-col leading-tight">
-                        <span className="font-medium">{u.full_name}</span>
-                        {u.ecode && <span className="text-xs text-muted-foreground font-mono">{u.ecode}</span>}
-                      </span>
-                    </SelectItem>
+                <SelectItem value="all">All Locations</SelectItem>
+                {[...new Set(assets.map(a => a.location).filter(Boolean))]
+                  .sort((a, b) => a.localeCompare(b))
+                  .map(loc => (
+                    <SelectItem key={loc} value={loc}>{loc}</SelectItem>
                   ))}
               </SelectContent>
             </Select>
             {/* Department filter — only shows departments that have ≥1 asset */}
             <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger className="w-full sm:w-48" data-testid="select-dept-filter">
+              <SelectTrigger className="w-[190px] h-10 text-sm" data-testid="select-dept-filter">
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
               <SelectContent>
@@ -579,6 +688,25 @@ export default function Assets() {
                   .map(dept => (
                     <SelectItem key={dept} value={dept!}>{dept}</SelectItem>
                   ))}
+              </SelectContent>
+            </Select>
+            {/* Acknowledgement filter */}
+            <Select value={ackFilter} onValueChange={(v) => setAckFilter(v as typeof ackFilter)}>
+              <SelectTrigger className="w-[220px] h-10 text-sm" data-testid="select-ack-filter">
+                <SelectValue placeholder="Acknowledgement" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Acknowledgement</SelectItem>
+                <SelectItem value="acknowledged">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Acknowledged
+                  </span>
+                </SelectItem>
+                <SelectItem value="pending">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-orange-500" /> Pending Acknowledgement
+                  </span>
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -711,7 +839,18 @@ export default function Assets() {
                       </td>
                       {/* Warranty End — col 6 */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{asset.warrantyEndDate}</td>
-                      {/* Assigned To — col 7 */}
+                      {/* Ownership — col 7 */}
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const own = asset.ownership || "Miles";
+                          return (
+                            <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap", OWNERSHIP_BADGE[own] ?? OWNERSHIP_BADGE["Miles"])}>
+                              {own}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      {/* Assigned To — col 8 */}
                       <td className="px-4 py-3">
                         {(() => {
                           const displayName = asset.assignedTo;
@@ -735,8 +874,8 @@ export default function Assets() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-0.5 mt-0.5">
-                                    <svg className="h-2.5 w-2.5 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
-                                    <span className="text-[10px] text-amber-600 font-semibold">Pending Ack</span>
+                                    <svg className="h-2.5 w-2.5 text-orange-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                                    <span className="text-[10px] text-orange-600 font-semibold">Pending Acknowledgement</span>
                                   </div>
                                 )}
                               </div>
@@ -851,6 +990,24 @@ export default function Assets() {
           </div>
           <div className="h-4 w-px bg-border" />
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>Clear</Button>
+          {ackFilter === "pending" && (
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-2 bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={handleSendReminders}
+              disabled={sendingReminders || selectedPendingAck.length === 0}
+              data-testid="button-send-reminder-emails"
+            >
+              {sendingReminders
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Mail className="h-3.5 w-3.5" />}
+              {sendingReminders
+                ? "Sending…"
+                : `Send Reminder Email${selectedPendingAck.length > 1 ? "s" : ""}` +
+                  (selectedPendingAck.length ? ` (${selectedPendingAck.length})` : "")}
+            </Button>
+          )}
           <Button size="sm" variant="destructive" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
             <Trash2 className="h-3.5 w-3.5" /> Delete {selectedCount}
           </Button>
@@ -1163,7 +1320,7 @@ export default function Assets() {
 
               {/* Type chips + search */}
               <div className="flex items-center gap-2 flex-wrap">
-                {["All", "Laptop", "Mobile", "Desktop", "Tab"].map(t => (
+                {["All", ...MAIN_DEVICE_TYPES].map(t => (
                   <button key={t} type="button"
                     onClick={() => setBulkTypeFilter(t)}
                     className={cn(

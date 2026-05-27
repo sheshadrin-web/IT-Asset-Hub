@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getAssetEmoji } from "@/lib/assetEmoji";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Check, ChevronsUpDown } from "lucide-react";
 import {
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
@@ -10,14 +11,17 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Laptop, Smartphone, Monitor, Tablet } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
 import LocationSelect from "@/components/LocationSelect";
+import { ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES } from "@/lib/assetEmoji";
+import { ASSET_OWNERSHIP_OPTIONS } from "@/data/mockData";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
-  assetType:       z.enum(["Laptop", "Mobile", "Desktop", "Tab"]),
+  assetType:       z.enum(ALL_ASSET_TYPES as unknown as [string, ...string[]]),
   brand:           z.string().min(1, "Brand is required"),
   model:           z.string().min(1, "Model is required"),
   serialNumber:    z.string().min(1, "Serial number is required"),
@@ -31,6 +35,13 @@ export const assetFormSchema = z.object({
   imei2:           z.string().optional(),
   simNumber:       z.string().optional(),
   phoneNumber:     z.string().optional(),
+  // Sim Card
+  simProvider:     z.string().optional(),
+  userName:        z.string().optional(),
+  useCase:         z.string().optional(),
+  billableName:    z.string().optional(),
+  planName:        z.string().optional(),
+  planAmount:      z.string().optional(),
   // Desktop
   monitorBrand:    z.string().optional(),
   monitorModel:    z.string().optional(),
@@ -45,6 +56,7 @@ export const assetFormSchema = z.object({
   warrantyEndDate: z.string().min(1, "Warranty end date is required"),
   vendor:          z.string().optional(),
   invoice:         z.string().optional(),
+  ownership:       z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
   location:        z.string().min(1, "Location is required"),
   department:      z.string().optional(),
   accessories:     z.string().optional(),
@@ -122,10 +134,12 @@ export default function AssetForm({
       brand: "", model: "", serialNumber: "", productNumber: "",
       processor: "", ram: "", operatingSystem: "",
       imeiNumber: "", imei2: "", simNumber: "", phoneNumber: "",
+      simProvider: "", userName: "", useCase: "", billableName: "", planName: "", planAmount: "",
       monitorBrand: "", monitorModel: "", monitorSize: "",
       keyboard: "", mouse: "", cpu: "", others: "",
       storage: "", purchaseDate: "", warrantyEndDate: "",
-      vendor: "", invoice: "", location: "", department: "",
+      vendor: "", invoice: "", ownership: "Miles",
+      location: "", department: "",
       accessories: "", remarks: "",
       ...defaultValues,
     },
@@ -136,11 +150,17 @@ export default function AssetForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(defaultValues)]);
 
+  const [typeOpen, setTypeOpen] = useState(false);
   const assetType = form.watch("assetType");
   const isLaptop  = assetType === "Laptop";
   const isMobile  = assetType === "Mobile";
   const isDesktop = assetType === "Desktop";
   const isTab     = assetType === "Tab";
+  const isCPU     = assetType === "CPU";
+  const isSimCard = assetType === "Sim Card";
+  const showComputerSpecs = isLaptop || isCPU || isDesktop;
+  // Suppress unused warnings — these flags are referenced in conditional sections below.
+  void isLaptop; void isMobile; void isDesktop; void isTab; void isCPU; void isSimCard; void showComputerSpecs;
 
   return (
     <Form {...form}>
@@ -172,27 +192,64 @@ export default function AssetForm({
 
         {/* Asset Type */}
         <Section title="Asset Type">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {(["Laptop", "Mobile", "Desktop", "Tab"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => !assetIdReadOnly && form.setValue("assetType", type, { shouldValidate: true })}
-                disabled={assetIdReadOnly}
-                className={cn(
-                  "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all",
-                  assetType === type
-                    ? "border-primary bg-primary/5 text-primary"
-                    : "border-border hover:border-muted-foreground/40 text-muted-foreground",
-                  assetIdReadOnly && "cursor-not-allowed opacity-60"
-                )}
-                data-testid={`type-selector-${type.toLowerCase()}`}
-              >
-                <span className="text-3xl leading-none" aria-hidden>{getAssetEmoji(type)}</span>
-                <span className="text-sm font-semibold">{type}</span>
-              </button>
-            ))}
-          </div>
+          <FormField control={form.control} name="assetType" render={({ field }) => (
+            <FormItem className="flex flex-col">
+              <FormLabel>Type <span className="text-destructive">*</span></FormLabel>
+              <Popover open={typeOpen} onOpenChange={setTypeOpen}>
+                <PopoverTrigger asChild>
+                  <FormControl>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      disabled={assetIdReadOnly}
+                      className={cn("w-full justify-between font-normal", !field.value && "text-muted-foreground")}
+                      data-testid="select-asset-type"
+                    >
+                      {field.value
+                        ? <span className="flex items-center gap-2"><span aria-hidden>{getAssetEmoji(field.value)}</span>{field.value}</span>
+                        : "Select asset type"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </FormControl>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-[--radix-popover-trigger-width] p-0"
+                  align="start"
+                  side="bottom"
+                  sideOffset={4}
+                  avoidCollisions={false}
+                >
+                  <Command>
+                    <CommandInput placeholder="Search asset type…" />
+                    <CommandList className="max-h-72 overflow-y-auto">
+                      <CommandEmpty>No asset type found.</CommandEmpty>
+                      {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                        <CommandGroup key={label} heading={label}>
+                          {types.map((t) => (
+                            <CommandItem
+                              key={t}
+                              value={t}
+                              onSelect={() => {
+                                field.onChange(t);
+                                setTypeOpen(false);
+                              }}
+                            >
+                              <span className="mr-2" aria-hidden>{getAssetEmoji(t)}</span>
+                              <span>{t}</span>
+                              <Check className={cn("ml-auto h-4 w-4", field.value === t ? "opacity-100" : "opacity-0")} />
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <FormDescription className="text-xs">Choose the category that best describes this asset.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )} />
         </Section>
 
         {/* Device Identification */}
@@ -230,8 +287,8 @@ export default function AssetForm({
           </div>
         </Section>
 
-        {/* ── Laptop Specs ─────────────────────────────────────────────── */}
-        {isLaptop && (
+        {/* ── Computer Specs (Laptop / CPU / Desktop) ──────────────────── */}
+        {showComputerSpecs && (
           <Section title="Hardware Specifications">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField control={form.control} name="processor" render={({ field }) => (
@@ -329,20 +386,6 @@ export default function AssetForm({
                   <FormMessage />
                 </FormItem>
               )} />
-              <FormField control={form.control} name="simNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>SIM Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="SIM card number / ICCID" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="Assigned phone number" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
@@ -355,6 +398,78 @@ export default function AssetForm({
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+          </Section>
+        )}
+
+        {/* ── Sim Card Details ─────────────────────────────────────────── */}
+        {isSimCard && (
+          <Section title="Sim Card Details">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField control={form.control} name="simProvider" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Provider</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger data-testid="select-sim-provider"><SelectValue placeholder="Select provider" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {["Airtel", "Jio", "Vodafone"].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Official Mobile Number</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. 9876543210" data-testid="input-official-mobile" /></FormControl>
+                  <FormDescription className="text-xs">Connection / phone number — shown in assignment email.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="simNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SIM Number (ICCID)</FormLabel>
+                  <FormControl><Input {...field} placeholder="19/20-digit SIM card number" /></FormControl>
+                  <FormDescription className="text-xs">Internal use only — not included in the assignment email.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="userName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>User Name (on bill)</FormLabel>
+                  <FormControl><Input {...field} placeholder="Name registered on telecom bill" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="useCase" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Use Case</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Sales, Support, Field Ops" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="billableName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Billable Name</FormLabel>
+                  <FormControl><Input {...field} placeholder="Entity billed for the connection" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="planName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Plan Name</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Postpaid 499, Corporate CUG" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="planAmount" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Plan Amount</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. ₹499 / month" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -412,20 +527,6 @@ export default function AssetForm({
                   <FormLabel>IMEI (Cellular)</FormLabel>
                   <FormControl><Input {...field} placeholder="IMEI if cellular-enabled tab" data-testid="input-imei" /></FormControl>
                   <FormDescription className="text-xs">Leave blank for Wi-Fi-only tablets</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="simNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>SIM Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="SIM card number / ICCID" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone / Data Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="Assigned number (if any)" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -577,6 +678,23 @@ export default function AssetForm({
               <FormItem>
                 <FormLabel>Invoice Number</FormLabel>
                 <FormControl><Input {...field} placeholder="Invoice or PO number" /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="ownership" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Ownership</FormLabel>
+                <Select value={field.value || "Miles"} onValueChange={field.onChange}>
+                  <FormControl>
+                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Miles" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {ASSET_OWNERSHIP_OPTIONS.map(o => (
+                      <SelectItem key={o} value={o}>{o}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormDescription className="text-xs">Who owns this asset</FormDescription>
                 <FormMessage />
               </FormItem>
             )} />
