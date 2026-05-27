@@ -24,6 +24,7 @@ import { AssetStatus } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import DeviceAgentCard from "@/components/DeviceAgentCard";
 
 interface HistoryRow {
   id:           string;
@@ -769,6 +770,9 @@ export default function AssetDetail() {
               <div className="flex justify-between"><span className="text-muted-foreground">Expires</span><span className="font-medium">{asset.warrantyEndDate}</span></div>
             </CardContent>
           </Card>
+
+          {/* ── Device Agent (Laptops only) ───────────────── */}
+          {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} />}
 
           {/* ── User History ──────────────────────────────── */}
           <Card>
