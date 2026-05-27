@@ -130,6 +130,17 @@ export default function DeviceAgentCard({ assetId }: Props) {
       `.\\miles-agent.exe register`,
       `.\\miles-agent.exe sync`,
     ].join("\n");
+  const installCmdMac = (tok: string) =>
+    [
+      `cd ~/Downloads`,
+      `[ -f miles-agent-macos ] || { echo "ERROR: miles-agent-macos not found. Please download the agent first."; exit 1; }`,
+      `chmod +x miles-agent-macos`,
+      `xattr -d com.apple.quarantine miles-agent-macos 2>/dev/null || true`,
+      `export MILES_AGENT_TOKEN="${tok}"`,
+      `./miles-agent-macos register`,
+      `./miles-agent-macos sync`,
+      `./miles-agent-macos install-service`,
+    ].join("\n");
   const installCmdPy = (tok: string) =>
     `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register\npython laptop_agent.py sync`;
 
@@ -209,23 +220,34 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
             <div className="border-t pt-3 mt-2">
               <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
-              <Button
-                asChild
-                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                data-testid="button-download-windows-agent"
-              >
-                <a href="/agent/miles-agent.exe" download="miles-agent.exe">
-                  <Download className="h-4 w-4" /> Download Windows Agent (.exe)
-                </a>
-              </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Button
+                  asChild
+                  className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  data-testid="button-download-windows-agent"
+                >
+                  <a href="/agent/miles-agent.exe" download="miles-agent.exe">
+                    <Download className="h-4 w-4" /> Download Windows Agent (.exe)
+                  </a>
+                </Button>
+                <Button
+                  asChild
+                  className="w-full gap-2 bg-slate-800 hover:bg-slate-900 text-white"
+                  data-testid="button-download-macos-agent"
+                >
+                  <a href="/agent/miles-agent-macos" download="miles-agent-macos">
+                    <Download className="h-4 w-4" /> Download macOS Agent
+                  </a>
+                </Button>
+              </div>
               <p className="text-[11px] text-muted-foreground mt-1.5">
-                Saves as <span className="font-mono">miles-agent.exe</span> in your Downloads folder.
-                Then click <b>Generate Agent Key</b> above and follow the install steps.
+                Standalone binaries — no Python needed. After download, click <b>Generate Agent Key</b> above
+                and follow the install steps for your OS.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button asChild size="sm" variant="outline" className="gap-2">
                   <a href="/agent/laptop_agent.py" download="laptop_agent.py">
-                    <Download className="h-4 w-4" /> Python script (macOS / Linux)
+                    <Download className="h-4 w-4" /> Python script (Linux / advanced)
                   </a>
                 </Button>
                 <Button asChild size="sm" variant="ghost" className="gap-2">
@@ -278,11 +300,39 @@ export default function DeviceAgentCard({ assetId }: Props) {
             <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[11px] text-sky-900">
               <p className="font-semibold mb-1">Before you paste:</p>
               <ol className="list-decimal ml-4 space-y-0.5">
-                <li>Click <b>Download Windows Agent (.exe)</b> on this page (file lands in <span className="font-mono">Downloads</span>).</li>
-                <li>If SmartScreen blocks it: <b>More info → Run anyway</b>.</li>
-                <li>Open <b>Command Prompt</b> or <b>PowerShell</b> as <b>Administrator</b>.</li>
-                <li>Paste the matching command below.</li>
+                <li><b>Windows:</b> click <b>Download Windows Agent (.exe)</b> → if SmartScreen blocks it, <b>More info → Run anyway</b> → open <b>Command Prompt</b> or <b>PowerShell</b> <i>as Administrator</i>.</li>
+                <li><b>macOS:</b> click <b>Download macOS Agent</b> → open <b>Terminal</b> (Applications → Utilities). The install command handles Gatekeeper quarantine automatically.</li>
+                <li>Paste the matching command below for your OS.</li>
               </ol>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Install Command — macOS (Terminal)
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => newToken && copy(installCmdMac(newToken), "macOS install command")}
+                  data-testid="button-copy-install-mac"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <textarea
+                readOnly
+                value={newToken ? installCmdMac(newToken) : ""}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={8}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Registers, runs a test sync, then installs a <b>launchd</b> background service so the agent
+                auto-starts on login and syncs every 5 minutes. To remove later:
+                <span className="font-mono"> ~/Library/Application\ Support/MilesAgent/miles-agent uninstall-service</span>
+              </p>
             </div>
 
             <div>

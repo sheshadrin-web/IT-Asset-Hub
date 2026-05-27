@@ -371,6 +371,104 @@ def run_loop() -> int:
         time.sleep(SYNC_INTERVAL_SEC)
 
 
+# ── service install (auto-start after reboot) ───────────────────────────────
+MAC_PLIST_LABEL = "com.miles.agent"
+MAC_PLIST_PATH  = os.path.expanduser(f"~/Library/LaunchAgents/{MAC_PLIST_LABEL}.plist")
+MAC_INSTALL_DIR = os.path.expanduser("~/Library/Application Support/MilesAgent")
+MAC_LOG_OUT     = os.path.expanduser("~/Library/Logs/miles-agent.out.log")
+MAC_LOG_ERR     = os.path.expanduser("~/Library/Logs/miles-agent.err.log")
+
+
+def _xml_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;")
+             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def install_service_mac() -> int:
+    """Install a per-user launchd agent that runs `miles-agent run` and survives reboot."""
+    if not TOKEN:
+        print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
+              file=sys.stderr)
+        return 2
+
+    os.makedirs(MAC_INSTALL_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(MAC_PLIST_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(MAC_LOG_OUT), exist_ok=True)
+
+    # Copy current binary into a stable location so Downloads can be cleaned later.
+    src = os.path.abspath(sys.argv[0])
+    dst = os.path.join(MAC_INSTALL_DIR, "miles-agent")
+    if os.path.abspath(src) != os.path.abspath(dst):
+        shutil.copy2(src, dst)
+    os.chmod(dst, 0o755)
+
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{MAC_PLIST_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{_xml_escape(dst)}</string>
+    <string>run</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MILES_AGENT_TOKEN</key><string>{_xml_escape(TOKEN)}</string>
+    <key>MILES_AGENT_API_BASE</key><string>{_xml_escape(API_BASE)}</string>
+    <key>MILES_AGENT_SYNC_INTERVAL</key><string>{SYNC_INTERVAL_SEC}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{_xml_escape(MAC_LOG_OUT)}</string>
+  <key>StandardErrorPath</key><string>{_xml_escape(MAC_LOG_ERR)}</string>
+</dict>
+</plist>
+"""
+    with open(MAC_PLIST_PATH, "w") as fh:
+        fh.write(plist)
+    os.chmod(MAC_PLIST_PATH, 0o644)
+
+    # Reload (unload-then-load; ignore "Could not find specified service")
+    subprocess.run(["launchctl", "unload", MAC_PLIST_PATH],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    r = subprocess.run(["launchctl", "load", "-w", MAC_PLIST_PATH],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if r.returncode != 0:
+        print("ERROR: launchctl load failed:", r.stderr.decode(errors="ignore"), file=sys.stderr)
+        return 1
+
+    print(f"✓ Service '{MAC_PLIST_LABEL}' installed and started.")
+    print(f"  Binary:   {dst}")
+    print(f"  Plist:    {MAC_PLIST_PATH}")
+    print(f"  Logs:     {MAC_LOG_OUT}")
+    print(f"  Sync every: {SYNC_INTERVAL_SEC} seconds (auto-starts on login)")
+    return 0
+
+
+def uninstall_service_mac() -> int:
+    if os.path.exists(MAC_PLIST_PATH):
+        subprocess.run(["launchctl", "unload", MAC_PLIST_PATH],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.remove(MAC_PLIST_PATH)
+    if os.path.isdir(MAC_INSTALL_DIR):
+        shutil.rmtree(MAC_INSTALL_DIR, ignore_errors=True)
+    print("✓ Service uninstalled.")
+    return 0
+
+
+def install_service() -> int:
+    if IS_MAC:  return install_service_mac()
+    if IS_LIN:  print("Linux service install: run `./miles-agent run` under systemd or cron.", file=sys.stderr); return 2
+    if IS_WIN:  print("Windows: use Task Scheduler or run `miles-agent.exe run` from a startup script.", file=sys.stderr); return 2
+    print("Unsupported platform for service install.", file=sys.stderr); return 2
+
+
+def uninstall_service() -> int:
+    if IS_MAC: return uninstall_service_mac()
+    print("Service uninstall not implemented for this platform.", file=sys.stderr); return 2
+
+
 def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     if cmd == "register": return register()
@@ -378,7 +476,9 @@ def main() -> int:
         print(json.dumps(_post("/sync", {"payload": collect_system_info()}), indent=2)); return 0
     if cmd == "info":
         print(json.dumps(collect_system_info(), indent=2)); return 0
-    if cmd == "run":      return run_loop()
+    if cmd == "run":               return run_loop()
+    if cmd == "install-service":   return install_service()
+    if cmd == "uninstall-service": return uninstall_service()
     print(f"unknown command: {cmd}", file=sys.stderr); return 2
 
 
