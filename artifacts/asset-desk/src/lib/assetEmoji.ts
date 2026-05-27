@@ -10,6 +10,7 @@ export const ASSET_TYPE_EMOJI: Record<string, string> = {
   Mobile:           "📱",
   Tab:              "📲",
   Tablet:           "📲",
+  "Sim Card":       "🪪",
   Camera:           "📷",
   CPU:              "🧠",
   "Generic Asset":  "📦",
@@ -38,7 +39,7 @@ export function getAssetEmoji(type?: string | null): string {
 
 // ─── Category groupings ───────────────────────────────────────────────────────
 export const MAIN_DEVICE_TYPES = [
-  "Laptop", "Desktop", "Monitor", "Mobile", "Tab", "Camera", "CPU", "Generic Asset",
+  "Laptop", "Desktop", "Monitor", "Mobile", "Tab", "Sim Card", "Camera", "CPU", "Generic Asset",
 ] as const;
 
 export const ACCESSORY_TYPES = [

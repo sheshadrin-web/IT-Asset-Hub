@@ -96,6 +96,15 @@ const COL_ALIASES: Record<string, string[]> = {
   employeeName:    ["employeename","assignedto","username","empname","employeefullname","employeenameassigned","name","fullname","user"],
   employeeCode:    ["employeecode","empcode","employeeid","empid","ecode","employeeno","empno","mpe","mpecode","employeeidcode"],
   department:      ["employeedepartment","department","dept","empdepartment","division"],
+  // Sim Card columns
+  simProvider:     ["provider","simprovider","telecomprovider","operator","carrier","network"],
+  phoneNumber:     ["connection","officialmobilenumber","officialmobileno","phonenumber","phoneno","mobilenumber","mobileno","mobile","contactnumber","number"],
+  simIccid:        ["simnumber","simno","iccid","simcardno","simcardnumber","sim"],
+  simUserName:     ["username","useronbill","billuser","billingname","customername"],
+  useCase:         ["usecase","purpose","usage","businessusecase"],
+  billableName:    ["billablename","billable","billtoname","billto","entity","billingentity","customerid"],
+  planName:        ["planname","plan","planpack","tariff","tariffplan","pack"],
+  planAmount:      ["planamount","amount","planprice","price","monthlyrent","rent","planrental","rental","unit"],
 };
 
 // Normalize aliases at lookup time so mixed-case aliases always match
@@ -108,11 +117,13 @@ function findCol(headers: string[], field: string): string | undefined {
 function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
   // Asset ID prefix is the most reliable signal — always check it first.
   const aid = assetIdFallback.toUpperCase();
-  if (/-MOB-|-PHN-/.test(aid))        return "Mobile";
-  if (/-TAB-/.test(aid))              return "Tab";
-  if (/-DES-|-DSK-/.test(aid))        return "Desktop";
-  if (/-LAP-/.test(aid))              return "Laptop";
-  if (/-MON-/.test(aid))              return "Monitor";
+  // Accept either bare prefix ("SIM-001") or compound prefix ("MILES-SIM-001").
+  if (/(^|-)SIM-/.test(aid))          return "Sim Card";
+  if (/(^|-)(MOB|PHN)-/.test(aid))    return "Mobile";
+  if (/(^|-)TAB-/.test(aid))          return "Tab";
+  if (/(^|-)(DES|DSK)-/.test(aid))    return "Desktop";
+  if (/(^|-)LAP-/.test(aid))          return "Laptop";
+  if (/(^|-)MON-/.test(aid))          return "Monitor";
   if (/-KBD-|-KEY-/.test(aid))        return "Keyboard";
   if (/-MOU-|-MSE-/.test(aid))        return "Mouse";
   if (/-HSE-|-HDS-/.test(aid))        return "Headset";
@@ -136,6 +147,7 @@ function mapAssetType(raw: string, assetIdFallback = ""): AssetType {
   if (v.includes("laptop") || v.includes("notebook"))      return "Laptop";
   if (v.includes("desk"))                                  return "Desktop";
   if (v === "tab" || v.includes("tablet"))                 return "Tab";
+  if (v.includes("sim card") || v === "sim" || v.includes("simcard")) return "Sim Card";
   if (v.includes("mob") || v.includes("phone"))            return "Mobile";
   if (v.includes("monitor") || v.includes("display"))      return "Monitor";
   if (v.includes("keyboard"))                              return "Keyboard";
@@ -268,13 +280,22 @@ interface MappedRow {
   ownership:       string;
   remarks:         string;
   employeeCode:    string;
+  // Sim Card fields
+  simProvider:     string;
+  phoneNumber:     string;
+  simNumber:       string;
+  simUserName:     string;
+  useCase:         string;
+  billableName:    string;
+  planName:        string;
+  planAmount:      string;
   warnings:        string[];
   errors:          string[];
 }
 
 // ─── Asset-tag prefix per type (matches mapAssetType regex above) ────────────
 const TAG_PREFIX: Record<string, string> = {
-  Laptop:"LAP", Desktop:"DES", Mobile:"MOB", Tab:"TAB", CPU:"CPU",
+  Laptop:"LAP", Desktop:"DES", Mobile:"MOB", Tab:"TAB", "Sim Card":"SIM", CPU:"CPU",
   Monitor:"MON", Keyboard:"KBD", Mouse:"MOU", Headset:"HSE", "Hard Disk":"HDD",
   Speaker:"SPK", "Docking Station":"DCK", Printer:"PRN",
   Router:"RTR", Server:"SRV", "Network Device":"NET", Firewall:"FW",
@@ -283,11 +304,12 @@ const TAG_PREFIX: Record<string, string> = {
 };
 
 // Column-set categories that drive the generated template
-type ColumnSet = "computer" | "mobile" | "tab" | "monitor" | "simple" | "network";
+type ColumnSet = "computer" | "mobile" | "tab" | "sim" | "monitor" | "simple" | "network";
 const COLUMN_SET: Partial<Record<AssetType, ColumnSet>> = {
   Laptop:"computer", Desktop:"computer", CPU:"computer", Server:"computer",
   Mobile:"mobile",
   Tab:"tab",
+  "Sim Card":"sim",
   Monitor:"monitor",
   Router:"network", "Network Device":"network", Firewall:"network",
 };
@@ -324,6 +346,15 @@ const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; 
       "MILES-DES-003,Lenovo,ThinkCentre M90q,SN22347,Hyderabad,Windows,Intel i9 12th Gen,64,1024,2022,Expired,Fair,Under Repair,,,,",
     ],
   },
+  "Sim Card": {
+    filename: "sim_card_import_template.csv",
+    headers: ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"],
+    rows: [
+      "SIM-001,Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,2025,Under Warranty,Assigned,John Doe,MPE1234,Sales",
+      "SIM-002,Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,2025,Under Warranty,Available,,,",
+      "SIM-003,Vodafone,9876500002,8991200123456789012,Jane Smith,Support,Miles Education Pvt Ltd,Postpaid 399,399,Hyderabad,2024,Under Warranty,Assigned,Jane Smith,MPE5678,Support",
+    ],
+  },
   Tab: {
     filename: "tab_import_template.csv",
     headers: ["Asset Tag","Brand","Model","Serial Number","Location","OS","RAM","ROM","IMEI","Purchase Year","Warranty","Asset Condition","Asset Status","Employee Name","Employee Code","Employee Department"],
@@ -358,6 +389,13 @@ function buildGenericTemplate(type: AssetType): { headers: string[]; rows: strin
     return { filename: `${type.toLowerCase()}_import_template.csv`, headers, rows: [
       `${tag(1)},Samsung,Sample Model,354812345678901,354812345678902,Mumbai,2024,Under Warranty,Assigned,John Doe,MPE1234,Sales`,
       `${tag(2)},Apple,Sample Model,356789012345678,,Bangalore,2025,Under Warranty,Available,,,,`,
+    ]};
+  }
+  if (set === "sim") {
+    const headers = ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"];
+    return { filename: `sim_card_import_template.csv`, headers, rows: [
+      `${tag(1)},Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,2025,Under Warranty,Assigned,John Doe,MPE1234,Sales`,
+      `${tag(2)},Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,2025,Under Warranty,Available,,,`,
     ]};
   }
   if (set === "tab") {
@@ -431,6 +469,8 @@ interface ImportedAssigned {
   operatingSystem: string;
   imei1:           string;
   imei2:           string;
+  phoneNumber:     string;
+  simProvider:     string;
   accessories:     string;
   assignedEmail:   string;
   assignedName:    string;
@@ -526,18 +566,37 @@ export default function BulkImport() {
         const assetId   = get(row, "assetId");
         const assetType = mapAssetType(get(row, "assetType"), assetId);
         const isMobile  = assetType === "Mobile";
+        const isSimCard = assetType === "Sim Card";
 
         // For mobile/phone: use IMEI columns; for laptop/desktop: use serial number
         const rawImei1  = get(row, "imei1") || (isMobile ? get(row, "serialNumber") : "");
         const rawImei2  = get(row, "imei2");
-        const serialNumber = isMobile ? rawImei1 : get(row, "serialNumber");
+        // Sim Card fields
+        const simProvider  = get(row, "simProvider");
+        const phoneNumber  = get(row, "phoneNumber");
+        const simIccid     = get(row, "simIccid");
+        const simUserName  = get(row, "simUserName") || get(row, "employeeName");
+        const useCase      = get(row, "useCase");
+        const billableName = get(row, "billableName");
+        const planName     = get(row, "planName");
+        const planAmount   = get(row, "planAmount");
+
+        // Sim Card uses Connection (Official Mobile Number) as its primary identifier in lieu of serial.
+        const serialNumber = isMobile ? rawImei1 : (isSimCard ? (phoneNumber || simIccid) : get(row, "serialNumber"));
+        // Sim Card rows don't need a hardware brand/model — synthesize from provider so validation passes.
+        const effectiveBrand = brand || (isSimCard ? (simProvider || "SIM") : brand);
+        const effectiveModel = model || (isSimCard ? (planName || "SIM") : model);
 
         if (!assetId) errors.push("Asset ID / Tag is required");
-        if (!brand)   errors.push("Brand is required");
+        if (!effectiveBrand) errors.push("Brand is required");
         if (assetTypeFilter && assetType !== assetTypeFilter)
           errors.push(`Wrong type: this is a ${assetType}, not a ${assetTypeFilter} — will be skipped`);
         if (isMobile && !rawImei1)     warnings.push("IMEI 1 missing");
-        else if (!isMobile && !serialNumber && !get(row, "model")) warnings.push("Serial number missing");
+        else if (isSimCard) {
+          if (!phoneNumber) warnings.push("Connection / Official Mobile Number missing");
+          if (!simProvider) warnings.push("Provider missing (Airtel / Jio / Vodafone)");
+        }
+        else if (!serialNumber && !get(row, "model")) warnings.push("Serial number missing");
         if (!purchaseDate) warnings.push("Could not parse purchase date");
         if (status === "Assigned" && !matchedUser && (empCode || empName))
           warnings.push(`Employee "${empCode || empName}" not found in system — will store name only`);
@@ -547,11 +606,19 @@ export default function BulkImport() {
           rowNum:          idx + 2,
           assetId,
           assetType,
-          brand,
-          model:           model || brand,
+          brand:           effectiveBrand,
+          model:           effectiveModel || effectiveBrand,
           serialNumber,
           imei1:           rawImei1,
           imei2:           rawImei2,
+          simProvider,
+          phoneNumber,
+          simNumber:       simIccid,
+          simUserName,
+          useCase,
+          billableName,
+          planName,
+          planAmount,
           operatingSystem: get(row, "operatingSystem"),
           processor:       get(row, "processor"),
           ram:             normSize(get(row, "ram")),
@@ -628,8 +695,14 @@ export default function BulkImport() {
         ram:               r.ram              || "",
         operating_system:  r.operatingSystem  || "",
         storage:           r.storage          || "",
-        sim_number:        "",
-        phone_number:      "",
+        sim_number:        r.assetType === "Sim Card" ? (r.simNumber   || "") : "",
+        phone_number:      r.assetType === "Sim Card" ? (r.phoneNumber || "") : "",
+        sim_provider:      r.assetType === "Sim Card" ? (r.simProvider  || null) : null,
+        user_name:         r.assetType === "Sim Card" ? (r.simUserName  || null) : null,
+        use_case:          r.assetType === "Sim Card" ? (r.useCase      || null) : null,
+        billable_name:     r.assetType === "Sim Card" ? (r.billableName || null) : null,
+        plan_name:         r.assetType === "Sim Card" ? (r.planName     || null) : null,
+        plan_amount:       r.assetType === "Sim Card" ? (r.planAmount   || null) : null,
         vendor:            r.vendor           || "",
         ownership:         r.ownership        || "Miles",
         invoice:           "",
@@ -674,6 +747,8 @@ export default function BulkImport() {
           operatingSystem: r.operatingSystem,
           imei1:           r.imei1,
           imei2:           r.imei2,
+          phoneNumber:     r.phoneNumber,
+          simProvider:     r.simProvider,
           accessories:     "",
           assignedEmail:   r.assignedEmail,
           assignedName:    r.assignedName,
@@ -810,6 +885,7 @@ export default function BulkImport() {
                 computer:"OS, processor, RAM, storage + serial number",
                 mobile:  "IMEI 1 & IMEI 2 columns (no serial number)",
                 tab:     "OS, RAM, storage + optional IMEI",
+                sim:     "Provider, Connection (Official Mobile No), SIM Number, plan details",
                 monitor: "Screen size & resolution",
                 network: "IP address & firmware",
                 simple:  "Basic asset details (brand, model, serial)",
@@ -1221,6 +1297,8 @@ function PendingAckPanel({ items, setItems, markAcknowledged, toast }: PendingAc
             operatingSystem: a.operatingSystem,
             imei1:           a.imei1,
             imei2:           a.imei2,
+            phoneNumber:     a.phoneNumber,
+            simProvider:     a.simProvider,
             accessories:     a.accessories,
             ackToken:        a.ackToken,
           })),

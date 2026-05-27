@@ -58,7 +58,7 @@ export function profileToCurrentUser(p: Profile): CurrentUser {
 // ─── Asset types ─────────────────────────────────────────────────────────────
 export type AssetType   =
   // Main Devices
-  | "Laptop" | "Desktop" | "Monitor" | "Mobile" | "Tab" | "Camera" | "CPU" | "Generic Asset"
+  | "Laptop" | "Desktop" | "Monitor" | "Mobile" | "Tab" | "Sim Card" | "Camera" | "CPU" | "Generic Asset"
   // Accessories
   | "Keyboard" | "Mouse" | "Headset" | "Hard Disk" | "Speaker" | "Docking Station"
   // Fixed Assets
@@ -82,8 +82,15 @@ export interface Asset {
   // Mobile-specific
   imeiNumber?:      string;   // IMEI 1
   imei2?:           string;   // IMEI 2
-  simNumber?:       string;
-  phoneNumber?:     string;
+  simNumber?:       string;   // ICCID (Sim Card)
+  phoneNumber?:     string;   // Official Mobile Number / Connection (Sim Card)
+  // Sim Card-specific
+  simProvider?:     string;   // Airtel, Jio, Vodafone, etc.
+  userName?:        string;   // USER NAME from telecom bill
+  useCase?:         string;   // Use case
+  billableName?:    string;   // BILLABLE NAME
+  planName?:        string;
+  planAmount?:      string;
   // Desktop-specific
   monitorBrand?:    string;
   monitorModel?:    string;

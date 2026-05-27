@@ -35,6 +35,13 @@ export const assetFormSchema = z.object({
   imei2:           z.string().optional(),
   simNumber:       z.string().optional(),
   phoneNumber:     z.string().optional(),
+  // Sim Card
+  simProvider:     z.string().optional(),
+  userName:        z.string().optional(),
+  useCase:         z.string().optional(),
+  billableName:    z.string().optional(),
+  planName:        z.string().optional(),
+  planAmount:      z.string().optional(),
   // Desktop
   monitorBrand:    z.string().optional(),
   monitorModel:    z.string().optional(),
@@ -127,6 +134,7 @@ export default function AssetForm({
       brand: "", model: "", serialNumber: "", productNumber: "",
       processor: "", ram: "", operatingSystem: "",
       imeiNumber: "", imei2: "", simNumber: "", phoneNumber: "",
+      simProvider: "", userName: "", useCase: "", billableName: "", planName: "", planAmount: "",
       monitorBrand: "", monitorModel: "", monitorSize: "",
       keyboard: "", mouse: "", cpu: "", others: "",
       storage: "", purchaseDate: "", warrantyEndDate: "",
@@ -149,9 +157,10 @@ export default function AssetForm({
   const isDesktop = assetType === "Desktop";
   const isTab     = assetType === "Tab";
   const isCPU     = assetType === "CPU";
+  const isSimCard = assetType === "Sim Card";
   const showComputerSpecs = isLaptop || isCPU || isDesktop;
   // Suppress unused warnings — these flags are referenced in conditional sections below.
-  void isLaptop; void isMobile; void isDesktop; void isTab; void isCPU; void showComputerSpecs;
+  void isLaptop; void isMobile; void isDesktop; void isTab; void isCPU; void isSimCard; void showComputerSpecs;
 
   return (
     <Form {...form}>
@@ -377,20 +386,6 @@ export default function AssetForm({
                   <FormMessage />
                 </FormItem>
               )} />
-              <FormField control={form.control} name="simNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>SIM Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="SIM card number / ICCID" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="Assigned phone number" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
               <FormField control={form.control} name="storage" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Storage</FormLabel>
@@ -403,6 +398,78 @@ export default function AssetForm({
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+          </Section>
+        )}
+
+        {/* ── Sim Card Details ─────────────────────────────────────────── */}
+        {isSimCard && (
+          <Section title="Sim Card Details">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField control={form.control} name="simProvider" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Provider</FormLabel>
+                  <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
+                    <FormControl><SelectTrigger data-testid="select-sim-provider"><SelectValue placeholder="Select provider" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not specified</SelectItem>
+                      {["Airtel", "Jio", "Vodafone"].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Official Mobile Number</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. 9876543210" data-testid="input-official-mobile" /></FormControl>
+                  <FormDescription className="text-xs">Connection / phone number — shown in assignment email.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="simNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SIM Number (ICCID)</FormLabel>
+                  <FormControl><Input {...field} placeholder="19/20-digit SIM card number" /></FormControl>
+                  <FormDescription className="text-xs">Internal use only — not included in the assignment email.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="userName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>User Name (on bill)</FormLabel>
+                  <FormControl><Input {...field} placeholder="Name registered on telecom bill" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="useCase" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Use Case</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Sales, Support, Field Ops" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="billableName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Billable Name</FormLabel>
+                  <FormControl><Input {...field} placeholder="Entity billed for the connection" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="planName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Plan Name</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Postpaid 499, Corporate CUG" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="planAmount" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Plan Amount</FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. ₹499 / month" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -460,20 +527,6 @@ export default function AssetForm({
                   <FormLabel>IMEI (Cellular)</FormLabel>
                   <FormControl><Input {...field} placeholder="IMEI if cellular-enabled tab" data-testid="input-imei" /></FormControl>
                   <FormDescription className="text-xs">Leave blank for Wi-Fi-only tablets</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="simNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>SIM Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="SIM card number / ICCID" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="phoneNumber" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone / Data Number</FormLabel>
-                  <FormControl><Input {...field} placeholder="Assigned number (if any)" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
