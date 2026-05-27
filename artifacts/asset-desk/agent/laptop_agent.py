@@ -273,31 +273,85 @@ def _get(path: str) -> dict:
 
 
 # ── wallpaper (cross-platform) ──────────────────────────────────────────────
+def _screen_size() -> tuple[int, int]:
+    """Best-effort current primary-display resolution. Defaults to 1920x1080."""
+    try:
+        if IS_WIN:
+            import ctypes
+            user32 = ctypes.windll.user32
+            try: user32.SetProcessDPIAware()
+            except Exception: pass
+            return (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+        if IS_MAC:
+            out = subprocess.check_output(
+                ["system_profiler", "SPDisplaysDataType"], timeout=10
+            ).decode(errors="ignore")
+            import re
+            m = re.search(r"Resolution:\s+(\d+)\s*x\s*(\d+)", out)
+            if m: return (int(m.group(1)), int(m.group(2)))
+        if IS_LIN and shutil.which("xrandr"):
+            out = subprocess.check_output(["xrandr", "--current"], timeout=10).decode(errors="ignore")
+            import re
+            for line in out.splitlines():
+                m = re.search(r"\s(\d+)x(\d+)\+\d+\+\d+", line)
+                if m: return (int(m.group(1)), int(m.group(2)))
+    except Exception:
+        pass
+    return (1920, 1080)
+
+
+def pick_variant(variants: list, screen_w: int, screen_h: int) -> dict | None:
+    """Choose the smallest variant that fully covers the screen.
+    If none cover it, fall back to the largest available (avoids upscaling artefacts)."""
+    if not variants: return None
+    covering = [v for v in variants if v.get("width", 0) >= screen_w and v.get("height", 0) >= screen_h]
+    if covering:
+        return min(covering, key=lambda v: v["width"] * v["height"])
+    return max(variants, key=lambda v: v.get("width", 0) * v.get("height", 0))
+
+
+def _win_set_style_fill() -> None:
+    """Write HKCU\\Control Panel\\Desktop\\WallpaperStyle=10 (Fill) + TileWallpaper=0."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop",
+                            0, winreg.KEY_SET_VALUE) as k:
+            winreg.SetValueEx(k, "WallpaperStyle", 0, winreg.REG_SZ, "10")  # 10 = Fill
+            winreg.SetValueEx(k, "TileWallpaper",  0, winreg.REG_SZ, "0")
+    except Exception:
+        pass  # registry write is best-effort; SetDeskWallpaper still works
+
+
 def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
     try:
         if IS_WIN:
             import ctypes
-            ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3)
-            return (True, None)
+            _win_set_style_fill()
+            # SPI_SETDESKWALLPAPER=20, SPIF_UPDATEINIFILE|SPIF_SENDWININICHANGE=3
+            ok = ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3)
+            return (bool(ok), None if ok else "SystemParametersInfoW returned 0")
         if IS_MAC:
-            # AppleScript across all desktops
+            # System Events scales the picture to fill the display.
             script = (
                 'tell application "System Events" to '
-                f'set picture of every desktop to "{local_path}"'
+                f'set picture of every desktop to POSIX file "{local_path}"'
             )
             subprocess.check_call(["osascript", "-e", script], timeout=15)
             return (True, None)
         if IS_LIN:
-            # GNOME 3+ — most common on Ubuntu desktop
             if shutil.which("gsettings"):
                 subprocess.check_call([
                     "gsettings", "set", "org.gnome.desktop.background",
                     "picture-uri", f"file://{local_path}",
                 ], timeout=15)
-                # GNOME 42+ split light/dark
                 subprocess.call([
                     "gsettings", "set", "org.gnome.desktop.background",
                     "picture-uri-dark", f"file://{local_path}",
+                ], timeout=15)
+                # Fill the screen (image is already pre-composited at full-screen size)
+                subprocess.call([
+                    "gsettings", "set", "org.gnome.desktop.background",
+                    "picture-options", "zoom",
                 ], timeout=15)
                 return (True, None)
             return (False, "no supported desktop env (gsettings missing)")
@@ -355,10 +409,24 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
             return ("none", None)
 
         wid    = w.get("id")
-        url    = w.get("url")
-        sha    = w.get("sha256") or ""
-        mime   = (w.get("mime_type") or "").lower()
+        # Pick the right-sized variant for THIS screen (preserves quality, avoids stretching)
+        variants = w.get("variants") or []
+        screen_w, screen_h = _screen_size()
+        chosen = pick_variant(variants, screen_w, screen_h) if variants else None
+        if chosen:
+            url  = chosen["url"]
+            sha  = chosen.get("sha256") or ""
+            mime = "image/png"  # variants are PNG/JPG; ext determined below
+        else:
+            url  = w.get("url")
+            sha  = w.get("sha256") or ""
+            mime = (w.get("mime_type") or "").lower()
         ext    = "jpg" if "jpeg" in mime or "jpg" in mime else ("bmp" if "bmp" in mime else "png")
+        # URL hint: if URL ends with .jpg/.png prefer that
+        for e in ("jpg", "jpeg", "png", "bmp"):
+            if url.lower().endswith("." + e):
+                ext = "jpg" if e == "jpeg" else e
+                break
         dst    = _wallpaper_image_path(ext)
 
         state  = _load_wallpaper_state()

@@ -36,6 +36,72 @@ async function sha256Hex(buf: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Common laptop resolutions we render the logo for
+const VARIANT_SIZES: Array<[number, number]> = [
+  [1920, 1080],   // FHD — covers 1366×768 too (Windows will downscale)
+  [2560, 1440],   // QHD
+  [3840, 2160],   // 4K + MacBook 14"/16" Retina (5K is downscaled cleanly)
+];
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+/** Sample 4 corners and average → dominant background colour of the logo image. */
+function detectBgColor(img: HTMLImageElement): string {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const pts = [
+    [1, 1], [c.width - 2, 1], [1, c.height - 2], [c.width - 2, c.height - 2],
+  ];
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const [x, y] of pts) {
+    try {
+      const p = ctx.getImageData(x, y, 1, 1).data;
+      if (p[3] > 10) { r += p[0]; g += p[1]; b += p[2]; n++; }
+    } catch { /* CORS-tainted — fall back */ }
+  }
+  if (!n) return "#0b1d3a";       // Miles dark navy fallback
+  return `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})`;
+}
+
+/** Composite the logo centred on a solid background at the requested size,
+ *  preserving aspect, ~60% of the shortest edge, never upscaling past 1×. */
+async function makeVariant(
+  img: HTMLImageElement, width: number, height: number, bg: string, mime: string,
+): Promise<Blob> {
+  const c = document.createElement("canvas");
+  c.width = width; c.height = height;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // Fit logo into a centred box that's ~60% of the smaller dimension
+  const targetH = Math.min(img.naturalHeight, Math.round(Math.min(width, height) * 0.6));
+  const scale   = targetH / img.naturalHeight;
+  const drawW   = img.naturalWidth  * scale;
+  const drawH   = img.naturalHeight * scale;
+  const x       = Math.round((width  - drawW) / 2);
+  const y       = Math.round((height - drawH) / 2);
+  ctx.drawImage(img, x, y, drawW, drawH);
+
+  const outMime = mime === "image/jpeg" ? "image/jpeg" : "image/png";
+  return new Promise((resolve, reject) => {
+    c.toBlob((b) => b ? resolve(b) : reject(new Error("canvas blob failed")),
+             outMime, outMime === "image/jpeg" ? 0.95 : undefined);
+  });
+}
+
 export default function WallpaperManager({ assetId, managedDeviceId, agentInstalled }: Props) {
   const { role } = useAuth();
   const isSuperAdmin = role === "super_admin";
@@ -73,39 +139,71 @@ export default function WallpaperManager({ assetId, managedDeviceId, agentInstal
 
   async function handleUpload(file: File, setActive: boolean) {
     if (!file.type.startsWith("image/")) {
-      toast({ title: "Please choose an image file (PNG / JPG / BMP)", variant: "destructive" });
+      toast({ title: "Please choose an image file (PNG / JPG)", variant: "destructive" });
       return;
     }
     setBusy(true);
-    setUploadProgress("Hashing…");
+    setUploadProgress("Reading image…");
     try {
       const buf = await file.arrayBuffer();
       const sha = await sha256Hex(buf);
-      const ext = (file.name.split(".").pop() || "png").toLowerCase();
-      const path = `${Date.now()}_${sha.slice(0, 8)}.${ext}`;
+      const ts  = Date.now();
+      const stem = `${ts}_${sha.slice(0, 8)}`;
 
-      setUploadProgress("Uploading…");
-      const up = await supabase.storage.from("wallpapers").upload(path, file, {
-        cacheControl: "31536000",
-        upsert: false,
-        contentType: file.type,
+      // 1. Original
+      setUploadProgress("Uploading original…");
+      const origExt  = (file.name.split(".").pop() || "png").toLowerCase();
+      const origPath = `${stem}/original.${origExt}`;
+      const up = await supabase.storage.from("wallpapers").upload(origPath, file, {
+        cacheControl: "31536000", upsert: false, contentType: file.type,
       });
       if (up.error) throw up.error;
+      const origUrl = supabase.storage.from("wallpapers").getPublicUrl(origPath).data.publicUrl;
 
-      const { data: pub } = supabase.storage.from("wallpapers").getPublicUrl(path);
+      // 2. Generate dark-bg composites for common laptop resolutions
+      setUploadProgress("Generating resolution variants…");
+      const img = await loadImage(file);
+      const bg  = detectBgColor(img);
+      const outMime = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
+      const outExt  = outMime === "image/jpeg" ? "jpg" : "png";
 
+      const variants: Array<{ width: number; height: number; url: string; sha256: string }> = [];
+      for (const [w, h] of VARIANT_SIZES) {
+        setUploadProgress(`Generating ${w}×${h}…`);
+        const blob   = await makeVariant(img, w, h, bg, outMime);
+        const vBuf   = await blob.arrayBuffer();
+        const vSha   = await sha256Hex(vBuf);
+        const vPath  = `${stem}/${w}x${h}.${outExt}`;
+        const vUp    = await supabase.storage.from("wallpapers").upload(vPath, blob, {
+          cacheControl: "31536000", upsert: false, contentType: outMime,
+        });
+        if (vUp.error) throw vUp.error;
+        variants.push({
+          width: w, height: h, sha256: vSha,
+          url: supabase.storage.from("wallpapers").getPublicUrl(vPath).data.publicUrl,
+        });
+      }
+
+      // 3. Register — primary URL is the largest variant (best for retina; agent picks per screen)
       setUploadProgress("Registering…");
+      const primary = variants[variants.length - 1];
       const { data, error } = await supabase.rpc("wallpaper_register", {
         p_name:         file.name,
-        p_storage_path: path,
-        p_public_url:   pub.publicUrl,
-        p_sha256:       sha,
-        p_mime_type:    file.type,
+        p_storage_path: origPath,
+        p_public_url:   primary.url,
+        p_sha256:       primary.sha256,
+        p_mime_type:    outMime,
         p_file_size:    file.size,
         p_set_active:   setActive,
+        p_variants:     variants,
       });
       if (error || !data?.success) throw new Error(error?.message || data?.error || "register failed");
-      toast({ title: setActive ? "Wallpaper uploaded & set active" : "Wallpaper uploaded" });
+
+      void origUrl; // (original kept in storage for re-processing later if needed)
+      toast({
+        title: setActive ? "Wallpaper uploaded & set active" : "Wallpaper uploaded",
+        description: `${variants.length} resolution variants generated (${VARIANT_SIZES.map(([w,h])=>`${w}×${h}`).join(", ")})`,
+      });
       await load();
     } catch (e: unknown) {
       toast({ title: "Upload failed", description: (e as Error).message, variant: "destructive" });
