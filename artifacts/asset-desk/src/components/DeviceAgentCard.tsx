@@ -5,7 +5,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle,
+  Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -112,8 +112,10 @@ export default function DeviceAgentCard({ assetId }: Props) {
     : "bg-gray-400";
   const statusLabel = device?.status ? device.status.charAt(0).toUpperCase() + device.status.slice(1) : "Not Installed";
 
-  // Install command shown after generating. The agent reads MILES_AGENT_TOKEN env var.
-  const installCmd = (tok: string) =>
+  // Install commands shown after generating. The agent reads MILES_AGENT_TOKEN env var.
+  const installCmdExe = (tok: string) =>
+    `set MILES_AGENT_TOKEN=${tok}\nmiles-agent.exe register`;
+  const installCmdPy = (tok: string) =>
     `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register`;
 
   return (
@@ -189,6 +191,30 @@ export default function DeviceAgentCard({ assetId }: Props) {
                 </Button>
               </div>
             )}
+
+            <div className="border-t pt-3 mt-2">
+              <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline" className="gap-2">
+                  <a href="/agent/miles-agent.exe" download>
+                    <Download className="h-4 w-4" /> Windows (.exe)
+                  </a>
+                </Button>
+                <Button asChild size="sm" variant="outline" className="gap-2">
+                  <a href="/agent/laptop_agent.py" download>
+                    <Download className="h-4 w-4" /> Python script
+                  </a>
+                </Button>
+                <Button asChild size="sm" variant="ghost" className="gap-2">
+                  <a href="/agent/miles-device-agent-guide.pdf" target="_blank" rel="noopener">
+                    <Download className="h-4 w-4" /> Setup guide (PDF)
+                  </a>
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Windows .exe is the easiest — no Python needed. macOS / Linux: use the Python script.
+              </p>
+            </div>
           </>
         )}
       </CardContent>
@@ -231,27 +257,59 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Install Command (Windows)</label>
+                <label className="text-xs font-medium text-muted-foreground">
+                  Install Command — Windows (.exe)
+                </label>
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs"
-                  onClick={() => newToken && copy(installCmd(newToken), "Install command")}
+                  onClick={() => newToken && copy(installCmdExe(newToken), "Install command")}
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy
                 </Button>
               </div>
               <textarea
                 readOnly
-                value={newToken ? installCmd(newToken) : ""}
+                value={newToken ? installCmdExe(newToken) : ""}
                 onFocus={(e) => e.currentTarget.select()}
                 className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
-                rows={3}
+                rows={2}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Run this in an elevated PowerShell on the laptop. See the agent README for the full install steps.
+                1. Download <b>miles-agent.exe</b> (button on the asset page).
+                2. Open <b>Command Prompt as Administrator</b> in the same folder.
+                3. Paste the above and press Enter.
               </p>
             </div>
+
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                macOS / Linux / no .exe? Use the Python script instead
+              </summary>
+              <div className="mt-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Install Command — Python (cross-platform)
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => newToken && copy(installCmdPy(newToken), "Python install command")}
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                </div>
+                <textarea
+                  readOnly
+                  value={newToken ? installCmdPy(newToken) : ""}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                  rows={3}
+                />
+              </div>
+            </details>
           </div>
           <DialogFooter>
             <Button onClick={() => setNewToken(null)}>I have copied the key</Button>
