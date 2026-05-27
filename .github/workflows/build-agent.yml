@@ -1,0 +1,45 @@
+name: Build Laptop Agent Binaries
+on:
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/asset-desk/agent/laptop_agent.py"
+      - ".github/workflows/build-agent.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller requests
+      - working-directory: artifacts/asset-desk/agent
+        run: pyinstaller --onefile --noconsole --name miles-agent laptop_agent.py
+      - shell: bash
+        run: |
+          mkdir -p artifacts/asset-desk/public/agent
+          cp "artifacts/asset-desk/agent/dist/miles-agent.exe" "artifacts/asset-desk/public/agent/miles-agent.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: miles-agent-windows
+          path: artifacts/asset-desk/public/agent/miles-agent.exe
+  publish:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: miles-agent-windows
+          path: artifacts/asset-desk/public/agent/
+      - run: |
+          git config user.name  "miles-bot"
+          git config user.email "miles-bot@users.noreply.github.com"
+          git add artifacts/asset-desk/public/agent/miles-agent.exe
+          git diff --cached --quiet || (git commit -m "chore(agent): rebuild miles-agent.exe [skip ci]" && git push)
