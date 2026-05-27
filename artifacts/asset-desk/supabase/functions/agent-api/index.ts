@@ -67,6 +67,21 @@ serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
+    if (req.method === "GET" && path === "/wallpaper/active") {
+      const r = await rpc("agent_get_active_wallpaper", { p_token: token });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
+    if (req.method === "POST" && path === "/wallpaper/status") {
+      const r = await rpc("agent_report_wallpaper", {
+        p_token:        token,
+        p_wallpaper_id: body.wallpaper_id ?? null,
+        p_status:       body.status,
+        p_error:        body.error ?? null,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
     if (req.method === "POST" && path === "/commands/status") {
       const r = await rpc("agent_update_command", {
         p_token: token,

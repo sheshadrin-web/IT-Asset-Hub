@@ -35,6 +35,7 @@ import platform
 import subprocess
 import shutil
 import uuid
+import hashlib
 from datetime import datetime, timezone
 
 import requests
@@ -305,13 +306,105 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
         return (False, str(e))
 
 
-def _wallpaper_dest() -> str:
+def _wallpaper_cache_dir() -> str:
     if IS_WIN:
-        base = os.environ.get("PROGRAMDATA", "C:\\ProgramData")
+        base = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "MilesAgent")
+    elif IS_MAC:
+        base = os.path.expanduser("~/Library/Application Support/MilesAgent")
     else:
-        base = os.path.expanduser("~/.miles_agent")
+        base = os.path.expanduser("~/.cache/miles-agent")
     os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "miles_wallpaper.jpg")
+    return base
+
+
+def _wallpaper_state_path() -> str:
+    return os.path.join(_wallpaper_cache_dir(), "wallpaper.state.json")
+
+
+def _wallpaper_image_path(ext: str = "png") -> str:
+    return os.path.join(_wallpaper_cache_dir(), f"miles_wallpaper.{ext}")
+
+
+def _load_wallpaper_state() -> dict:
+    try:
+        with open(_wallpaper_state_path()) as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _save_wallpaper_state(d: dict) -> None:
+    try:
+        with open(_wallpaper_state_path(), "w") as fh:
+            json.dump(d, fh)
+    except Exception:
+        pass
+
+
+def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
+    """Fetch active wallpaper from portal, download if changed, apply, and report.
+    Returns (status, error). Status is 'applied' | 'skipped' | 'failed' | 'none'.
+    Never raises — wallpaper failure must not break the sync loop.
+    """
+    try:
+        resp = _get("/wallpaper/active")
+        if not resp.get("success"):
+            return ("failed", resp.get("error") or "fetch failed")
+        w = resp.get("wallpaper")
+        if not w:
+            return ("none", None)
+
+        wid    = w.get("id")
+        url    = w.get("url")
+        sha    = w.get("sha256") or ""
+        mime   = (w.get("mime_type") or "").lower()
+        ext    = "jpg" if "jpeg" in mime or "jpg" in mime else ("bmp" if "bmp" in mime else "png")
+        dst    = _wallpaper_image_path(ext)
+
+        state  = _load_wallpaper_state()
+        same   = (state.get("sha256") == sha and state.get("wallpaper_id") == wid
+                  and os.path.exists(state.get("path", "")))
+
+        if same and not force:
+            return ("skipped", None)
+
+        # Download (stream to avoid huge memory for large images)
+        r = requests.get(url, timeout=HTTP_TIMEOUT_SEC, stream=True)
+        if r.status_code != 200:
+            err = f"download http {r.status_code}"
+            _post("/wallpaper/status", {"wallpaper_id": wid, "status": "failed", "error": err})
+            return ("failed", err)
+
+        with open(dst, "wb") as f:
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if chunk: f.write(chunk)
+
+        # Verify hash if server supplied one (preserves quality / integrity)
+        if sha:
+            h = hashlib.sha256()
+            with open(dst, "rb") as f:
+                for chunk in iter(lambda: f.read(64 * 1024), b""):
+                    h.update(chunk)
+            if h.hexdigest() != sha:
+                err = "sha256 mismatch — file corrupted in transit"
+                _post("/wallpaper/status", {"wallpaper_id": wid, "status": "failed", "error": err})
+                return ("failed", err)
+
+        ok, err = _set_wallpaper(os.path.abspath(dst))
+        status  = "applied" if ok else "failed"
+        _post("/wallpaper/status", {
+            "wallpaper_id": wid, "status": status, "error": err,
+        })
+        if ok:
+            _save_wallpaper_state({
+                "wallpaper_id": wid, "sha256": sha, "path": dst,
+                "applied_at": datetime.now(timezone.utc).isoformat(),
+            })
+        return (status, err)
+    except Exception as e:
+        try: _post("/wallpaper/status", {"status": "failed", "error": str(e)})
+        except Exception: pass
+        return ("failed", str(e))
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -322,18 +415,13 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         _post("/sync", {"payload": collect_system_info()})
         return ("completed", "synced", None)
     if ctype == "update_wallpaper":
-        url = (cmd.get("payload") or {}).get("url")
-        if not url:
-            return ("failed", None, "no wallpaper URL")
-        try:
-            dst = _wallpaper_dest()
-            r = requests.get(url, timeout=HTTP_TIMEOUT_SEC)
-            with open(dst, "wb") as f:
-                f.write(r.content)
-            ok, err = _set_wallpaper(dst)
-            return ("completed", "wallpaper applied", None) if ok else ("failed", None, err)
-        except Exception as e:
-            return ("failed", None, str(e))
+        # Always pull the current active wallpaper from the portal (force re-apply)
+        status, err = apply_active_wallpaper(force=True)
+        if status in ("applied", "skipped"):
+            return ("completed", f"wallpaper {status}", None)
+        if status == "none":
+            return ("completed", "no active wallpaper", None)
+        return ("failed", None, err)
     return ("failed", None, f"unsupported command: {ctype}")
 
 
@@ -356,6 +444,12 @@ def register() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN is not set", file=sys.stderr); return 2
     print(json.dumps(_post("/register", {"payload": collect_system_info()}), indent=2))
+    # First-run wallpaper apply (best-effort, never blocks registration success)
+    status, err = apply_active_wallpaper(force=True)
+    if status == "applied": print("[wallpaper] applied")
+    elif status == "skipped": print("[wallpaper] already up-to-date")
+    elif status == "none":    print("[wallpaper] none configured")
+    else:                     print(f"[wallpaper] {status}: {err}", file=sys.stderr)
     return 0
 
 
@@ -365,6 +459,7 @@ def run_loop() -> int:
     while True:
         try:
             _post("/sync", {"payload": collect_system_info()})
+            apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
             poll_commands()
         except Exception as e:
             print(f"[{datetime.now(timezone.utc).isoformat()}] sync error: {e}", file=sys.stderr)

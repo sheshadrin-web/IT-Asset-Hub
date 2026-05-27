@@ -11,6 +11,7 @@ import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
+import WallpaperManager from "./WallpaperManager";
 
 interface ManagedDevice {
   id:                  string;
@@ -227,6 +228,12 @@ export default function DeviceAgentCard({ assetId }: Props) {
                 </Button>
               </div>
             )}
+
+            <WallpaperManager
+              assetId={assetId}
+              managedDeviceId={device?.id ?? null}
+              agentInstalled={!!device}
+            />
 
             <div className="border-t pt-3 mt-2">
               <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
