@@ -52,7 +52,7 @@ export const assetFormSchema = z.object({
   others:          z.string().optional(),
   // Shared
   storage:         z.string().optional(),
-  purchaseDate:    z.string().min(1, "Purchase date is required"),
+  purchaseDate:    z.string().optional().default(""),
   warrantyEndDate: z.string().optional().default(""),
   vendor:          z.string().optional(),
   invoice:         z.string().optional(),
@@ -75,6 +75,9 @@ export const assetFormSchema = z.object({
     }
     if (!data.warrantyEndDate || data.warrantyEndDate.trim() === "") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["warrantyEndDate"], message: "Warranty end date is required" });
+    }
+    if (!data.purchaseDate || data.purchaseDate.trim() === "") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["purchaseDate"], message: "Purchase date is required" });
     }
   }
 });
@@ -670,13 +673,15 @@ export default function AssetForm({
         {/* Purchase & Warranty */}
         <Section title="Purchase & Warranty">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField control={form.control} name="purchaseDate" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Purchase Date <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input type="date" {...field} data-testid="input-purchase-date" /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
+            {!isSimCard && (
+              <FormField control={form.control} name="purchaseDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Purchase Date <span className="text-destructive">*</span></FormLabel>
+                  <FormControl><Input type="date" {...field} data-testid="input-purchase-date" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            )}
             {!isSimCard && (
               <FormField control={form.control} name="warrantyEndDate" render={({ field }) => (
                 <FormItem>
