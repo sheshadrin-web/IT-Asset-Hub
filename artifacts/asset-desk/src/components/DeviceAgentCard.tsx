@@ -113,10 +113,25 @@ export default function DeviceAgentCard({ assetId }: Props) {
   const statusLabel = device?.status ? device.status.charAt(0).toUpperCase() + device.status.slice(1) : "Not Installed";
 
   // Install commands shown after generating. The agent reads MILES_AGENT_TOKEN env var.
-  const installCmdExe = (tok: string) =>
-    `set MILES_AGENT_TOKEN=${tok}\nmiles-agent.exe register`;
+  // Both shell variants: cd to Downloads → verify miles-agent.exe is there → register → test sync.
+  const installCmdCmd = (tok: string) =>
+    [
+      `cd /d %USERPROFILE%\\Downloads`,
+      `if not exist miles-agent.exe (echo ERROR: miles-agent.exe not found. Please download the agent first. && exit /b 1)`,
+      `set MILES_AGENT_TOKEN=${tok}`,
+      `miles-agent.exe register`,
+      `miles-agent.exe sync`,
+    ].join("\n");
+  const installCmdPs = (tok: string) =>
+    [
+      `cd $env:USERPROFILE\\Downloads`,
+      `if (-not (Test-Path .\\miles-agent.exe)) { Write-Host "ERROR: miles-agent.exe not found. Please download the agent first." -ForegroundColor Red; exit 1 }`,
+      `$env:MILES_AGENT_TOKEN="${tok}"`,
+      `.\\miles-agent.exe register`,
+      `.\\miles-agent.exe sync`,
+    ].join("\n");
   const installCmdPy = (tok: string) =>
-    `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register`;
+    `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register\npython laptop_agent.py sync`;
 
   return (
     <Card>
@@ -194,15 +209,23 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
             <div className="border-t pt-3 mt-2">
               <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
-              <div className="flex flex-wrap gap-2">
+              <Button
+                asChild
+                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                data-testid="button-download-windows-agent"
+              >
+                <a href="/agent/miles-agent.exe" download="miles-agent.exe">
+                  <Download className="h-4 w-4" /> Download Windows Agent (.exe)
+                </a>
+              </Button>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Saves as <span className="font-mono">miles-agent.exe</span> in your Downloads folder.
+                Then click <b>Generate Agent Key</b> above and follow the install steps.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-2">
                 <Button asChild size="sm" variant="outline" className="gap-2">
-                  <a href="/agent/miles-agent.exe" download>
-                    <Download className="h-4 w-4" /> Windows (.exe)
-                  </a>
-                </Button>
-                <Button asChild size="sm" variant="outline" className="gap-2">
-                  <a href="/agent/laptop_agent.py" download>
-                    <Download className="h-4 w-4" /> Python script
+                  <a href="/agent/laptop_agent.py" download="laptop_agent.py">
+                    <Download className="h-4 w-4" /> Python script (macOS / Linux)
                   </a>
                 </Button>
                 <Button asChild size="sm" variant="ghost" className="gap-2">
@@ -211,9 +234,6 @@ export default function DeviceAgentCard({ assetId }: Props) {
                   </a>
                 </Button>
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1.5">
-                Windows .exe is the easiest — no Python needed. macOS / Linux: use the Python script.
-              </p>
             </div>
           </>
         )}
@@ -255,31 +275,65 @@ export default function DeviceAgentCard({ assetId }: Props) {
               />
             </div>
 
+            <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[11px] text-sky-900">
+              <p className="font-semibold mb-1">Before you paste:</p>
+              <ol className="list-decimal ml-4 space-y-0.5">
+                <li>Click <b>Download Windows Agent (.exe)</b> on this page (file lands in <span className="font-mono">Downloads</span>).</li>
+                <li>If SmartScreen blocks it: <b>More info → Run anyway</b>.</li>
+                <li>Open <b>Command Prompt</b> or <b>PowerShell</b> as <b>Administrator</b>.</li>
+                <li>Paste the matching command below.</li>
+              </ol>
+            </div>
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-medium text-muted-foreground">
-                  Install Command — Windows (.exe)
+                  Install Command — Command Prompt (cmd.exe)
                 </label>
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-7 gap-1.5 text-xs"
-                  onClick={() => newToken && copy(installCmdExe(newToken), "Install command")}
+                  onClick={() => newToken && copy(installCmdCmd(newToken), "CMD install command")}
+                  data-testid="button-copy-install-cmd"
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy
                 </Button>
               </div>
               <textarea
                 readOnly
-                value={newToken ? installCmdExe(newToken) : ""}
+                value={newToken ? installCmdCmd(newToken) : ""}
                 onFocus={(e) => e.currentTarget.select()}
                 className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
-                rows={2}
+                rows={5}
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Install Command — PowerShell
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => newToken && copy(installCmdPs(newToken), "PowerShell install command")}
+                  data-testid="button-copy-install-ps"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <textarea
+                readOnly
+                value={newToken ? installCmdPs(newToken) : ""}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={5}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                1. Download <b>miles-agent.exe</b> (button on the asset page).
-                2. Open <b>Command Prompt as Administrator</b> in the same folder.
-                3. Paste the above and press Enter.
+                The last line runs <span className="font-mono">sync</span> — a one-shot check-in to confirm the
+                device shows up in the portal immediately. Refresh this page after ~10 seconds.
               </p>
             </div>
 
