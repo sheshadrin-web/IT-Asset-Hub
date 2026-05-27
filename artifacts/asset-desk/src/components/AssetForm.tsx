@@ -22,9 +22,9 @@ import { ASSET_OWNERSHIP_OPTIONS } from "@/data/mockData";
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
   assetType:       z.enum(ALL_ASSET_TYPES as unknown as [string, ...string[]]),
-  brand:           z.string().min(1, "Brand is required"),
-  model:           z.string().min(1, "Model is required"),
-  serialNumber:    z.string().min(1, "Serial number is required"),
+  brand:           z.string().optional().default(""),
+  model:           z.string().optional().default(""),
+  serialNumber:    z.string().optional().default(""),
   productNumber:   z.string().optional(),
   // Laptop
   processor:       z.string().optional(),
@@ -53,7 +53,7 @@ export const assetFormSchema = z.object({
   // Shared
   storage:         z.string().optional(),
   purchaseDate:    z.string().min(1, "Purchase date is required"),
-  warrantyEndDate: z.string().min(1, "Warranty end date is required"),
+  warrantyEndDate: z.string().optional().default(""),
   vendor:          z.string().optional(),
   invoice:         z.string().optional(),
   ownership:       z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
@@ -61,6 +61,22 @@ export const assetFormSchema = z.object({
   department:      z.string().optional(),
   accessories:     z.string().optional(),
   remarks:         z.string().optional(),
+}).superRefine((data, ctx) => {
+  // Brand/Model/Serial are required for every asset type except Sim Card.
+  if (data.assetType !== "Sim Card") {
+    if (!data.brand || data.brand.trim() === "") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brand"], message: "Brand is required" });
+    }
+    if (!data.model || data.model.trim() === "") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["model"], message: "Model is required" });
+    }
+    if (!data.serialNumber || data.serialNumber.trim() === "") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["serialNumber"], message: "Serial number is required" });
+    }
+    if (!data.warrantyEndDate || data.warrantyEndDate.trim() === "") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["warrantyEndDate"], message: "Warranty end date is required" });
+    }
+  }
 });
 
 export type AssetFormValues = z.infer<typeof assetFormSchema>;
@@ -252,40 +268,42 @@ export default function AssetForm({
           )} />
         </Section>
 
-        {/* Device Identification */}
-        <Section title="Device Identification">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField control={form.control} name="brand" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Brand <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input {...field} placeholder="Dell, Apple, HP, Samsung…" data-testid="input-brand" /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="model" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Model <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input {...field} placeholder="e.g. Latitude 5540, OptiPlex 7090" data-testid="input-model" /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="serialNumber" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Serial Number <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input {...field} placeholder="Unique serial from device label" data-testid="input-serial-number" /></FormControl>
-                <FormDescription className="text-xs">Found on the bottom label or Settings → About</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="productNumber" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Product Number</FormLabel>
-                <FormControl><Input {...field} placeholder="Product / Part number" /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-          </div>
-        </Section>
+        {/* Device Identification — hidden for Sim Card */}
+        {!isSimCard && (
+          <Section title="Device Identification">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField control={form.control} name="brand" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Brand <span className="text-destructive">*</span></FormLabel>
+                  <FormControl><Input {...field} placeholder="Dell, Apple, HP, Samsung…" data-testid="input-brand" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="model" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Model <span className="text-destructive">*</span></FormLabel>
+                  <FormControl><Input {...field} placeholder="e.g. Latitude 5540, OptiPlex 7090" data-testid="input-model" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="serialNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Serial Number <span className="text-destructive">*</span></FormLabel>
+                  <FormControl><Input {...field} placeholder="Unique serial from device label" data-testid="input-serial-number" /></FormControl>
+                  <FormDescription className="text-xs">Found on the bottom label or Settings → About</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="productNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Product Number</FormLabel>
+                  <FormControl><Input {...field} placeholder="Product / Part number" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+          </Section>
+        )}
 
         {/* ── Computer Specs (Laptop / CPU / Desktop) ──────────────────── */}
         {showComputerSpecs && (
@@ -659,14 +677,16 @@ export default function AssetForm({
                 <FormMessage />
               </FormItem>
             )} />
-            <FormField control={form.control} name="warrantyEndDate" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Warranty End Date <span className="text-destructive">*</span></FormLabel>
-                <FormControl><Input type="date" {...field} data-testid="input-warranty-date" /></FormControl>
-                <FormDescription className="text-xs">Usually 3 years from purchase date</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )} />
+            {!isSimCard && (
+              <FormField control={form.control} name="warrantyEndDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Warranty End Date</FormLabel>
+                  <FormControl><Input type="date" {...field} data-testid="input-warranty-date" /></FormControl>
+                  <FormDescription className="text-xs">Usually 3 years from purchase date</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            )}
             <FormField control={form.control} name="vendor" render={({ field }) => (
               <FormItem>
                 <FormLabel>Vendor</FormLabel>
@@ -727,25 +747,27 @@ export default function AssetForm({
           </div>
         </Section>
 
-        {/* Accessories & Remarks */}
-        <Section title="Accessories & Notes">
-          <FormField control={form.control} name="accessories" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Accessories</FormLabel>
-              <FormControl>
-                <AccessoriesSelector
-                  assetType={assetType}
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                  disabled={disabled}
-                />
-              </FormControl>
-              <FormDescription className="text-xs">
-                Select all items bundled with this device. Choose <strong>Others</strong> to enter anything not listed.
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )} />
+        {/* Accessories & Remarks — Accessories hidden for Sim Card */}
+        <Section title={isSimCard ? "Notes" : "Accessories & Notes"}>
+          {!isSimCard && (
+            <FormField control={form.control} name="accessories" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Accessories</FormLabel>
+                <FormControl>
+                  <AccessoriesSelector
+                    assetType={assetType}
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    disabled={disabled}
+                  />
+                </FormControl>
+                <FormDescription className="text-xs">
+                  Select all items bundled with this device. Choose <strong>Others</strong> to enter anything not listed.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )} />
+          )}
           <FormField control={form.control} name="remarks" render={({ field }) => (
             <FormItem>
               <FormLabel>Remarks</FormLabel>
