@@ -195,35 +195,62 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
       {/* One-time token reveal dialog */}
       <Dialog open={!!newToken} onOpenChange={(v) => !v && setNewToken(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5 text-emerald-600" />
               Agent Key Generated
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <strong>Copy this now.</strong> For security, the full key is shown only once.
               After closing this dialog only the last 4 characters will remain visible.
             </div>
+
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Agent Key</label>
-              <div className="mt-1 flex gap-2">
-                <code className="flex-1 truncate rounded border bg-muted/50 px-2 py-1.5 text-xs font-mono">{newToken}</code>
-                <Button size="sm" variant="outline" onClick={() => newToken && copy(newToken, "Agent key")}>
-                  <Copy className="h-4 w-4" />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Agent Key</label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => newToken && copy(newToken, "Agent key")}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
                 </Button>
               </div>
+              <textarea
+                readOnly
+                value={newToken ?? ""}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={2}
+              />
             </div>
+
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Install Command (Windows)</label>
-              <div className="mt-1 flex gap-2">
-                <code className="flex-1 truncate rounded border bg-muted/50 px-2 py-1.5 text-xs font-mono">{newToken && installCmd(newToken)}</code>
-                <Button size="sm" variant="outline" onClick={() => newToken && copy(installCmd(newToken), "Install command")}>
-                  <Copy className="h-4 w-4" />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Install Command (Windows)</label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => newToken && copy(installCmd(newToken), "Install command")}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
                 </Button>
               </div>
+              <textarea
+                readOnly
+                value={newToken ? installCmd(newToken) : ""}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={3}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Run this in an elevated PowerShell on the laptop. See the agent README for the full install steps.
+              </p>
             </div>
           </div>
           <DialogFooter>
