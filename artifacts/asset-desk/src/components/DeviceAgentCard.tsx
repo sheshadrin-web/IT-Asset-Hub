@@ -114,7 +114,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
   // Install command shown after generating. The agent reads MILES_AGENT_TOKEN env var.
   const installCmd = (tok: string) =>
-    `setx MILES_AGENT_TOKEN "${tok}" && miles-agent.exe register`;
+    `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register`;
 
   return (
     <Card>
