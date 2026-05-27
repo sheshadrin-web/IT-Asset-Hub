@@ -141,6 +141,16 @@ export default function DeviceAgentCard({ assetId }: Props) {
       `./miles-agent-macos sync`,
       `./miles-agent-macos install-service`,
     ].join("\n");
+  const installCmdLinux = (tok: string) =>
+    [
+      `cd ~/Downloads`,
+      `[ -f miles-agent-linux ] || { echo "ERROR: miles-agent-linux not found. Please download the agent first."; exit 1; }`,
+      `chmod +x miles-agent-linux`,
+      `export MILES_AGENT_TOKEN="${tok}"`,
+      `./miles-agent-linux register`,
+      `./miles-agent-linux sync`,
+      `./miles-agent-linux install-service`,
+    ].join("\n");
   const installCmdPy = (tok: string) =>
     `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register\npython laptop_agent.py sync`;
 
@@ -220,14 +230,14 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
             <div className="border-t pt-3 mt-2">
               <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <Button
                   asChild
                   className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
                   data-testid="button-download-windows-agent"
                 >
                   <a href="/agent/miles-agent.exe" download="miles-agent.exe">
-                    <Download className="h-4 w-4" /> Download Windows Agent (.exe)
+                    <Download className="h-4 w-4" /> Windows (.exe)
                   </a>
                 </Button>
                 <Button
@@ -236,7 +246,16 @@ export default function DeviceAgentCard({ assetId }: Props) {
                   data-testid="button-download-macos-agent"
                 >
                   <a href="/agent/miles-agent-macos" download="miles-agent-macos">
-                    <Download className="h-4 w-4" /> Download macOS Agent
+                    <Download className="h-4 w-4" /> macOS
+                  </a>
+                </Button>
+                <Button
+                  asChild
+                  className="w-full gap-2 bg-orange-600 hover:bg-orange-700 text-white"
+                  data-testid="button-download-linux-agent"
+                >
+                  <a href="/agent/miles-agent-linux" download="miles-agent-linux">
+                    <Download className="h-4 w-4" /> Ubuntu / Linux
                   </a>
                 </Button>
               </div>
@@ -247,7 +266,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button asChild size="sm" variant="outline" className="gap-2">
                   <a href="/agent/laptop_agent.py" download="laptop_agent.py">
-                    <Download className="h-4 w-4" /> Python script (Linux / advanced)
+                    <Download className="h-4 w-4" /> Python script (advanced)
                   </a>
                 </Button>
                 <Button asChild size="sm" variant="ghost" className="gap-2">
@@ -300,8 +319,9 @@ export default function DeviceAgentCard({ assetId }: Props) {
             <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[11px] text-sky-900">
               <p className="font-semibold mb-1">Before you paste:</p>
               <ol className="list-decimal ml-4 space-y-0.5">
-                <li><b>Windows:</b> click <b>Download Windows Agent (.exe)</b> → if SmartScreen blocks it, <b>More info → Run anyway</b> → open <b>Command Prompt</b> or <b>PowerShell</b> <i>as Administrator</i>.</li>
-                <li><b>macOS:</b> click <b>Download macOS Agent</b> → open <b>Terminal</b> (Applications → Utilities). The install command handles Gatekeeper quarantine automatically.</li>
+                <li><b>Windows:</b> click <b>Windows (.exe)</b> → if SmartScreen blocks it, <b>More info → Run anyway</b> → open <b>Command Prompt</b> or <b>PowerShell</b> <i>as Administrator</i>.</li>
+                <li><b>macOS:</b> click <b>macOS</b> → open <b>Terminal</b> (Applications → Utilities). The install command handles Gatekeeper quarantine automatically.</li>
+                <li><b>Ubuntu / Linux:</b> click <b>Ubuntu / Linux</b> → open a <b>terminal</b>. The install command sets up a <span className="font-mono">systemd --user</span> service.</li>
                 <li>Paste the matching command below for your OS.</li>
               </ol>
             </div>
@@ -332,6 +352,36 @@ export default function DeviceAgentCard({ assetId }: Props) {
                 Registers, runs a test sync, then installs a <b>launchd</b> background service so the agent
                 auto-starts on login and syncs every 5 minutes. To remove later:
                 <span className="font-mono"> ~/Library/Application\ Support/MilesAgent/miles-agent uninstall-service</span>
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Install Command — Ubuntu / Linux (Terminal)
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => newToken && copy(installCmdLinux(newToken), "Linux install command")}
+                  data-testid="button-copy-install-linux"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <textarea
+                readOnly
+                value={newToken ? installCmdLinux(newToken) : ""}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={7}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Registers, runs a test sync, then installs a <b>systemd --user</b> service so the agent
+                auto-starts on login and syncs every 5 minutes. For headless servers, run once:
+                <span className="font-mono"> sudo loginctl enable-linger $USER</span>. To remove:
+                <span className="font-mono"> ~/.local/share/miles-agent/miles-agent uninstall-service</span>
               </p>
             </div>
 

@@ -457,15 +457,94 @@ def uninstall_service_mac() -> int:
     return 0
 
 
+# ── Linux systemd --user service ────────────────────────────────────────────
+LIN_UNIT_NAME   = "miles-agent.service"
+LIN_UNIT_PATH   = os.path.expanduser(f"~/.config/systemd/user/{LIN_UNIT_NAME}")
+LIN_INSTALL_DIR = os.path.expanduser("~/.local/share/miles-agent")
+
+
+def install_service_linux() -> int:
+    """Install a systemd --user service that runs the agent and survives reboot (with linger)."""
+    if not TOKEN:
+        print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
+              file=sys.stderr)
+        return 2
+
+    os.makedirs(LIN_INSTALL_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(LIN_UNIT_PATH), exist_ok=True)
+
+    src = os.path.abspath(sys.argv[0])
+    dst = os.path.join(LIN_INSTALL_DIR, "miles-agent")
+    if os.path.abspath(src) != os.path.abspath(dst):
+        shutil.copy2(src, dst)
+    os.chmod(dst, 0o755)
+
+    unit = f"""[Unit]
+Description=Miles IT Assets Device Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={dst} run
+Restart=always
+RestartSec=15
+Environment=MILES_AGENT_TOKEN={TOKEN}
+Environment=MILES_AGENT_API_BASE={API_BASE}
+Environment=MILES_AGENT_SYNC_INTERVAL={SYNC_INTERVAL_SEC}
+
+[Install]
+WantedBy=default.target
+"""
+    with open(LIN_UNIT_PATH, "w") as fh:
+        fh.write(unit)
+    os.chmod(LIN_UNIT_PATH, 0o600)  # contains token
+
+    for args in (
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", LIN_UNIT_NAME],
+        ["systemctl", "--user", "restart", LIN_UNIT_NAME],
+    ):
+        r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            print(f"ERROR: {' '.join(args)} failed:", r.stderr.decode(errors="ignore"), file=sys.stderr)
+            return 1
+
+    print(f"✓ Service '{LIN_UNIT_NAME}' installed and started (systemd --user).")
+    print(f"  Binary:   {dst}")
+    print(f"  Unit:     {LIN_UNIT_PATH}")
+    print(f"  Status:   systemctl --user status {LIN_UNIT_NAME}")
+    print(f"  Logs:     journalctl --user -u {LIN_UNIT_NAME} -f")
+    print(f"  Sync every: {SYNC_INTERVAL_SEC} seconds")
+    print()
+    print("To keep the agent running when you are logged out (headless servers), run once:")
+    print(f"  sudo loginctl enable-linger {os.environ.get('USER', '$USER')}")
+    return 0
+
+
+def uninstall_service_linux() -> int:
+    subprocess.run(["systemctl", "--user", "disable", "--now", LIN_UNIT_NAME],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(LIN_UNIT_PATH):
+        os.remove(LIN_UNIT_PATH)
+    subprocess.run(["systemctl", "--user", "daemon-reload"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.isdir(LIN_INSTALL_DIR):
+        shutil.rmtree(LIN_INSTALL_DIR, ignore_errors=True)
+    print("✓ Service uninstalled.")
+    return 0
+
+
 def install_service() -> int:
     if IS_MAC:  return install_service_mac()
-    if IS_LIN:  print("Linux service install: run `./miles-agent run` under systemd or cron.", file=sys.stderr); return 2
+    if IS_LIN:  return install_service_linux()
     if IS_WIN:  print("Windows: use Task Scheduler or run `miles-agent.exe run` from a startup script.", file=sys.stderr); return 2
     print("Unsupported platform for service install.", file=sys.stderr); return 2
 
 
 def uninstall_service() -> int:
     if IS_MAC: return uninstall_service_mac()
+    if IS_LIN: return uninstall_service_linux()
     print("Service uninstall not implemented for this platform.", file=sys.stderr); return 2
 
 
