@@ -43,11 +43,14 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.4.1"
+AGENT_VERSION       = "0.4.2"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
+# Commands (lock / unlock / etc.) are polled far more frequently than the heavy
+# system sync so admin actions take effect within seconds, not minutes.
+COMMAND_POLL_SEC    = max(2, int(os.environ.get("MILES_AGENT_COMMAND_POLL", "5")))
 HTTP_TIMEOUT_SEC    = 30
 
 EMPLOYEE_EMAIL      = os.environ.get("MILES_EMPLOYEE_EMAIL", "")
@@ -967,16 +970,22 @@ def run_loop() -> int:
                 _apply_hard_lock()
     except Exception:
         pass
+    last_sync = 0.0
     while True:
+        now = time.monotonic()
         try:
-            sync = _post("/sync", {"payload": collect_system_info()})
-            if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
-                reconcile_lock(bool(sync.get("locked")))
-            apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
+            # Heavy system sync + wallpaper + lock reconcile on the slow cycle.
+            if now - last_sync >= SYNC_INTERVAL_SEC:
+                sync = _post("/sync", {"payload": collect_system_info()})
+                if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
+                    reconcile_lock(bool(sync.get("locked")))
+                apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
+                last_sync = now
+            # Commands (lock / unlock) on the fast cycle so they apply in seconds.
             poll_commands()
         except Exception as e:
-            print(f"[{datetime.now(timezone.utc).isoformat()}] sync error: {e}", file=sys.stderr)
-        time.sleep(SYNC_INTERVAL_SEC)
+            print(f"[{datetime.now(timezone.utc).isoformat()}] loop error: {e}", file=sys.stderr)
+        time.sleep(COMMAND_POLL_SEC)
 
 
 # ── service install (auto-start after reboot) ───────────────────────────────
