@@ -232,9 +232,17 @@ export function AssetProvider({ children }: { children: ReactNode }) {
       await supabase.from("assets").update({ remarks: handoverNote }).eq("asset_id", assetId);
     }
     const assignedAt = new Date().toISOString();
+    // Resolve the assignee's ecode now so it is available both for local state
+    // and for any later return/unassign history event in this same session
+    // (before the next full refetch repopulates it from the profiles join).
+    let assignedEcode: string | null = null;
+    try {
+      const { data: ecodeRow } = await supabase.from("profiles").select("ecode").eq("id", userId).single();
+      assignedEcode = (ecodeRow as { ecode?: string } | null)?.ecode ?? null;
+    } catch { /* non-fatal */ }
     setAssets(prev => prev.map(a =>
       a.assetId === assetId
-        ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, department, assignedAt, ackToken, acknowledged: false, acknowledgedAt: undefined }
+        ? { ...a, status: "Assigned", assignedTo: userName, assignedEmail: userEmail, assignedEcode: assignedEcode ?? undefined, department, assignedAt, ackToken, acknowledged: false, acknowledgedAt: undefined }
         : a
     ));
     // Send assignment email (non-fatal)
@@ -303,20 +311,20 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     // Log assignment to history (non-fatal)
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      const { data: ecodeRow } = await supabase.from("profiles").select("ecode").eq("id", userId).single();
       const assetObj = assets.find(a => a.assetId === assetId);
-      await supabase.from("asset_assignment_history").insert({
+      const { error: histErr } = await supabase.from("asset_assignment_history").insert({
         asset_id:   assetId,
         asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
         user_id:    userId,
         user_name:  userName,
         user_email: userEmail,
-        user_ecode: (ecodeRow as { ecode?: string } | null)?.ecode ?? null,
+        user_ecode: assignedEcode,
         department: department,
         event_type: "assigned",
         event_by:   authUser?.id ?? null,
         notes:      handoverNote ?? null,
       });
+      if (histErr) console.warn("[history] failed to log assignment", histErr);
     } catch (e) { console.warn("[history] failed to log assignment", e); /* non-fatal — must not block the assignment */ }
   };
 
@@ -339,7 +347,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     // Log return to history (non-fatal)
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      await supabase.from("asset_assignment_history").insert({
+      const { error: histErr } = await supabase.from("asset_assignment_history").insert({
         asset_id:   assetId,
         asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
         user_name:  assetObj?.assignedTo ?? null,
@@ -350,6 +358,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         event_by:   authUser?.id ?? null,
         notes:      returnNote ?? null,
       });
+      if (histErr) console.warn("[history] failed to log return", histErr);
     } catch (e) { console.warn("[history] failed to log return", e); /* non-fatal */ }
   };
 
@@ -376,7 +385,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     // Log unassignment to history (non-fatal)
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      await supabase.from("asset_assignment_history").insert({
+      const { error: histErr } = await supabase.from("asset_assignment_history").insert({
         asset_id:   assetId,
         asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
         user_name:  assetObj?.assignedTo ?? null,
@@ -386,6 +395,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         event_type: "unassigned",
         event_by:   authUser?.id ?? null,
       });
+      if (histErr) console.warn("[history] failed to log unassignment", histErr);
     } catch (e) { console.warn("[history] failed to log unassignment", e); /* non-fatal */ }
   };
 
@@ -510,7 +520,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const { data: ecodeRow } = await supabase.from("profiles").select("ecode").eq("id", userId).single();
-      await supabase.from("asset_assignment_history").insert(
+      const { error: histErr } = await supabase.from("asset_assignment_history").insert(
         assetIds.map(assetId => {
           const assetObj = assets.find(a => a.assetId === assetId);
           return {
@@ -523,6 +533,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
           };
         })
       );
+      if (histErr) console.warn("[history] failed to log bulk assignment", histErr);
     } catch (e) { console.warn("[history] failed to log bulk assignment", e); /* non-fatal */ }
   };
 
