@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.4.0"
+AGENT_VERSION       = "0.4.1"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
@@ -735,22 +735,38 @@ def _apply_hard_lock() -> tuple[str, str | None, str | None]:
             return ("failed", None, f"LockWorkStation failed (Windows error {err})")
 
         if IS_MAC:
-            # CGSession -suspend drops to the real login window (credential gate).
-            # This is the ONLY method we treat as a genuine lock. pmset only sleeps
-            # the display and does NOT guarantee a password prompt on wake, so we
-            # never report it as a successful lock (would be a false "Locked").
+            # Modern macOS (Big Sur and later) REMOVED the old CGSession Menu Extras
+            # binary, so the preferred method is login.framework's
+            # SACLockScreenImmediate(), which drops to the real login window and
+            # requires the password — a genuine lock. We fall back to the legacy
+            # CGSession binary only on older systems that still ship it. pmset only
+            # sleeps the display and does NOT guarantee a password gate, so it is
+            # never treated as a successful lock (would be a false "Locked").
+            mac_err = None
+            try:
+                import ctypes
+                login_fw = ctypes.CDLL(
+                    "/System/Library/PrivateFrameworks/login.framework/login")
+                login_fw.SACLockScreenImmediate.restype = ctypes.c_int
+                rc = login_fw.SACLockScreenImmediate()
+                if rc == 0:
+                    _write_lock_state({"locked": True, "platform": "macos"})
+                    return ("completed", "Screen locked (login window)", None)
+                mac_err = f"SACLockScreenImmediate returned {rc}"
+            except Exception as e:
+                mac_err = f"SACLockScreenImmediate unavailable ({e})"
             cg = ("/System/Library/CoreServices/Menu Extras/"
                   "User.menu/Contents/Resources/CGSession")
-            if not os.path.exists(cg):
+            if os.path.exists(cg):
+                r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
+                if r.returncode == 0:
+                    _write_lock_state({"locked": True, "platform": "macos"})
+                    return ("completed", "Screen locked (login window)", None)
                 return ("failed", None,
-                        "CGSession was not found on this Mac, so a guaranteed screen "
-                        "lock could not be performed. The device was NOT locked.")
-            r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
-            if r.returncode == 0:
-                _write_lock_state({"locked": True, "platform": "macos"})
-                return ("completed", "Screen locked (login window)", None)
+                        f"{mac_err}; CGSession -suspend exited {r.returncode}: "
+                        f"{r.stderr.strip()}")
             return ("failed", None,
-                    f"CGSession -suspend exited {r.returncode}: {r.stderr.strip()}")
+                    f"Could not lock this Mac: {mac_err}. The device was NOT locked.")
 
         if IS_LIN:
             if not _is_root():
