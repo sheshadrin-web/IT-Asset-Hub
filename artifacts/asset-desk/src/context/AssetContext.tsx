@@ -1,6 +1,20 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Asset, AssetStatus, AssetType, AssetOwnership } from "@/data/mockData";
+import { useAuth } from "@/context/AuthContext";
+
+// Explicit column list for non-privileged (end user) reads. It deliberately
+// OMITS `sim_number` (ICCID) — sensitive carrier data that must never reach an
+// end-user client, even over the network. Row-level RLS cannot redact columns,
+// so we restrict the projection here. Privileged roles select "*" instead.
+const SAFE_ASSET_COLUMNS =
+  "id, asset_id, asset_type, brand, model, serial_number, product_number, processor, ram, " +
+  "operating_system, storage, imei_1, imei_2, phone_number, sim_provider, user_name, use_case, " +
+  "billable_name, plan_name, plan_amount, monitor_brand, monitor_model, monitor_size, keyboard, " +
+  "mouse, cpu, others, purchase_date, warranty_end_date, vendor, invoice, ownership, status, " +
+  "assigned_to, assigned_to_name, assigned_email, assigned_at, ack_token, acknowledged, " +
+  "acknowledged_at, asset_photos, department, location, accessories, remarks, created_at, " +
+  "profiles!assets_assigned_to_fkey(full_name, email, ecode)";
 
 function mapFromDB(row: Record<string, unknown>): Asset {
   return {
@@ -132,17 +146,25 @@ const AssetContext = createContext<AssetContextType | null>(null);
 export function AssetProvider({ children }: { children: ReactNode }) {
   const [assets,  setAssets]  = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const { role } = useAuth();
+
+  // Only IT staff may receive the full row (incl. sim_number/ICCID). Default to
+  // the redacted projection whenever the role is not yet resolved or is end_user.
+  const isPrivileged = role === "super_admin" || role === "it_admin" || role === "it_agent";
 
   const fetchAssets = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
     setLoading(true);
+    const columns = isPrivileged
+      ? "*, profiles!assets_assigned_to_fkey(full_name, email, ecode)"
+      : SAFE_ASSET_COLUMNS;
     const { data, error } = await supabase
       .from("assets")
-      .select("*, profiles!assets_assigned_to_fkey(full_name, email, ecode)")
+      .select(columns)
       .order("created_at", { ascending: false });
-    if (!error && data) setAssets(data.map(mapFromDB));
+    if (!error && data) setAssets((data as unknown as Record<string, unknown>[]).map(mapFromDB));
     setLoading(false);
-  }, []);
+  }, [isPrivileged]);
 
   // Fetch once on mount, then re-fetch whenever auth session changes (so end
   // users — whose RLS-filtered view depends on having a valid JWT — always see
