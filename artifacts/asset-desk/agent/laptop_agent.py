@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.3.0"
+AGENT_VERSION       = "0.4.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
@@ -202,6 +202,13 @@ def _collect_linux() -> dict:
 def collect_system_info() -> dict:
     hostname  = socket.gethostname()
     logged_in = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    # When the agent runs as a root system service (required for Linux hard lock),
+    # USER/USERNAME is "root". Report the real human at the console instead so the
+    # portal keeps showing the employee, not the service account.
+    if IS_LIN and _is_root():
+        cu = _linux_console_user()
+        if cu:
+            logged_in = cu
 
     ip_addr = ""
     try:
@@ -591,142 +598,261 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
         return ("failed", str(e))
 
 
-# ── remote lock (soft, persistent, non-destructive) ────────────────────────
-# A locked device shows a full-screen "locked by IT" overlay that re-asserts
-# itself and survives reboots. State is persisted locally so the lock holds even
-# if the laptop is taken offline, and is reconciled from the server on every
-# /sync. Data is never touched; IT clears the lock remotely.
+# ── remote HARD lock (real OS lockout, honest reporting) ───────────────────
+# A locked device is locked at the OS level — NOT a dismissable overlay:
+#   * Windows : LockWorkStation() (secure desktop; re-asserted each cycle).
+#   * macOS   : CGSession -suspend (drops to the login window).
+#   * Linux   : the account is password-locked (usermod -L) and the active
+#               session is terminated. This needs root, so the agent must run
+#               as a system service. If it is NOT root we report
+#               "requires_admin" rather than faking success.
+# We NEVER report 'completed' unless the OS lock actually took effect, and we
+# surface the exact failure reason to the portal. Local state persists so the
+# lock re-asserts on reboot and is reconciled from the server every /sync.
 LOCK_STATE_FILE = os.path.join(os.path.expanduser("~"), ".miles-agent", "lock.state.json")
 
-_lock_state  = {"locked": False}
-_lock_thread = None
-_lock_mutex  = threading.Lock()
+_lock_mutex = threading.Lock()
+
+
+def _read_lock_state() -> dict:
+    try:
+        with open(LOCK_STATE_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
 
 
 def _read_local_lock() -> bool:
+    return bool(_read_lock_state().get("locked", False))
+
+
+def _write_lock_state(state: dict) -> None:
     try:
-        with open(LOCK_STATE_FILE, "r", encoding="utf-8") as f:
-            return bool(json.load(f).get("locked", False))
+        os.makedirs(os.path.dirname(LOCK_STATE_FILE), exist_ok=True)
+        with open(LOCK_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+
+def _is_root() -> bool:
+    try:
+        return hasattr(os, "geteuid") and os.geteuid() == 0
     except Exception:
         return False
 
 
-def _write_local_lock(locked: bool) -> None:
+def _linux_console_user() -> str | None:
+    """Best-effort: the human user logged into the graphical/console session —
+    the one a hard lock must lock out. Only meaningful when running as root."""
     try:
-        os.makedirs(os.path.dirname(LOCK_STATE_FILE), exist_ok=True)
-        with open(LOCK_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"locked": bool(locked)}, f)
+        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                             capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                uid, user = parts[1], parts[2]
+                try:
+                    if int(uid) >= 1000 and user != "root":
+                        return user
+                except ValueError:
+                    continue
     except Exception:
         pass
+    try:
+        out = subprocess.run(["who"], capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            cols = line.split()
+            if cols and cols[0] != "root":
+                return cols[0]
+    except Exception:
+        pass
+    su = os.environ.get("SUDO_USER")
+    return su if su and su != "root" else None
 
 
-def _os_lock_screen() -> None:
-    """Force the OS login/lock screen once (best-effort, cross-platform)."""
+def _linux_user_has_session(user: str) -> bool:
+    """True if `user` still has an active login session (root-only check)."""
+    try:
+        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                             capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == user:
+                return True
+    except Exception:
+        # If we cannot determine it, assume a session may remain (fail safe:
+        # the caller treats "unknown" as "still there" and reports honestly).
+        return True
+    return False
+
+
+def _linux_account_locked(user: str) -> bool | None:
+    """Whether the account password is locked, via `passwd -S` (root-only).
+    Returns True (locked), False (usable), or None if it cannot be determined."""
+    try:
+        r = subprocess.run(["passwd", "-S", user], capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return None
+        parts = r.stdout.split()
+        if len(parts) >= 2:
+            # field 2: L/LK = locked, P/PS = usable password, NP = no password
+            return parts[1] in ("L", "LK")
+    except Exception:
+        return None
+    return None
+
+
+def _linux_unlock_account(user: str) -> tuple[bool, str]:
+    """Unlock the account using both available methods, then verify. Returns
+    (ok, detail). ok is True only if the account is confirmed not locked."""
+    subprocess.run(["usermod", "--unlock", user], capture_output=True, text=True, timeout=15)
+    if _linux_account_locked(user) is False:
+        return (True, "usermod --unlock")
+    subprocess.run(["passwd", "-u", user], capture_output=True, text=True, timeout=15)
+    locked = _linux_account_locked(user)
+    if locked is False:
+        return (True, "passwd -u")
+    if locked is None:
+        # Cannot verify either way; report best-effort outcome honestly.
+        return (False, "unlock attempted but could not be verified")
+    return (False, "account is still locked after both unlock methods")
+
+
+def _apply_hard_lock() -> tuple[str, str | None, str | None]:
+    """Lock the device at the OS level. Returns (status, result, error) where
+    status is 'completed' (truly locked), 'failed', or 'requires_admin'.
+    On Linux the locked username is persisted so unlock can target it later."""
     try:
         if IS_WIN:
             import ctypes
-            ctypes.windll.user32.LockWorkStation()
-        elif IS_MAC:
+            ret = ctypes.windll.user32.LockWorkStation()
+            if ret:
+                _write_lock_state({"locked": True, "platform": "windows"})
+                return ("completed", "Workstation locked", None)
+            err = ctypes.windll.kernel32.GetLastError()
+            return ("failed", None, f"LockWorkStation failed (Windows error {err})")
+
+        if IS_MAC:
+            # CGSession -suspend drops to the real login window (credential gate).
+            # This is the ONLY method we treat as a genuine lock. pmset only sleeps
+            # the display and does NOT guarantee a password prompt on wake, so we
+            # never report it as a successful lock (would be a false "Locked").
             cg = ("/System/Library/CoreServices/Menu Extras/"
                   "User.menu/Contents/Resources/CGSession")
-            if os.path.exists(cg):
-                subprocess.run([cg, "-suspend"], timeout=10)
-            else:
-                subprocess.run(["pmset", "displaysleepnow"], timeout=10)
-        elif IS_LIN:
-            for c in (["loginctl", "lock-session"], ["xdg-screensaver", "lock"],
-                      ["gnome-screensaver-command", "-l"], ["dm-tool", "lock"]):
-                if shutil.which(c[0]):
-                    subprocess.run(c, timeout=10)
-                    break
-    except Exception:
-        pass
+            if not os.path.exists(cg):
+                return ("failed", None,
+                        "CGSession was not found on this Mac, so a guaranteed screen "
+                        "lock could not be performed. The device was NOT locked.")
+            r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
+            if r.returncode == 0:
+                _write_lock_state({"locked": True, "platform": "macos"})
+                return ("completed", "Screen locked (login window)", None)
+            return ("failed", None,
+                    f"CGSession -suspend exited {r.returncode}: {r.stderr.strip()}")
+
+        if IS_LIN:
+            if not _is_root():
+                return ("requires_admin", None,
+                        "Hard lock requires root. This agent is running as a normal "
+                        "user (systemd --user) and cannot lock the OS account, so the "
+                        "device was NOT locked. Reinstall the agent as a system service "
+                        "with sudo (see the portal install command) to enforce hard lock.")
+            user = _linux_console_user()
+            if not user:
+                return ("failed", None, "Could not determine the logged-in user to lock.")
+            # 1) Password-lock the account so the user cannot log back in.
+            r = subprocess.run(["usermod", "--lock", user], capture_output=True, text=True, timeout=15)
+            if r.returncode != 0:
+                r = subprocess.run(["passwd", "-l", user], capture_output=True, text=True, timeout=15)
+                if r.returncode != 0:
+                    return ("failed", None,
+                            f"Failed to lock account '{user}': {r.stderr.strip()}")
+            # Positively verify the account is actually locked — never trust the exit
+            # code alone. If verification explicitly says it is NOT locked, report a
+            # failure rather than a false "Locked".
+            if _linux_account_locked(user) is False:
+                return ("failed", None,
+                        f"The lock command returned success but account '{user}' is "
+                        f"still reported as unlocked, so the device was NOT locked.")
+            # 2) Terminate the active session so the user is kicked out NOW. We must
+            #    confirm the session is actually gone — a still-running session means
+            #    the user can keep using the device, which is NOT a real lock.
+            subprocess.run(["loginctl", "terminate-user", user], capture_output=True, text=True, timeout=15)
+            if _linux_user_has_session(user):
+                # Escalate: kill all of the user's processes/scopes.
+                subprocess.run(["loginctl", "kill-user", user], capture_output=True, text=True, timeout=15)
+                time.sleep(1)
+            if _linux_user_has_session(user):
+                # Could not evict the live session. Roll the account lock back so the
+                # device is left in a consistent UNLOCKED state and report the truth —
+                # never a false "locked". Verify the rollback actually succeeded.
+                ok, detail = _linux_unlock_account(user)
+                if not ok:
+                    return ("failed", None,
+                            f"Account '{user}' could not be fully locked (the active "
+                            f"session could not be terminated) AND the rollback failed: "
+                            f"{detail}. The account may still be locked — unlock it "
+                            f"manually as root, then retry.")
+                return ("failed", None,
+                        f"Account '{user}' could not be fully locked: the active session "
+                        f"could not be terminated, so the user can still use the device. "
+                        f"The partial lock was rolled back. Please retry.")
+            _write_lock_state({"locked": True, "platform": "linux", "user": user})
+            return ("completed", f"Account '{user}' locked and session terminated", None)
+
+        return ("failed", None, f"unsupported platform: {sys.platform}")
+    except Exception as e:
+        return ("failed", None, str(e))
 
 
-def _run_lock_overlay() -> None:
-    """Full-screen, always-on-top lockout window. Stays until the lock clears.
-    Falls back to a periodic OS screen-lock loop if no GUI toolkit is present."""
+def _release_lock() -> tuple[str, str | None, str | None]:
+    """Undo a hard lock. Returns (status, result, error)."""
     try:
-        import tkinter as tk
-        root = tk.Tk()
-    except Exception:
-        # No GUI toolkit / no display — keep nudging the OS lock screen instead.
-        while _lock_state["locked"]:
-            _os_lock_screen()
-            time.sleep(15)
-        return
-
-    root.title("Device Locked")
-    root.configure(bg="#0b1220")
-    try:
-        root.attributes("-fullscreen", True)
-    except Exception:
-        root.geometry("3000x2000+0+0")
-    try:
-        root.attributes("-topmost", True)
-    except Exception:
-        pass
-    root.protocol("WM_DELETE_WINDOW", lambda: None)
-    root.bind("<Escape>", lambda e: "break")
-
-    tk.Label(root, text="\U0001F512", fg="#ffffff", bg="#0b1220",
-             font=("Helvetica", 64)).pack(pady=(0, 10))
-    tk.Label(root, text="This device has been locked by Miles Education IT",
-             fg="#ffffff", bg="#0b1220", font=("Helvetica", 26, "bold"),
-             justify="center").pack()
-    tk.Label(root, text="Please contact the IT team to regain access.",
-             fg="#cbd5e1", bg="#0b1220", font=("Helvetica", 18),
-             justify="center").pack(pady=(12, 0))
-    tk.Label(root,
-             text=("Your files are safe and have not been deleted.\n"
-                   "This lock will be removed remotely by IT."),
-             fg="#94a3b8", bg="#0b1220", font=("Helvetica", 13),
-             justify="center").pack(pady=(24, 0))
-
-    def keep_alive():
-        if not _lock_state["locked"]:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-            return
-        try:
-            root.attributes("-fullscreen", True)
-            root.attributes("-topmost", True)
-            root.lift()
-            root.focus_force()
-        except Exception:
-            pass
-        root.after(1500, keep_alive)
-
-    root.after(500, keep_alive)
-    try:
-        root.mainloop()
-    except Exception:
-        pass
+        if IS_LIN:
+            if not _is_root():
+                # A non-root agent can NEVER produce a confirmed hard lock (it
+                # returns requires_admin), so any unlock command reaching it must
+                # correspond to a lock applied by a root agent — which a non-root
+                # agent cannot undo. Always report requires_admin so the server's
+                # is_locked is never falsely cleared (regardless of local state).
+                return ("requires_admin", None,
+                        "Cannot unlock: undoing an OS account lock requires root, but "
+                        "this agent is running as a normal user. Reinstall the agent as "
+                        "a system service with sudo, then retry the unlock.")
+            user = _read_lock_state().get("user") or _linux_console_user()
+            if not user:
+                return ("failed", None, "Could not determine which account to unlock.")
+            ok, detail = _linux_unlock_account(user)
+            if not ok:
+                return ("failed", None, f"Failed to unlock account '{user}': {detail}")
+            _write_lock_state({"locked": False})
+            return ("completed", f"Account '{user}' unlocked ({detail})", None)
+        # Windows / macOS workstation locks leave nothing persistent to undo.
+        _write_lock_state({"locked": False})
+        return ("completed", "Access restored", None)
+    except Exception as e:
+        return ("failed", None, str(e))
 
 
-def set_lock(locked: bool) -> None:
-    """Idempotently apply or clear the lock. Safe to call on every sync."""
-    global _lock_thread
+def reconcile_lock(server_locked: bool) -> None:
+    """Keep the OS in sync with the server's confirmed lock flag (best-effort,
+    no command reporting). Only acts on a transition to avoid re-locking each
+    heartbeat. Used by the sync loop and on startup."""
     with _lock_mutex:
-        locked = bool(locked)
-        if locked and not _lock_state["locked"]:
-            _lock_state["locked"] = True
-            _os_lock_screen()
-            # Guard against a still-draining overlay thread from a rapid
-            # unlock->relock: only spawn a fresh one if none is alive.
-            if _lock_thread is None or not _lock_thread.is_alive():
-                _lock_thread = threading.Thread(target=_run_lock_overlay, daemon=True)
-                _lock_thread.start()
-        elif not locked and _lock_state["locked"]:
-            # The overlay thread polls _lock_state and tears itself down.
-            _lock_state["locked"] = False
+        local = _read_local_lock()
+        if server_locked and not local:
+            _apply_hard_lock()
+        elif not server_locked and local:
+            _release_lock()
 
 
 # ── commands ────────────────────────────────────────────────────────────────
 def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
-    """Returns (status, result_message, error_message)."""
+    """Returns (status, result_message, error_message). status is one of
+    'completed', 'failed', or 'requires_admin' — only 'completed' means the
+    action truly took effect."""
     ctype = cmd.get("type")
     if ctype in ("sync_now", "collect_system_info"):
         _post("/sync", {"payload": collect_system_info()})
@@ -740,13 +866,11 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
             return ("completed", "no active wallpaper", None)
         return ("failed", None, err)
     if ctype == "lock_screen":
-        _write_local_lock(True)
-        set_lock(True)
-        return ("completed", "device locked", None)
+        with _lock_mutex:
+            return _apply_hard_lock()
     if ctype == "unlock":
-        _write_local_lock(False)
-        set_lock(False)
-        return ("completed", "device unlocked", None)
+        with _lock_mutex:
+            return _release_lock()
     return ("failed", None, f"unsupported command: {ctype}")
 
 
@@ -817,20 +941,21 @@ def run_loop() -> int:
     if not _acquire_singleton():
         print("Another Miles agent is already running for this user — exiting.", file=sys.stderr)
         return 0
-    # Enforce the last-known lock immediately so a reboot — even offline — keeps
-    # the device locked before the first /sync round-trips.
+    # Re-assert the last-known lock immediately so a reboot — even offline —
+    # keeps the device locked before the first /sync round-trips. On Linux the
+    # account stays password-locked across reboot anyway; this also kicks any
+    # session that came up.
     try:
         if _read_local_lock():
-            set_lock(True)
+            with _lock_mutex:
+                _apply_hard_lock()
     except Exception:
         pass
     while True:
         try:
             sync = _post("/sync", {"payload": collect_system_info()})
             if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
-                locked = bool(sync.get("locked"))
-                _write_local_lock(locked)
-                set_lock(locked)
+                reconcile_lock(bool(sync.get("locked")))
             apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
             poll_commands()
         except Exception as e:
@@ -945,18 +1070,107 @@ def uninstall_service_mac() -> int:
     return 0
 
 
-# ── Linux systemd --user service ────────────────────────────────────────────
-LIN_UNIT_NAME   = "miles-agent.service"
-LIN_UNIT_PATH   = os.path.expanduser(f"~/.config/systemd/user/{LIN_UNIT_NAME}")
-LIN_INSTALL_DIR = os.path.expanduser("~/.local/share/miles-agent")
+# ── Linux systemd service ───────────────────────────────────────────────────
+# Two install modes:
+#   * ROOT  -> a SYSTEM service (/etc/systemd/system). Required for the hard
+#     lock: only root can usermod -L / terminate another user's session.
+#   * non-root -> a per-user service (systemd --user). Convenient, but the agent
+#     cannot enforce a hard lock and will report "requires_admin" on lock.
+LIN_UNIT_NAME        = "miles-agent.service"
+LIN_UNIT_PATH        = os.path.expanduser(f"~/.config/systemd/user/{LIN_UNIT_NAME}")
+LIN_INSTALL_DIR      = os.path.expanduser("~/.local/share/miles-agent")
+LIN_SYS_UNIT_PATH    = f"/etc/systemd/system/{LIN_UNIT_NAME}"
+LIN_SYS_INSTALL_DIR  = "/opt/miles-agent"
+
+
+def _remove_legacy_user_service() -> None:
+    """Best-effort: tear down a previously-installed per-user service so it does
+    not poll for commands alongside the new root system service (which would
+    cause duplicate execution / a non-root agent claiming lock commands)."""
+    su = os.environ.get("SUDO_USER")
+    if not su or su == "root":
+        return
+    try:
+        import pwd
+        uid = pwd.getpwnam(su).pw_uid
+    except Exception:
+        return
+    env = dict(os.environ, XDG_RUNTIME_DIR=f"/run/user/{uid}")
+    subprocess.run(["sudo", "-u", su, "systemctl", "--user", "disable", "--now", LIN_UNIT_NAME],
+                   env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    legacy_unit = f"/home/{su}/.config/systemd/user/{LIN_UNIT_NAME}"
+    try:
+        if os.path.exists(legacy_unit):
+            os.remove(legacy_unit)
+    except Exception:
+        pass
+
+
+def _install_service_linux_system() -> int:
+    """Root install: a system-wide systemd service that can enforce the hard lock."""
+    _remove_legacy_user_service()
+    os.makedirs(LIN_SYS_INSTALL_DIR, exist_ok=True)
+
+    prog_args, dst = _service_program_args(LIN_SYS_INSTALL_DIR)
+    exec_start = " ".join(shlex.quote(a) for a in prog_args)
+
+    unit = f"""[Unit]
+Description=Miles IT Assets Device Agent (system)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={exec_start}
+Restart=always
+RestartSec=15
+Environment=MILES_AGENT_TOKEN={TOKEN}
+Environment=MILES_AGENT_API_BASE={API_BASE}
+Environment=MILES_AGENT_SYNC_INTERVAL={SYNC_INTERVAL_SEC}
+
+[Install]
+WantedBy=multi-user.target
+"""
+    with open(LIN_SYS_UNIT_PATH, "w") as fh:
+        fh.write(unit)
+    os.chmod(LIN_SYS_UNIT_PATH, 0o600)  # contains token
+
+    for args in (
+        ["systemctl", "daemon-reload"],
+        ["systemctl", "enable", LIN_UNIT_NAME],
+        ["systemctl", "restart", LIN_UNIT_NAME],
+    ):
+        r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            print(f"ERROR: {' '.join(args)} failed:", r.stderr.decode(errors="ignore"), file=sys.stderr)
+            return 1
+
+    print(f"✓ Service '{LIN_UNIT_NAME}' installed and started (system service, root).")
+    print(f"  Binary:   {dst}")
+    print(f"  Unit:     {LIN_SYS_UNIT_PATH}")
+    print(f"  Status:   systemctl status {LIN_UNIT_NAME}")
+    print(f"  Logs:     journalctl -u {LIN_UNIT_NAME} -f")
+    print(f"  Sync every: {SYNC_INTERVAL_SEC} seconds")
+    print("  Hard lock: ENABLED (running as root).")
+    return 0
 
 
 def install_service_linux() -> int:
-    """Install a systemd --user service that runs the agent and survives reboot (with linger)."""
+    """Install a systemd service that runs the agent and survives reboot.
+    Runs as a SYSTEM service when invoked as root (enables hard lock); otherwise
+    falls back to a per-user service (hard lock unavailable)."""
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
               file=sys.stderr)
         return 2
+
+    if _is_root():
+        return _install_service_linux_system()
+
+    print("WARNING: installing as a per-user service (not root). Remote HARD LOCK will")
+    print("         NOT work — the agent cannot lock the OS account without root. To")
+    print("         enable hard lock, reinstall with: sudo python3 laptop_agent.py install")
+    print()
 
     os.makedirs(LIN_INSTALL_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(LIN_UNIT_PATH), exist_ok=True)
@@ -1002,6 +1216,7 @@ WantedBy=default.target
     print(f"  Status:   systemctl --user status {LIN_UNIT_NAME}")
     print(f"  Logs:     journalctl --user -u {LIN_UNIT_NAME} -f")
     print(f"  Sync every: {SYNC_INTERVAL_SEC} seconds")
+    print("  Hard lock: DISABLED (per-user service, no root).")
     print()
     print("To keep the agent running when you are logged out (headless servers), run once:")
     print(f"  sudo loginctl enable-linger {os.environ.get('USER', '$USER')}")
@@ -1009,6 +1224,18 @@ WantedBy=default.target
 
 
 def uninstall_service_linux() -> int:
+    if _is_root():
+        subprocess.run(["systemctl", "disable", "--now", LIN_UNIT_NAME],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(LIN_SYS_UNIT_PATH):
+            os.remove(LIN_SYS_UNIT_PATH)
+        subprocess.run(["systemctl", "daemon-reload"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.isdir(LIN_SYS_INSTALL_DIR):
+            shutil.rmtree(LIN_SYS_INSTALL_DIR, ignore_errors=True)
+        print("✓ System service uninstalled.")
+        return 0
+
     subprocess.run(["systemctl", "--user", "disable", "--now", LIN_UNIT_NAME],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if os.path.exists(LIN_UNIT_PATH):

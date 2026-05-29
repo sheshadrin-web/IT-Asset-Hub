@@ -40,6 +40,35 @@ interface AgentToken {
   generated_at:     string;
   revoked_at:       string | null;
 }
+interface DeviceCommand {
+  id:                string;
+  command_type:      string;
+  status:            "pending" | "running" | "completed" | "failed" | "cancelled" | "requires_admin";
+  requested_at:      string | null;
+  executed_at:       string | null;
+  completed_at:      string | null;
+  result_message:    string | null;
+  error_message:     string | null;
+  requested_by_name: string | null;
+}
+
+// Maps the raw command status to a human label + colour for the audit log/banner.
+const STATUS_META: Record<DeviceCommand["status"], { label: string; cls: string }> = {
+  pending:        { label: "Pending",                   cls: "text-slate-600 bg-slate-100" },
+  running:        { label: "Executing",                 cls: "text-sky-700 bg-sky-100" },
+  completed:      { label: "Success",                   cls: "text-emerald-700 bg-emerald-100" },
+  failed:         { label: "Failed",                    cls: "text-red-700 bg-red-100" },
+  requires_admin: { label: "Requires Admin Privileges", cls: "text-amber-800 bg-amber-100" },
+  cancelled:      { label: "Superseded",                cls: "text-slate-500 bg-slate-100" },
+};
+
+const COMMAND_LABEL: Record<string, string> = {
+  lock_screen:        "Lock device",
+  unlock:             "Unlock device",
+  update_wallpaper:   "Update wallpaper",
+  sync_now:           "Sync now",
+  collect_system_info:"Collect system info",
+};
 
 interface Props { assetId: string; assetTag?: string | null; }
 
@@ -55,6 +84,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
 
   const [device, setDevice] = useState<ManagedDevice | null>(null);
   const [token,  setToken]  = useState<AgentToken | null>(null);
+  const [commands, setCommands] = useState<DeviceCommand[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -77,6 +107,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     ]);
     setDevice((d.data as ManagedDevice | null) ?? null);
     setToken((t.data as AgentToken | null) ?? null);
+
+    // Audit log: recent lock/unlock/etc commands with the initiator's name.
+    const h = await supabase.rpc("device_command_history", { p_asset_id: assetId, p_limit: 20 });
+    setCommands(Array.isArray(h.data) ? (h.data as DeviceCommand[]) : []);
     setLoading(false);
   }, [assetId, session, authLoading]);
 
@@ -209,7 +243,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `export MILES_AGENT_TOKEN="${tok}"`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py register`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
-      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
+      // install-service runs under sudo so the agent is registered as a root
+      // SYSTEM service — required for the real hard lock (lock the OS account +
+      // terminate the session). MILES_AGENT_TOKEN is passed through to sudo.
+      `sudo MILES_AGENT_TOKEN="${tok}" ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
     ].join(" && \\\n");
     return hostName ? `${install}\nsudo hostnamectl set-hostname "${hostName}"` : install;
   };
@@ -257,10 +294,11 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       ...(hostName ? [`Rename-Computer -NewName "${hostName}" -Force`] : []),
     ].join("\n");
 
-  // Remote lock/unlock only exists in agent v0.3.0+. An older agent (e.g. v0.2.0)
-  // ignores the lock command entirely, so the portal can show "Locked" while the
-  // laptop stays fully usable. Detect that mismatch and warn IT to update the agent.
-  const LOCK_MIN_VERSION = [0, 3, 0];
+  // Real HARD lock (OS-level account/workstation lock with honest status
+  // reporting) only exists in agent v0.4.0+. Older agents either ignore the
+  // command or only show a dismissable overlay, so the portal must not imply a
+  // true lock. Detect the mismatch and warn IT to update the agent.
+  const LOCK_MIN_VERSION = [0, 4, 0];
   const parseVer = (v: string | null | undefined): number[] =>
     (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
   const lockEnforceable = (() => {
@@ -274,6 +312,21 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     return true;
   })();
   const lockUnenforceable = !!device?.is_locked && !lockEnforceable;
+
+  // The most recent lock/unlock command drives the live status banner: a lock
+  // request can be Pending → Executing → Success/Failed/Requires Admin. The
+  // device only shows as truly "Locked" once the agent confirms success
+  // (is_locked, set server-side only on a confirmed lock).
+  const latestLockCmd = commands.find(
+    (c) => c.command_type === "lock_screen" || c.command_type === "unlock",
+  );
+  const lockPending =
+    latestLockCmd?.command_type === "lock_screen" &&
+    (latestLockCmd.status === "pending" || latestLockCmd.status === "running");
+  const lockFailed =
+    latestLockCmd?.command_type === "lock_screen" &&
+    (latestLockCmd.status === "failed" || latestLockCmd.status === "requires_admin") &&
+    !device?.is_locked;
 
   return (
     <Card>
@@ -330,11 +383,43 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 flex items-center gap-2">
                 <Lock className="h-4 w-4 text-red-600 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-red-800">Device locked</p>
+                  <p className="text-xs font-medium text-red-800">Device locked (confirmed)</p>
                   <p className="text-[11px] text-red-700">
-                    End-user access is blocked
+                    The agent confirmed the OS lock took effect — end-user access is blocked
                     {device.locked_at ? <> since {new Date(device.locked_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
                     {" "}Files are preserved. Unlock below to restore access.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!device?.is_locked && lockPending && (
+              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-sky-600 shrink-0 animate-spin" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-sky-800">
+                    Lock {latestLockCmd?.status === "running" ? "executing" : "pending"}…
+                  </p>
+                  <p className="text-[11px] text-sky-700">
+                    Lock requested — waiting for the device agent to apply it and confirm. The device is
+                    <b> not yet locked</b>. This page updates once the agent reports back (next sync).
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {lockFailed && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-900">
+                    Lock {latestLockCmd?.status === "requires_admin" ? "needs admin privileges" : "failed"} — device NOT locked
+                  </p>
+                  <p className="text-[11px] text-amber-800">
+                    {latestLockCmd?.error_message
+                      ? latestLockCmd.error_message
+                      : "The agent could not apply the lock."}
+                    {" "}You can retry the lock below once the issue is resolved.
                   </p>
                 </div>
               </div>
@@ -347,8 +432,8 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   <p className="text-xs font-medium text-amber-900">Lock not enforced — agent too old</p>
                   <p className="text-[11px] text-amber-800">
                     This device runs agent <span className="font-mono">v{device?.agent_version ?? "?"}</span>, which
-                    does not support remote lock (needs <span className="font-mono">v0.3.0</span>+). The lock is recorded
-                    here but the laptop stays usable. Reinstall the agent on the device to enforce it.
+                    does not support the real hard lock (needs <span className="font-mono">v0.4.0</span>+). The lock is
+                    recorded here but the laptop may stay usable. Reinstall the agent on the device to enforce it.
                   </p>
                 </div>
               </div>
@@ -386,6 +471,40 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   <RefreshCw className="h-4 w-4" /> Refresh
                 </Button>
               </div>
+            )}
+
+            {isSuperAdmin && device && commands.length > 0 && (
+              <details className="rounded-md border bg-muted/20 mt-1">
+                <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-muted-foreground">
+                  Command audit log ({commands.length})
+                </summary>
+                <div className="px-3 pb-3 space-y-2">
+                  {commands.map((c) => {
+                    const meta = STATUS_META[c.status] ?? STATUS_META.pending;
+                    const when = c.completed_at ?? c.executed_at ?? c.requested_at;
+                    return (
+                      <div key={c.id} className="rounded border bg-background px-2.5 py-2 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{COMMAND_LABEL[c.command_type] ?? c.command_type}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 font-medium", meta.cls)}>{meta.label}</span>
+                          <span className="ml-auto text-muted-foreground">
+                            {when ? new Date(when).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-muted-foreground">
+                          Requested by <span className="font-medium text-foreground">{c.requested_by_name ?? "System"}</span>
+                        </p>
+                        {c.error_message && (
+                          <p className="mt-0.5 text-red-700 break-words">Reason: {c.error_message}</p>
+                        )}
+                        {!c.error_message && c.result_message && (
+                          <p className="mt-0.5 text-emerald-700 break-words">{c.result_message}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
             )}
 
             <WallpaperManager
@@ -559,10 +678,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 rows={7}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Registers, runs a test sync, then installs a <b>systemd --user</b> service so the agent
-                auto-starts on login and syncs every 5 minutes. For headless servers, run once:
-                <span className="font-mono"> sudo loginctl enable-linger $USER</span>. To remove:
-                <span className="font-mono"> ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service</span>
+                Registers, runs a test sync, then installs a <b>root systemd system service</b> (via
+                <span className="font-mono"> sudo</span>) so the agent runs with the privileges needed to enforce a
+                real <b>hard lock</b> and syncs every 5 minutes — you'll be asked for your password once. To remove:
+                <span className="font-mono"> sudo ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service</span>
               </p>
             </div>
 
@@ -648,9 +767,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Lock this device?</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            The laptop will show a full-screen lock message and the end user won't be able to use it.
-            Their files are <b>not</b> deleted. The lock applies within a few minutes, stays after a restart,
-            and you can unlock it anytime from this page.
+            This sends a <b>hard lock</b> to the device: the OS account/workstation is locked and the active
+            session is ended, so the end user can't use it. Their files are <b>not</b> deleted. The portal
+            only shows <b>Locked</b> once the agent confirms it actually took effect — until then you'll see
+            a Pending/Executing status, or the exact reason if it failed. You can unlock anytime from this page.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLock(false)}>Cancel</Button>
