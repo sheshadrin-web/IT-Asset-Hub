@@ -34,6 +34,7 @@ import socket
 import platform
 import subprocess
 import shutil
+import shlex
 import uuid
 import hashlib
 from datetime import datetime, timezone
@@ -549,6 +550,31 @@ def _xml_escape(s: str) -> str:
 
 def install_service_mac() -> int:
     """Install a per-user launchd agent that runs `miles-agent run` and survives reboot."""
+    return _install_service_mac_impl()
+
+
+def _service_program_args(install_dir: str) -> tuple[list[str], str]:
+    """Return the argv used to launch the agent in `run` mode as a persistent service,
+    plus a display path. Handles both frozen-binary and plain .py script installs so the
+    service keeps working whether the user ran the binary or `python3 laptop_agent.py`."""
+    src = os.path.abspath(sys.argv[0])
+    if getattr(sys, "frozen", False):
+        # PyInstaller binary — exec it directly.
+        dst = os.path.join(install_dir, "miles-agent")
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copy2(src, dst)
+        os.chmod(dst, 0o755)
+        return ([dst, "run"], dst)
+    # Script mode — copy the .py to a stable location and launch via the current interpreter
+    # (e.g. a venv python that has `requests`), so the service uses the same env that worked.
+    dst = os.path.join(install_dir, "laptop_agent.py")
+    if os.path.abspath(src) != os.path.abspath(dst):
+        shutil.copy2(src, dst)
+    os.chmod(dst, 0o644)
+    return ([os.path.abspath(sys.executable), dst, "run"], dst)
+
+
+def _install_service_mac_impl() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
               file=sys.stderr)
@@ -558,12 +584,9 @@ def install_service_mac() -> int:
     os.makedirs(os.path.dirname(MAC_PLIST_PATH), exist_ok=True)
     os.makedirs(os.path.dirname(MAC_LOG_OUT), exist_ok=True)
 
-    # Copy current binary into a stable location so Downloads can be cleaned later.
-    src = os.path.abspath(sys.argv[0])
-    dst = os.path.join(MAC_INSTALL_DIR, "miles-agent")
-    if os.path.abspath(src) != os.path.abspath(dst):
-        shutil.copy2(src, dst)
-    os.chmod(dst, 0o755)
+    # Build launch argv (handles both frozen binary and plain .py script installs).
+    prog_args, dst = _service_program_args(MAC_INSTALL_DIR)
+    prog_xml = "\n".join(f"    <string>{_xml_escape(a)}</string>" for a in prog_args)
 
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -572,8 +595,7 @@ def install_service_mac() -> int:
   <key>Label</key><string>{MAC_PLIST_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{_xml_escape(dst)}</string>
-    <string>run</string>
+{prog_xml}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -636,11 +658,9 @@ def install_service_linux() -> int:
     os.makedirs(LIN_INSTALL_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(LIN_UNIT_PATH), exist_ok=True)
 
-    src = os.path.abspath(sys.argv[0])
-    dst = os.path.join(LIN_INSTALL_DIR, "miles-agent")
-    if os.path.abspath(src) != os.path.abspath(dst):
-        shutil.copy2(src, dst)
-    os.chmod(dst, 0o755)
+    # Build launch argv (handles both frozen binary and plain .py script installs).
+    prog_args, dst = _service_program_args(LIN_INSTALL_DIR)
+    exec_start = " ".join(shlex.quote(a) for a in prog_args)
 
     unit = f"""[Unit]
 Description=Miles IT Assets Device Agent
@@ -649,7 +669,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart={dst} run
+ExecStart={exec_start}
 Restart=always
 RestartSec=15
 Environment=MILES_AGENT_TOKEN={TOKEN}
