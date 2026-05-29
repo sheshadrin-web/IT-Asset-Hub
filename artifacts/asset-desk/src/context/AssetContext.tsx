@@ -363,6 +363,50 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const updateStatus = async (assetId: string, status: AssetStatus): Promise<void> => {
+    // An asset that returns to "Available" is back in inventory and must NOT
+    // keep a stale assigned user. Clear the assignment fields in the same write
+    // and log a "returned" history event capturing who it came back from.
+    // Any other status change (Under Repair, Retired, Lost…) only touches status.
+    if (status === "Available") {
+      const assetObj = assets.find(a => a.assetId === assetId);
+      const { error } = await supabase
+        .from("assets")
+        .update({
+          status:          "Available",
+          assigned_to:     null,
+          assigned_email:  null,
+          assigned_to_name:null,
+          assigned_at:     null,
+          department:      null,
+          ack_token:       null,
+          acknowledged:    false,
+          acknowledged_at: null,
+        })
+        .eq("asset_id", assetId);
+      if (error) throw new Error(error.message);
+      setAssets(prev => prev.map(a =>
+        a.assetId === assetId
+          ? { ...a, status: "Available", assignedTo: undefined, assignedEmail: undefined, assignedEcode: undefined, department: undefined, assignedAt: undefined, ackToken: undefined, acknowledged: false, acknowledgedAt: undefined }
+          : a
+      ));
+      // Log return to history only if it was actually assigned to someone (non-fatal)
+      if (assetObj?.assignedTo || assetObj?.assignedEmail) {
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          await supabase.from("asset_assignment_history").insert({
+            asset_id:   assetId,
+            asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
+            user_name:  assetObj?.assignedTo ?? null,
+            user_email: assetObj?.assignedEmail ?? null,
+            user_ecode: (assetObj as { assignedEcode?: string } | undefined)?.assignedEcode ?? null,
+            department: assetObj?.department ?? null,
+            event_type: "returned",
+            event_by:   authUser?.id ?? null,
+          });
+        } catch (e) { console.warn("[history] failed to log return", e); /* non-fatal */ }
+      }
+      return;
+    }
     const { error } = await supabase.from("assets").update({ status }).eq("asset_id", assetId);
     if (error) throw new Error(error.message);
     setAssets(prev => prev.map(a => a.assetId === assetId ? { ...a, status } : a));

@@ -61,6 +61,7 @@ function getLifecycleStageIdx(status: AssetStatus): number {
   if (status === "In Procurement") return 0;
   if (status === "Available")      return 1;
   if (status === "Assigned")       return 2;
+  if (status === "Recovery Stage") return 2;
   if (status === "Under Repair")   return 3;
   if (status === "Retired")        return 4;
   return 1;
@@ -265,6 +266,12 @@ export default function AssetDetail() {
           {isAdmin && asset.status === "In Procurement" && (
             <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-move-inventory">
               <PackageCheck className="h-4 w-4" /> Move to Inventory
+            </Button>
+          )}
+          {/* Receive back into inventory — for Recovery Stage (clears assigned user) */}
+          {isAdmin && asset.status === "Recovery Stage" && (
+            <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleUpdateStatus("Available")} data-testid="button-receive-available">
+              <PackageCheck className="h-4 w-4" /> Receive — Mark Available
             </Button>
           )}
           {/* Mark Available — for Under Repair, Retired, Lost */}
