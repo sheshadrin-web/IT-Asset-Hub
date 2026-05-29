@@ -270,7 +270,8 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     [
       `mkdir "%USERPROFILE%\\.miles-agent" 2>nul`,
       `curl -fsSL "${agentUrl}" -o ${SCRIPT}`,
-      `python -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || (echo Installing Python ^(one-time, no admin needed^)... && curl -fsSL "${PY_URL}" -o "%TEMP%\\miles-python-setup.exe" && "%TEMP%\\miles-python-setup.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 && ${PY_FALLBACK_CMD} -m venv "%USERPROFILE%\\.miles-agent\\venv")`,
+      `py -3 -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || python -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || (echo Installing Python ^(one-time, no admin needed^)... && curl -fsSL "${PY_URL}" -o "%TEMP%\\miles-python-setup.exe" && "%TEMP%\\miles-python-setup.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 & ${PY_FALLBACK_CMD} -m venv "%USERPROFILE%\\.miles-agent\\venv" || py -3 -m venv "%USERPROFILE%\\.miles-agent\\venv")`,
+      `if not exist ${PY} echo [ERROR] Python setup did not complete. Install Python 3 from https://www.python.org/downloads/ - enable "Add python.exe to PATH" - then paste this command again.`,
       `${PY} -m pip install -q --upgrade pip requests`,
       `setx MILES_AGENT_TOKEN "${tok}"`,
       `set MILES_AGENT_TOKEN=${tok}`,
@@ -288,8 +289,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     [
       `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.miles-agent" | Out-Null`,
       `curl.exe -fsSL "${agentUrl}" -o ${SCRIPTP}`,
-      `python -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null`,
-      `if ($LASTEXITCODE -ne 0) { Write-Host "Installing Python (one-time, no admin needed)..."; curl.exe -fsSL "${PY_URL}" -o "$env:TEMP\\miles-python-setup.exe"; Start-Process "$env:TEMP\\miles-python-setup.exe" -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_launcher=1' -Wait; & ${PYP_FALLBACK} -m venv "$env:USERPROFILE\\.miles-agent\\venv" }`,
+      `py -3 -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null; if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { python -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null }`,
+      `if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { Write-Host "Installing Python (one-time, no admin needed)..."; curl.exe -fsSL "${PY_URL}" -o "$env:TEMP\\miles-python-setup.exe"; Start-Process "$env:TEMP\\miles-python-setup.exe" -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_launcher=1' -Wait; & ${PYP_FALLBACK} -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null; if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { py -3 -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null } }`,
+      `if (-not (Test-Path ${PYP})) { Write-Host "[ERROR] Python setup did not complete. Install Python 3 from https://www.python.org/downloads/ - enable 'Add python.exe to PATH' - then paste this command again." }`,
       `& ${PYP} -m pip install -q --upgrade pip requests`,
       `setx MILES_AGENT_TOKEN "${tok}" | Out-Null`,
       `$env:MILES_AGENT_TOKEN="${tok}"`,
