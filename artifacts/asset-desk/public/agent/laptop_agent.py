@@ -345,19 +345,21 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
                 f'tell application "System Events" to set picture of every desktop to POSIX file "{esc}"',
             ]
             last_err: str | None = None
-            applied = False
+            ran_ok = False
             for script in scripts:
                 try:
                     subprocess.check_call(
                         ["osascript", "-e", script], timeout=20,
                         stderr=subprocess.PIPE,
                     )
-                    applied = True
+                    ran_ok = True
                     break
                 except subprocess.CalledProcessError as e:
                     last_err = (e.stderr.decode() if e.stderr else str(e)).strip()
                 except Exception as e:  # noqa: BLE001
                     last_err = str(e)
+            if not ran_ok:
+                return (False, last_err or "osascript failed to set wallpaper")
             # Force the desktop to re-render the new picture (best-effort).
             for proc in ("Dock", "WallpaperAgent"):
                 try:
@@ -365,9 +367,21 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:  # noqa: BLE001
                     pass
-            if applied:
+            # Verify the desktop actually changed — osascript can exit 0 while the
+            # picture silently stays the same on modern macOS. If the read-back
+            # doesn't reference our file, report failure so the portal shows the
+            # real state instead of a false "applied".
+            try:
+                out = subprocess.check_output(
+                    ["osascript", "-e",
+                     'tell application "System Events" to get picture of desktop 1'],
+                    timeout=15, stderr=subprocess.DEVNULL,
+                ).decode().strip()
+                if os.path.basename(local_path) in out:
+                    return (True, None)
+                return (False, f"wallpaper set call succeeded but desktop still shows '{out or 'unknown'}'")
+            except Exception:  # noqa: BLE001 — verification unavailable, trust the apply
                 return (True, None)
-            return (False, last_err or "osascript failed to set wallpaper")
         if IS_LIN:
             if shutil.which("gsettings"):
                 subprocess.check_call([

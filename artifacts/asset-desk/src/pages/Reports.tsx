@@ -92,10 +92,11 @@ function exportUsersCsv(users: Profile[]) {
 type ManagedDevice = Record<string, unknown>;
 
 async function fetchManagedDevices(): Promise<ManagedDevice[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("managed_devices")
     .select("*")
     .order("last_seen_at", { ascending: false, nullsFirst: false });
+  if (error) throw new Error(error.message);
   return (data ?? []) as ManagedDevice[];
 }
 
