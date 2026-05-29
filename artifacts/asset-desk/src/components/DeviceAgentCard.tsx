@@ -117,47 +117,77 @@ export default function DeviceAgentCard({ assetId }: Props) {
     : "bg-gray-400";
   const statusLabel = device?.status ? device.status.charAt(0).toUpperCase() + device.status.slice(1) : "Not Installed";
 
-  // Install commands shown after generating. The agent reads MILES_AGENT_TOKEN env var.
-  // Both shell variants: cd to Downloads → verify miles-agent.exe is there → register → test sync.
-  const installCmdCmd = (tok: string) =>
-    [
-      `cd /d %USERPROFILE%\\Downloads`,
-      `if not exist miles-agent.exe (echo ERROR: miles-agent.exe not found. Please download the agent first. && exit /b 1)`,
-      `set MILES_AGENT_TOKEN=${tok}`,
-      `miles-agent.exe register`,
-      `miles-agent.exe sync`,
-    ].join("\n");
-  const installCmdPs = (tok: string) =>
-    [
-      `cd $env:USERPROFILE\\Downloads`,
-      `if (-not (Test-Path .\\miles-agent.exe)) { Write-Host "ERROR: miles-agent.exe not found. Please download the agent first." -ForegroundColor Red; exit 1 }`,
-      `$env:MILES_AGENT_TOKEN="${tok}"`,
-      `.\\miles-agent.exe register`,
-      `.\\miles-agent.exe sync`,
-    ].join("\n");
+  // Install commands shown after generating. They download the Python agent from
+  // this portal, create an isolated venv (avoids macOS/Ubuntu PEP-668 "externally
+  // managed environment" errors), install `requests`, register + test-sync, then
+  // install a background service. Each step is chained so it stops cleanly on the
+  // first failure rather than cascading errors. The agent reads MILES_AGENT_TOKEN.
+  const agentUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${import.meta.env.BASE_URL}agent/laptop_agent.py`
+      : "/agent/laptop_agent.py";
+
+  // ── macOS (Terminal) — launchd background service ──────────────────────────
   const installCmdMac = (tok: string) =>
     [
-      `cd ~/Downloads`,
-      `[ -f miles-agent-macos ] || { echo "ERROR: miles-agent-macos not found. Please download the agent first."; exit 1; }`,
-      `chmod +x miles-agent-macos`,
-      `xattr -d com.apple.quarantine miles-agent-macos 2>/dev/null || true`,
+      `mkdir -p ~/.miles-agent`,
+      `curl -fsSL "${agentUrl}" -o ~/.miles-agent/laptop_agent.py`,
+      `python3 -m venv ~/.miles-agent/venv`,
+      `~/.miles-agent/venv/bin/python -m pip install -q --upgrade pip requests`,
       `export MILES_AGENT_TOKEN="${tok}"`,
-      `./miles-agent-macos register`,
-      `./miles-agent-macos sync`,
-      `./miles-agent-macos install-service`,
-    ].join("\n");
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py register`,
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
+    ].join(" && \\\n");
+
+  // ── Ubuntu / Linux (Terminal) — systemd --user service ─────────────────────
   const installCmdLinux = (tok: string) =>
     [
-      `cd ~/Downloads`,
-      `[ -f miles-agent-linux ] || { echo "ERROR: miles-agent-linux not found. Please download the agent first."; exit 1; }`,
-      `chmod +x miles-agent-linux`,
+      `mkdir -p ~/.miles-agent`,
+      `curl -fsSL "${agentUrl}" -o ~/.miles-agent/laptop_agent.py`,
+      `python3 -m venv ~/.miles-agent/venv`,
+      `~/.miles-agent/venv/bin/python -m pip install -q --upgrade pip requests`,
       `export MILES_AGENT_TOKEN="${tok}"`,
-      `./miles-agent-linux register`,
-      `./miles-agent-linux sync`,
-      `./miles-agent-linux install-service`,
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py register`,
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
+      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
+    ].join(" && \\\n");
+
+  // ── Windows (Command Prompt) — logon Scheduled Task ────────────────────────
+  const PY = `"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe"`;
+  const SCRIPT = `"%USERPROFILE%\\.miles-agent\\laptop_agent.py"`;
+  const installCmdCmd = (tok: string) =>
+    [
+      `mkdir "%USERPROFILE%\\.miles-agent" 2>nul`,
+      `curl -fsSL "${agentUrl}" -o ${SCRIPT}`,
+      `python -m venv "%USERPROFILE%\\.miles-agent\\venv"`,
+      `${PY} -m pip install -q --upgrade pip requests`,
+      `setx MILES_AGENT_TOKEN "${tok}"`,
+      `set MILES_AGENT_TOKEN=${tok}`,
+      `${PY} ${SCRIPT} register`,
+      `${PY} ${SCRIPT} sync`,
+      `schtasks /Create /SC ONLOGON /TN MilesAgent /TR "\\"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\pythonw.exe\\" \\"%USERPROFILE%\\.miles-agent\\laptop_agent.py\\" run" /F`,
     ].join("\n");
-  const installCmdPy = (tok: string) =>
-    `set MILES_AGENT_TOKEN=${tok}\npip install requests\npython laptop_agent.py register\npython laptop_agent.py sync`;
+
+  // ── Windows (PowerShell) — logon Scheduled Task ────────────────────────────
+  // Uses the native ScheduledTasks cmdlets (New-ScheduledTaskAction / Register-
+  // ScheduledTask) which take the executable and arguments separately, avoiding
+  // the fragile backslash-quote escaping that schtasks /TR requires.
+  const PYP = `"$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe"`;
+  const SCRIPTP = `"$env:USERPROFILE\\.miles-agent\\laptop_agent.py"`;
+  const installCmdPs = (tok: string) =>
+    [
+      `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.miles-agent" | Out-Null`,
+      `curl.exe -fsSL "${agentUrl}" -o ${SCRIPTP}`,
+      `python -m venv "$env:USERPROFILE\\.miles-agent\\venv"`,
+      `& ${PYP} -m pip install -q --upgrade pip requests`,
+      `setx MILES_AGENT_TOKEN "${tok}" | Out-Null`,
+      `$env:MILES_AGENT_TOKEN="${tok}"`,
+      `& ${PYP} ${SCRIPTP} register`,
+      `& ${PYP} ${SCRIPTP} sync`,
+      `$act = New-ScheduledTaskAction -Execute "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\pythonw.exe" -Argument "\`"$env:USERPROFILE\\.miles-agent\\laptop_agent.py\`" run"`,
+      `Register-ScheduledTask -TaskName MilesAgent -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Action $act -Force | Out-Null`,
+    ].join("\n");
 
   return (
     <Card>
@@ -240,44 +270,16 @@ export default function DeviceAgentCard({ assetId }: Props) {
             />
 
             <div className="border-t pt-3 mt-2">
-              <p className="text-[11px] font-medium text-muted-foreground mb-2">Download Agent</p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <Button
-                  asChild
-                  className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                  data-testid="button-download-windows-agent"
-                >
-                  <a href="/agent/miles-agent.exe" download="miles-agent.exe">
-                    <Download className="h-4 w-4" /> Windows (.exe)
-                  </a>
-                </Button>
-                <Button
-                  asChild
-                  className="w-full gap-2 bg-slate-800 hover:bg-slate-900 text-white"
-                  data-testid="button-download-macos-agent"
-                >
-                  <a href="/agent/miles-agent-macos" download="miles-agent-macos">
-                    <Download className="h-4 w-4" /> macOS
-                  </a>
-                </Button>
-                <Button
-                  asChild
-                  className="w-full gap-2 bg-orange-600 hover:bg-orange-700 text-white"
-                  data-testid="button-download-linux-agent"
-                >
-                  <a href="/agent/miles-agent-linux" download="miles-agent-linux">
-                    <Download className="h-4 w-4" /> Ubuntu / Linux
-                  </a>
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-1.5">
-                Standalone binaries — no Python needed. After download, click <b>Generate Agent Key</b> above
-                and follow the install steps for your OS.
+              <p className="text-[11px] font-medium text-muted-foreground mb-2">Agent Setup</p>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Click <b>Generate Agent Key</b> above, then copy the one-line install command for the
+                target OS. It downloads the agent and starts it automatically — no manual download needed.
+                The files below are optional references.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button asChild size="sm" variant="outline" className="gap-2">
                   <a href="/agent/laptop_agent.py" download="laptop_agent.py">
-                    <Download className="h-4 w-4" /> Python script (advanced)
+                    <Download className="h-4 w-4" /> Python script
                   </a>
                 </Button>
                 <Button asChild size="sm" variant="ghost" className="gap-2">
@@ -330,10 +332,9 @@ export default function DeviceAgentCard({ assetId }: Props) {
             <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-[11px] text-sky-900">
               <p className="font-semibold mb-1">Before you paste:</p>
               <ol className="list-decimal ml-4 space-y-0.5">
-                <li><b>Windows:</b> click <b>Windows (.exe)</b> → if SmartScreen blocks it, <b>More info → Run anyway</b> → open <b>Command Prompt</b> or <b>PowerShell</b> <i>as Administrator</i>.</li>
-                <li><b>macOS:</b> click <b>macOS</b> → open <b>Terminal</b> (Applications → Utilities). The install command handles Gatekeeper quarantine automatically.</li>
-                <li><b>Ubuntu / Linux:</b> click <b>Ubuntu / Linux</b> → open a <b>terminal</b>. The install command sets up a <span className="font-mono">systemd --user</span> service.</li>
-                <li>Paste the matching command below for your OS.</li>
+                <li>Open the terminal for your OS — <b>macOS:</b> Terminal (Applications → Utilities) · <b>Linux:</b> any terminal · <b>Windows:</b> Command Prompt or PowerShell.</li>
+                <li>Requires <b>Python 3</b> (pre-installed on most Macs; on Ubuntu run <span className="font-mono">sudo apt install -y python3-venv</span> first if prompted).</li>
+                <li>Copy the command for your OS, paste the <b>whole block</b>, and press Enter. It downloads the agent, sets it up, registers, and starts the background service automatically — no manual download needed.</li>
               </ol>
             </div>
 
@@ -362,7 +363,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
               <p className="mt-1.5 text-[11px] text-muted-foreground">
                 Registers, runs a test sync, then installs a <b>launchd</b> background service so the agent
                 auto-starts on login and syncs every 5 minutes. To remove later:
-                <span className="font-mono"> ~/Library/Application\ Support/MilesAgent/miles-agent uninstall-service</span>
+                <span className="font-mono"> ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service</span>
               </p>
             </div>
 
@@ -392,7 +393,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
                 Registers, runs a test sync, then installs a <b>systemd --user</b> service so the agent
                 auto-starts on login and syncs every 5 minutes. For headless servers, run once:
                 <span className="font-mono"> sudo loginctl enable-linger $USER</span>. To remove:
-                <span className="font-mono"> ~/.local/share/miles-agent/miles-agent uninstall-service</span>
+                <span className="font-mono"> ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service</span>
               </p>
             </div>
 
@@ -443,38 +444,11 @@ export default function DeviceAgentCard({ assetId }: Props) {
                 rows={5}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                The last line runs <span className="font-mono">sync</span> — a one-shot check-in to confirm the
-                device shows up in the portal immediately. Refresh this page after ~10 seconds.
+                Sets the token, registers, runs a test <span className="font-mono">sync</span>, then creates a
+                logon <b>Scheduled Task</b> (<span className="font-mono">MilesAgent</span>) so it keeps syncing.
+                Refresh this page after ~10 seconds to see the device.
               </p>
             </div>
-
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                macOS / Linux / no .exe? Use the Python script instead
-              </summary>
-              <div className="mt-2">
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Install Command — Python (cross-platform)
-                  </label>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 gap-1.5 text-xs"
-                    onClick={() => newToken && copy(installCmdPy(newToken), "Python install command")}
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                </div>
-                <textarea
-                  readOnly
-                  value={newToken ? installCmdPy(newToken) : ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
-                  rows={3}
-                />
-              </div>
-            </details>
           </div>
           <DialogFooter>
             <Button onClick={() => setNewToken(null)}>I have copied the key</Button>
