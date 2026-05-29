@@ -653,17 +653,25 @@ export default function AssetDetail() {
             </CardContent>
           </Card>
 
-          {(asset.assignedTo || asset.assignedEmail) && (
+          {(asset.assignedTo || asset.assignedEmail || history.length > 0) && (
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Assigned User</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
-                      {(asset.assignedTo ?? asset.assignedEmail ?? "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
-                    </AvatarFallback>
-                  </Avatar>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  User Assignment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(asset.assignedTo || asset.assignedEmail) && (
                   <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Current Assigned User</p>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
+                          {(asset.assignedTo ?? asset.assignedEmail ?? "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
                     <p className="text-sm font-semibold text-foreground">{asset.assignedTo ?? asset.assignedEmail}</p>
                     <p className="text-xs text-muted-foreground">{asset.department}</p>
                     {asset.assignedEmail && <p className="text-xs text-muted-foreground">{asset.assignedEmail}</p>}
@@ -743,25 +751,81 @@ export default function AssetDetail() {
                         </div>
                       );
                     })()}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* ── User History (previous assignments) ── */}
                 {(() => {
-                  const assignedRow  = [...history].find(r => r.event_type === "assigned");
-                  const returnedRow  = [...history].find(r => r.event_type === "returned" || r.event_type === "unassigned");
-                  const fmt = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                  const hasCurrent = !!(asset.assignedTo || asset.assignedEmail);
+                  // Drop the current active assignment's "assigned" event so the same
+                  // user is never shown twice (once as current, once in history).
+                  const matchesCurrent = (row: HistoryRow) => {
+                    if (!hasCurrent) return false;
+                    if (asset.assignedEmail && row.user_email)
+                      return row.user_email.toLowerCase() === asset.assignedEmail.toLowerCase();
+                    if (asset.assignedTo && row.user_name)
+                      return row.user_name === asset.assignedTo;
+                    return false;
+                  };
+                  const currentAssignedId = hasCurrent
+                    ? history.find(r => r.event_type === "assigned" && matchesCurrent(r))?.id
+                    : undefined;
+                  const pastHistory = history.filter(r => r.id !== currentAssignedId);
                   return (
-                    <div className="border-t border-border pt-3 space-y-2 text-sm">
-                      {assignedRow && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Assigned On</span>
-                          <span className="font-medium text-blue-600">{fmt(assignedRow.created_at)}</span>
-                        </div>
-                      )}
-                      {returnedRow && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Returned On</span>
-                          <span className="font-medium text-emerald-600">{fmt(returnedRow.created_at)}</span>
-                        </div>
+                    <div className={cn(hasCurrent && "border-t border-border pt-3")}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">User History</p>
+                        {pastHistory.length > 0 && (
+                          <span className="ml-auto text-xs font-normal text-muted-foreground">
+                            {pastHistory.length} event{pastHistory.length !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                      {historyLoading ? (
+                        <p className="py-3 text-center text-xs text-muted-foreground">Loading…</p>
+                      ) : pastHistory.length === 0 ? (
+                        <p className="py-3 text-center text-xs text-muted-foreground">
+                          {hasCurrent ? "No previous assignments." : "No assignment history yet."}
+                        </p>
+                      ) : (
+                        <ol className="relative ml-4 border-l border-border">
+                          {pastHistory.map((row, i) => {
+                            const isAssigned  = row.event_type === "assigned";
+                            const isReturned  = row.event_type === "returned" || row.event_type === "unassigned";
+                            const dotClass    = isAssigned
+                              ? "bg-blue-500 ring-blue-100"
+                              : isReturned
+                              ? "bg-emerald-500 ring-emerald-100"
+                              : "bg-gray-400 ring-gray-100";
+                            const label       = isAssigned ? "Assigned" : isReturned ? "Returned" : row.event_type;
+                            const labelClass  = isAssigned
+                              ? "text-blue-600 bg-blue-50 border-blue-200"
+                              : isReturned
+                              ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+                              : "text-gray-500 bg-gray-50 border-gray-200";
+                            const displayName = [row.user_ecode, row.user_name].filter(Boolean).join(" · ") || row.user_email || "Unknown user";
+                            const date        = row.created_at
+                              ? new Date(row.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                              : "";
+                            return (
+                              <li key={row.id ?? i} className="ml-4 mb-4 last:mb-0">
+                                <span className={cn("absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full ring-4", dotClass)} />
+                                <div className="pl-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold", labelClass)}>{label}</span>
+                                    <span className="text-xs text-muted-foreground">{date}</span>
+                                  </div>
+                                  <p className="mt-0.5 text-sm font-medium text-foreground leading-snug">{displayName}</p>
+                                  {row.department && <p className="text-xs text-muted-foreground">{row.department}</p>}
+                                  {row.user_email && row.user_name && <p className="text-xs text-muted-foreground">{row.user_email}</p>}
+                                  {row.notes && <p className="mt-1 text-xs italic text-muted-foreground">"{row.notes}"</p>}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ol>
                       )}
                     </div>
                   );
@@ -780,63 +844,6 @@ export default function AssetDetail() {
 
           {/* ── Device Agent (Laptops only) ───────────────── */}
           {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
-
-          {/* ── User History ──────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                User History
-                {history.length > 0 && (
-                  <span className="ml-auto text-xs font-normal text-muted-foreground">{history.length} event{history.length !== 1 ? "s" : ""}</span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {historyLoading ? (
-                <p className="px-4 py-5 text-center text-xs text-muted-foreground">Loading…</p>
-              ) : history.length === 0 ? (
-                <p className="px-4 py-5 text-center text-xs text-muted-foreground">No assignment history yet.</p>
-              ) : (
-                <ol className="relative ml-4 border-l border-border pb-2">
-                  {history.map((row, i) => {
-                    const isAssigned  = row.event_type === "assigned";
-                    const isReturned  = row.event_type === "returned" || row.event_type === "unassigned";
-                    const dotClass    = isAssigned
-                      ? "bg-blue-500 ring-blue-100"
-                      : isReturned
-                      ? "bg-emerald-500 ring-emerald-100"
-                      : "bg-gray-400 ring-gray-100";
-                    const label       = isAssigned ? "Assigned" : isReturned ? "Returned" : row.event_type;
-                    const labelClass  = isAssigned
-                      ? "text-blue-600 bg-blue-50 border-blue-200"
-                      : isReturned
-                      ? "text-emerald-600 bg-emerald-50 border-emerald-200"
-                      : "text-gray-500 bg-gray-50 border-gray-200";
-                    const displayName = [row.user_ecode, row.user_name].filter(Boolean).join(" · ") || row.user_email || "Unknown user";
-                    const date        = row.created_at
-                      ? new Date(row.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                      : "";
-                    return (
-                      <li key={row.id ?? i} className="ml-4 mb-4 last:mb-0">
-                        <span className={cn("absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full ring-4", dotClass)} />
-                        <div className="pl-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold", labelClass)}>{label}</span>
-                            <span className="text-xs text-muted-foreground">{date}</span>
-                          </div>
-                          <p className="mt-0.5 text-sm font-medium text-foreground leading-snug">{displayName}</p>
-                          {row.department && <p className="text-xs text-muted-foreground">{row.department}</p>}
-                          {row.user_email && row.user_name && <p className="text-xs text-muted-foreground">{row.user_email}</p>}
-                          {row.notes && <p className="mt-1 text-xs italic text-muted-foreground">"{row.notes}"</p>}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
 
