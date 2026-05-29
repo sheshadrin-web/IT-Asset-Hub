@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.4.2"
+AGENT_VERSION       = "0.4.3"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
@@ -603,12 +603,19 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
 
 # ── remote HARD lock (real OS lockout, honest reporting) ───────────────────
 # A locked device is locked at the OS level — NOT a dismissable overlay:
-#   * Windows : LockWorkStation() (secure desktop; re-asserted each cycle).
-#   * macOS   : CGSession -suspend (drops to the login window).
+#   * Windows : LockWorkStation() drops to the secure desktop.
+#   * macOS   : login.framework SACLockScreenImmediate() drops to the login
+#               window (CGSession -suspend fallback on older systems).
 #   * Linux   : the account is password-locked (usermod -L) and the active
 #               session is terminated. This needs root, so the agent must run
 #               as a system service. If it is NOT root we report
 #               "requires_admin" rather than faking success.
+# The Windows/macOS screen lock is dismissed the instant the user types their
+# password, so a one-shot lock would let a "locked" device become usable again
+# while the portal still shows Locked. To make the lock real and persistent we
+# RE-ASSERT the screen lock every fast cycle (see reassert_lock) while the
+# device is meant to be locked — the user gets locked out again within seconds.
+# Linux needs no re-assertion because the account stays password-locked.
 # We NEVER report 'completed' unless the OS lock actually took effect, and we
 # surface the exact failure reason to the portal. Local state persists so the
 # lock re-asserts on reboot and is reconciled from the server every /sync.
@@ -723,53 +730,72 @@ def _linux_unlock_account(user: str) -> tuple[bool, str]:
     return (False, "account is still locked after both unlock methods")
 
 
+def _win_lock_now() -> tuple[bool, str | None]:
+    """Issue the Windows workstation lock. Returns (ok, error). Idempotent —
+    safe to call when the screen is already locked."""
+    try:
+        import ctypes
+        ret = ctypes.windll.user32.LockWorkStation()
+        if ret:
+            return (True, None)
+        err = ctypes.windll.kernel32.GetLastError()
+        return (False, f"LockWorkStation failed (Windows error {err})")
+    except Exception as e:
+        return (False, f"LockWorkStation unavailable ({e})")
+
+
+def _mac_lock_now() -> tuple[bool, str | None]:
+    """Drop the Mac to the login window. Returns (ok, error). Idempotent —
+    safe to call when the screen is already locked.
+
+    Modern macOS (Big Sur and later) REMOVED the old CGSession Menu Extras
+    binary, so the preferred method is login.framework's SACLockScreenImmediate(),
+    which drops to the real login window and requires the password — a genuine
+    lock. We fall back to the legacy CGSession binary only on older systems that
+    still ship it. pmset only sleeps the display and does NOT guarantee a
+    password gate, so it is never treated as a successful lock."""
+    mac_err = None
+    try:
+        import ctypes
+        login_fw = ctypes.CDLL(
+            "/System/Library/PrivateFrameworks/login.framework/login")
+        login_fw.SACLockScreenImmediate.restype = ctypes.c_int
+        rc = login_fw.SACLockScreenImmediate()
+        if rc == 0:
+            return (True, None)
+        mac_err = f"SACLockScreenImmediate returned {rc}"
+    except Exception as e:
+        mac_err = f"SACLockScreenImmediate unavailable ({e})"
+    cg = ("/System/Library/CoreServices/Menu Extras/"
+          "User.menu/Contents/Resources/CGSession")
+    if os.path.exists(cg):
+        r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            return (True, None)
+        return (False,
+                f"{mac_err}; CGSession -suspend exited {r.returncode}: "
+                f"{r.stderr.strip()}")
+    return (False, f"Could not lock this Mac: {mac_err}. The device was NOT locked.")
+
+
 def _apply_hard_lock() -> tuple[str, str | None, str | None]:
     """Lock the device at the OS level. Returns (status, result, error) where
     status is 'completed' (truly locked), 'failed', or 'requires_admin'.
     On Linux the locked username is persisted so unlock can target it later."""
     try:
         if IS_WIN:
-            import ctypes
-            ret = ctypes.windll.user32.LockWorkStation()
-            if ret:
+            ok, err = _win_lock_now()
+            if ok:
                 _write_lock_state({"locked": True, "platform": "windows"})
                 return ("completed", "Workstation locked", None)
-            err = ctypes.windll.kernel32.GetLastError()
-            return ("failed", None, f"LockWorkStation failed (Windows error {err})")
+            return ("failed", None, err)
 
         if IS_MAC:
-            # Modern macOS (Big Sur and later) REMOVED the old CGSession Menu Extras
-            # binary, so the preferred method is login.framework's
-            # SACLockScreenImmediate(), which drops to the real login window and
-            # requires the password — a genuine lock. We fall back to the legacy
-            # CGSession binary only on older systems that still ship it. pmset only
-            # sleeps the display and does NOT guarantee a password gate, so it is
-            # never treated as a successful lock (would be a false "Locked").
-            mac_err = None
-            try:
-                import ctypes
-                login_fw = ctypes.CDLL(
-                    "/System/Library/PrivateFrameworks/login.framework/login")
-                login_fw.SACLockScreenImmediate.restype = ctypes.c_int
-                rc = login_fw.SACLockScreenImmediate()
-                if rc == 0:
-                    _write_lock_state({"locked": True, "platform": "macos"})
-                    return ("completed", "Screen locked (login window)", None)
-                mac_err = f"SACLockScreenImmediate returned {rc}"
-            except Exception as e:
-                mac_err = f"SACLockScreenImmediate unavailable ({e})"
-            cg = ("/System/Library/CoreServices/Menu Extras/"
-                  "User.menu/Contents/Resources/CGSession")
-            if os.path.exists(cg):
-                r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
-                if r.returncode == 0:
-                    _write_lock_state({"locked": True, "platform": "macos"})
-                    return ("completed", "Screen locked (login window)", None)
-                return ("failed", None,
-                        f"{mac_err}; CGSession -suspend exited {r.returncode}: "
-                        f"{r.stderr.strip()}")
-            return ("failed", None,
-                    f"Could not lock this Mac: {mac_err}. The device was NOT locked.")
+            ok, err = _mac_lock_now()
+            if ok:
+                _write_lock_state({"locked": True, "platform": "macos"})
+                return ("completed", "Screen locked (login window)", None)
+            return ("failed", None, err)
 
         if IS_LIN:
             if not _is_root():
@@ -865,6 +891,30 @@ def reconcile_lock(server_locked: bool) -> None:
             _apply_hard_lock()
         elif not server_locked and local:
             _release_lock()
+
+
+def reassert_lock() -> None:
+    """While the device is meant to be locked, keep the OS lock asserted. The
+    Windows/macOS screen lock is dismissed the moment the user types their
+    password, so without re-asserting a 'locked' device becomes usable again
+    while the portal still shows Locked. Re-issuing the screen lock each fast
+    cycle keeps the user out — they are locked again within seconds. Linux uses
+    a persistent account lock, so it needs no re-assertion here. Best-effort and
+    silent: never reports a command status, never flips local state."""
+    if IS_LIN:
+        return
+    try:
+        if not _read_local_lock():
+            return
+        with _lock_mutex:
+            if not _read_local_lock():
+                return
+            if IS_WIN:
+                _win_lock_now()
+            elif IS_MAC:
+                _mac_lock_now()
+    except Exception:
+        pass
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -983,6 +1033,11 @@ def run_loop() -> int:
                 last_sync = now
             # Commands (lock / unlock) on the fast cycle so they apply in seconds.
             poll_commands()
+            # Keep a locked device locked: re-assert the Windows/macOS screen
+            # lock every fast cycle (no-op on Linux / when unlocked). Runs after
+            # poll_commands so an incoming unlock clears local state first and we
+            # don't re-lock in the same cycle.
+            reassert_lock()
         except Exception as e:
             print(f"[{datetime.now(timezone.utc).isoformat()}] loop error: {e}", file=sys.stderr)
         time.sleep(COMMAND_POLL_SEC)

@@ -295,10 +295,12 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     ].join("\n");
 
   // Real HARD lock (OS-level account/workstation lock with honest status
-  // reporting) only exists in agent v0.4.0+. Older agents either ignore the
-  // command or only show a dismissable overlay, so the portal must not imply a
-  // true lock. Detect the mismatch and warn IT to update the agent.
-  const LOCK_MIN_VERSION = [0, 4, 0];
+  // reporting) needs agent v0.4.3+. Older agents either ignore the command, show
+  // a dismissable overlay, or — on macOS/Windows ≤0.4.2 — lock the screen only
+  // once (the user types their password and is back in while the portal still
+  // shows Locked). v0.4.3 re-asserts the screen lock so it actually persists.
+  // Detect the mismatch and warn IT to update the agent.
+  const LOCK_MIN_VERSION = [0, 4, 3];
   const parseVer = (v: string | null | undefined): number[] =>
     (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
   const lockEnforceable = (() => {
@@ -432,7 +434,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   <p className="text-xs font-medium text-amber-900">Lock not enforced — agent too old</p>
                   <p className="text-[11px] text-amber-800">
                     This device runs agent <span className="font-mono">v{device?.agent_version ?? "?"}</span>, which
-                    does not support the real hard lock (needs <span className="font-mono">v0.4.0</span>+). The lock is
+                    does not support the real hard lock (needs <span className="font-mono">v0.4.3</span>+). The lock is
                     recorded here but the laptop may stay usable. Reinstall the agent on the device to enforce it.
                   </p>
                 </div>
