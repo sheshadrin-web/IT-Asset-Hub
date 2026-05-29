@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Upload, Check, Send, RefreshCw, ImageIcon, CheckCircle2,
+  Upload, Check, Send, RefreshCw, ImageIcon, CheckCircle2, Trash2,
 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -104,6 +108,7 @@ export default function WallpaperManager({ assetId, managedDeviceId, agentInstal
   const [loading, setLoading]       = useState(true);
   const [busy, setBusy]             = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Wallpaper | null>(null);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -204,6 +209,32 @@ export default function WallpaperManager({ assetId, managedDeviceId, agentInstal
     }
     toast({ title: "Set as active wallpaper" });
     await load();
+  }
+
+  async function deleteWallpaper(id: string) {
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("wallpaper_delete", { p_wallpaper_id: id });
+      if (error || !data?.success) {
+        throw new Error(error?.message ?? data?.error ?? "delete failed");
+      }
+      // Purge the storage folder (original + every resolution variant live under
+      // the same `<stem>/` prefix, e.g. "1716998400000_a1b2c3d4/…").
+      const storagePath: string | undefined = data?.storage_path;
+      const stem = storagePath?.split("/")[0];
+      if (stem) {
+        const list = await supabase.storage.from("wallpapers").list(stem);
+        const paths = (list.data ?? []).map(f => `${stem}/${f.name}`);
+        if (paths.length) await supabase.storage.from("wallpapers").remove(paths);
+      }
+      toast({ title: "Wallpaper deleted" });
+      await load();
+    } catch (e: unknown) {
+      toast({ title: "Failed to delete", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+      setPendingDelete(null);
+    }
   }
 
   async function pushToDevice() {
@@ -319,30 +350,73 @@ export default function WallpaperManager({ assetId, managedDeviceId, agentInstal
           <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Recent Uploads</p>
           <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
             {wallpapers.map(w => (
-              <button
+              <div
                 key={w.id}
-                type="button"
-                onClick={() => !w.is_active && void setActive(w.id)}
-                disabled={busy || w.is_active}
                 className={cn(
                   "relative aspect-video rounded border overflow-hidden bg-muted group",
                   w.is_active
-                    ? "ring-2 ring-emerald-500 cursor-default"
-                    : "hover:ring-2 hover:ring-violet-400 cursor-pointer"
+                    ? "ring-2 ring-emerald-500"
+                    : "hover:ring-2 hover:ring-violet-400"
                 )}
-                title={w.is_active ? `${w.name} (active)` : `Set "${w.name}" as active`}
               >
-                <img src={w.public_url} alt={w.name} className="w-full h-full object-cover" />
-                {w.is_active && (
-                  <span className="absolute top-0.5 right-0.5 bg-emerald-500 text-white rounded-full p-0.5">
+                <button
+                  type="button"
+                  onClick={() => !w.is_active && void setActive(w.id)}
+                  disabled={busy || w.is_active}
+                  className={cn(
+                    "absolute inset-0 w-full h-full",
+                    w.is_active ? "cursor-default" : "cursor-pointer"
+                  )}
+                  title={w.is_active ? `${w.name} (active)` : `Set "${w.name}" as active`}
+                >
+                  <img src={w.public_url} alt={w.name} className="w-full h-full object-cover" />
+                </button>
+                {w.is_active ? (
+                  <span className="absolute top-0.5 right-0.5 bg-emerald-500 text-white rounded-full p-0.5 pointer-events-none">
                     <Check className="h-2.5 w-2.5" />
                   </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(w)}
+                    disabled={busy}
+                    className="absolute top-0.5 right-0.5 rounded bg-black/55 hover:bg-red-600 text-white p-1
+                               opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-0"
+                    title={`Delete "${w.name}"`}
+                    data-testid={`button-delete-wallpaper-${w.id}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
                 )}
-              </button>
+              </div>
             ))}
           </div>
         </div>
       )}
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this wallpaper?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.name}" will be permanently removed from the library, along with
+              its stored image files. Devices already showing it keep their current desktop —
+              this only removes it from the list. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={busy}
+              onClick={(e) => { e.preventDefault(); if (pendingDelete) void deleteWallpaper(pendingDelete.id); }}
+              data-testid="button-confirm-delete-wallpaper"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );
