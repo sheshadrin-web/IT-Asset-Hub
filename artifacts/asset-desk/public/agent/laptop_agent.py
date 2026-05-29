@@ -332,13 +332,42 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
             ok = ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3)
             return (bool(ok), None if ok else "SystemParametersInfoW returned 0")
         if IS_MAC:
-            # System Events scales the picture to fill the display.
-            script = (
-                'tell application "System Events" to '
-                f'set picture of every desktop to POSIX file "{local_path}"'
-            )
-            subprocess.check_call(["osascript", "-e", script], timeout=15)
-            return (True, None)
+            # macOS Sonoma (14) / Sequoia (15) regression: the classic
+            #   set picture of every desktop to POSIX file "..."
+            # form exits 0 but silently does NOT change the wallpaper. Passing a
+            # plain POSIX path STRING (no `POSIX file`) is what actually applies
+            # on modern macOS. We try the string form first, then fall back to the
+            # legacy form for older macOS, and finally nudge Dock/WallpaperAgent so
+            # the change is rendered immediately.
+            esc = local_path.replace('"', '\\"')
+            scripts = [
+                f'tell application "System Events" to set picture of every desktop to "{esc}"',
+                f'tell application "System Events" to set picture of every desktop to POSIX file "{esc}"',
+            ]
+            last_err: str | None = None
+            applied = False
+            for script in scripts:
+                try:
+                    subprocess.check_call(
+                        ["osascript", "-e", script], timeout=20,
+                        stderr=subprocess.PIPE,
+                    )
+                    applied = True
+                    break
+                except subprocess.CalledProcessError as e:
+                    last_err = (e.stderr.decode() if e.stderr else str(e)).strip()
+                except Exception as e:  # noqa: BLE001
+                    last_err = str(e)
+            # Force the desktop to re-render the new picture (best-effort).
+            for proc in ("Dock", "WallpaperAgent"):
+                try:
+                    subprocess.call(["killall", proc], timeout=10,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:  # noqa: BLE001
+                    pass
+            if applied:
+                return (True, None)
+            return (False, last_err or "osascript failed to set wallpaper")
         if IS_LIN:
             if shutil.which("gsettings"):
                 subprocess.check_call([

@@ -88,6 +88,66 @@ function exportUsersCsv(users: Profile[]) {
   downloadCsv(csv, `users_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
+// ── Device Agents (managed devices reporting via the laptop agent) ──────────
+type ManagedDevice = Record<string, unknown>;
+
+async function fetchManagedDevices(): Promise<ManagedDevice[]> {
+  const { data } = await supabase
+    .from("managed_devices")
+    .select("*")
+    .order("last_seen_at", { ascending: false, nullsFirst: false });
+  return (data ?? []) as ManagedDevice[];
+}
+
+const DEVICE_AGENT_HEADER = [
+  "Asset ID","Hostname","Serial Number","Brand","Model","Processor","RAM","Storage",
+  "Operating System","Logged-in User","Employee Email","E-Code",
+  "IP Address","MAC Address","Agent Version","Managed","Status","Last Seen",
+];
+
+function deviceAgentRow(
+  d: ManagedDevice,
+  assetIdByUuid: Map<string, string>,
+  fmtDate: (v: unknown) => string,
+): unknown[] {
+  const s = (v: unknown) => (v == null || v === "" ? "" : String(v));
+  const os = [d.os_name, d.os_version].filter(Boolean).join(" ");
+  return [
+    assetIdByUuid.get(String(d.laptop_asset_id)) ?? "",
+    s(d.hostname), s(d.serial_number), s(d.brand), s(d.model),
+    s(d.processor), s(d.ram), s(d.storage), os,
+    s(d.logged_in_username), s(d.employee_email), s(d.employee_ecode),
+    s(d.ip_address), s(d.mac_address), s(d.agent_version),
+    d.is_managed ? "Yes" : "No", s(d.status), fmtDate(d.last_seen_at),
+  ];
+}
+
+async function exportDeviceAgentsCsv(
+  assets: Asset[],
+  toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void,
+) {
+  try {
+    const devices = await fetchManagedDevices();
+    if (devices.length === 0) {
+      toast({ title: "No agent devices", description: "No managed devices have reported in yet.", variant: "destructive" });
+      return;
+    }
+    const assetIdByUuid = new Map(assets.map((a) => [String(a.id), a.assetId]));
+    const fmtDate = (v: unknown) => {
+      if (!v) return "";
+      const dt = new Date(String(v));
+      return isNaN(dt.getTime()) ? String(v) : dt.toLocaleString("en-IN");
+    };
+    const rows = devices.map((d) => deviceAgentRow(d, assetIdByUuid, fmtDate));
+    const csv = "\ufeff" + [DEVICE_AGENT_HEADER, ...rows]
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    downloadCsv(csv, `device_agents_report_${new Date().toISOString().split("T")[0]}.csv`);
+    toast({ title: "Device Agents exported", description: `${devices.length} managed device(s) downloaded` });
+  } catch (err) {
+    toast({ title: "Export failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+  }
+}
+
 async function exportFullXlsx(
   assets: Asset[],
   tickets: TicketType[],
@@ -305,8 +365,21 @@ async function exportFullXlsx(
     addSheet(wb, "7 - Warranty & Procurement", [warranty7Header, ...warranty7Rows],
       [14,10,12,18,18,14,14,18,16,16,16,12]);
 
+    // ── Sheet 8: Device Agents (managed devices) ──────────────────────────────
+    const devices = await fetchManagedDevices();
+    const assetIdByUuid = new Map(assets.map((a) => [String(a.id), a.assetId]));
+    const devices8Rows: unknown[][] = devices.length > 0
+      ? devices.map((d) => deviceAgentRow(d, assetIdByUuid, (v) => {
+          if (!v) return "";
+          const dt = new Date(String(v));
+          return isNaN(dt.getTime()) ? String(v) : dt.toLocaleString("en-IN");
+        }))
+      : [["No managed devices have reported in yet. Install the laptop agent to populate this report."]];
+    addSheet(wb, "8 - Device Agents", [DEVICE_AGENT_HEADER, ...devices8Rows],
+      [14,18,18,12,18,18,8,10,18,18,28,12,16,18,12,8,12,18]);
+
     XLSX.writeFile(wb, `full_report_${dateStr}.xlsx`);
-    toast({ title: "Full report exported", description: `full_report_${dateStr}.xlsx — 7 sheets downloaded` });
+    toast({ title: "Full report exported", description: `full_report_${dateStr}.xlsx — 8 sheets downloaded` });
   } catch (err) {
     toast({
       title: "Export failed",
@@ -447,6 +520,9 @@ export default function Reports() {
             </DropdownMenuItem>
             <DropdownMenuItem className="flex items-center gap-2 cursor-pointer" onClick={() => handleExport(() => exportUsersCsv(users), "Users report")}>
               <Users className="h-3.5 w-3.5 text-emerald-500" />Export Users
+            </DropdownMenuItem>
+            <DropdownMenuItem className="flex items-center gap-2 cursor-pointer" onClick={() => exportDeviceAgentsCsv(assets, toast)}>
+              <Cpu className="h-3.5 w-3.5 text-cyan-500" />Export Device Agents
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
