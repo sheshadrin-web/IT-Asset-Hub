@@ -127,9 +127,21 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       ? `${window.location.origin}${import.meta.env.BASE_URL}agent/laptop_agent.py`
       : "/agent/laptop_agent.py";
 
+  // Asset tag (e.g. MILES-LAP-579) baked into the install command so the machine's
+  // system hostname is renamed to it. Hostnames allow letters/digits/hyphens, so
+  // normalise anything else to a hyphen, drop edge hyphens, and cap at the 63-char
+  // hostname limit (scutil/hostnamectl reject longer names).
+  const hostName = (assetTag ?? "").trim()
+    .replace(/[^A-Za-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63)
+    .replace(/-+$/g, "");
+
   // ── macOS (Terminal) — launchd background service ──────────────────────────
-  const installCmdMac = (tok: string) =>
-    [
+  // The rename is appended as its own line (not part of the && chain) so a failed
+  // sudo / cancelled password prompt never masks a successful agent install.
+  const installCmdMac = (tok: string) => {
+    const install = [
       `mkdir -p ~/.miles-agent`,
       `curl -fsSL "${agentUrl}" -o ~/.miles-agent/laptop_agent.py`,
       `python3 -m venv ~/.miles-agent/venv`,
@@ -139,10 +151,19 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
     ].join(" && \\\n");
+    if (!hostName) return install;
+    const rename = [
+      `sudo scutil --set ComputerName "${hostName}"`,
+      `sudo scutil --set LocalHostName "${hostName}"`,
+      `sudo scutil --set HostName "${hostName}"`,
+      `sudo dscacheutil -flushcache`,
+    ].join(" && \\\n");
+    return `${install}\n${rename}`;
+  };
 
   // ── Ubuntu / Linux (Terminal) — systemd --user service ─────────────────────
-  const installCmdLinux = (tok: string) =>
-    [
+  const installCmdLinux = (tok: string) => {
+    const install = [
       `mkdir -p ~/.miles-agent`,
       `curl -fsSL "${agentUrl}" -o ~/.miles-agent/laptop_agent.py`,
       `python3 -m venv ~/.miles-agent/venv`,
@@ -152,6 +173,8 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
     ].join(" && \\\n");
+    return hostName ? `${install}\nsudo hostnamectl set-hostname "${hostName}"` : install;
+  };
 
   // ── Windows (Command Prompt) — logon Scheduled Task ────────────────────────
   const PY = `"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe"`;
@@ -167,6 +190,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `${PY} ${SCRIPT} register`,
       `${PY} ${SCRIPT} sync`,
       `schtasks /Create /SC ONLOGON /TN MilesAgent /TR "\\"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\pythonw.exe\\" \\"%USERPROFILE%\\.miles-agent\\laptop_agent.py\\" run" /F`,
+      ...(hostName ? [`powershell -Command "Rename-Computer -NewName '${hostName}' -Force"`] : []),
     ].join("\n");
 
   // ── Windows (PowerShell) — logon Scheduled Task ────────────────────────────
@@ -187,6 +211,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `& ${PYP} ${SCRIPTP} sync`,
       `$act = New-ScheduledTaskAction -Execute "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\pythonw.exe" -Argument "\`"$env:USERPROFILE\\.miles-agent\\laptop_agent.py\`" run"`,
       `Register-ScheduledTask -TaskName MilesAgent -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Action $act -Force | Out-Null`,
+      ...(hostName ? [`Rename-Computer -NewName "${hostName}" -Force`] : []),
     ].join("\n");
 
   return (
@@ -362,7 +387,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
                 Registers, runs a test sync, then installs a <b>launchd</b> background service so the agent
-                auto-starts on login and syncs every 5 minutes. To remove later:
+                auto-starts on login and syncs every 5 minutes. It also renames the Mac's computer/host name to
+                the asset tag{hostName ? <> (<span className="font-mono">{hostName}</span>)</> : null} — macOS will
+                ask for your Mac password once for this step. To remove later:
                 <span className="font-mono"> ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service</span>
               </p>
             </div>
@@ -447,6 +474,8 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 Sets the token, registers, runs a test <span className="font-mono">sync</span>, then creates a
                 logon <b>Scheduled Task</b> (<span className="font-mono">MilesAgent</span>) so it keeps syncing.
                 Refresh this page after ~10 seconds to see the device.
+                {hostName ? <> It also renames the PC to the asset tag (<span className="font-mono">{hostName}</span>) —
+                run the terminal <b>as Administrator</b> and <b>reboot</b> for the new name to take full effect.</> : null}
               </p>
             </div>
           </div>
