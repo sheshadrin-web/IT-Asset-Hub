@@ -785,11 +785,36 @@ export default function Users() {
         });
       }
 
+      // 3. Auto-lock any managed laptop(s) assigned to this user so the
+      //    offboarded employee can no longer use the device. Data is preserved;
+      //    IT unlocks from the asset page to re-grant access. Non-fatal: the user
+      //    is already deactivated, and lock_device no-ops for assets without an
+      //    installed agent (the RPC returns an error we simply skip).
+      let lockedCount = 0;
+      try {
+        const { data: userAssets } = await supabase
+          .from("assets")
+          .select("id")
+          .eq("assigned_to", deactivateTarget.id);
+        for (const a of (userAssets ?? []) as { id: string }[]) {
+          const { data: lr } = await supabase.rpc("lock_device", {
+            p_asset_id: a.id,
+            p_reason: "Employee offboarded",
+          });
+          if (lr?.success) lockedCount++;
+        }
+      } catch {
+        // Swallow — locking is best-effort and must not block deactivation.
+      }
+
+      const lockNote = lockedCount > 0
+        ? ` ${lockedCount} managed laptop${lockedCount === 1 ? "" : "s"} locked.`
+        : "";
       toast({
         title: "User deactivated",
-        description: recoveryCount > 0
+        description: (recoveryCount > 0
           ? `${deactivateTarget.full_name} can no longer log in. ${recoveryCount} asset${recoveryCount === 1 ? "" : "s"} flagged as Recovery Stage.`
-          : `${deactivateTarget.full_name} can no longer log in.`,
+          : `${deactivateTarget.full_name} can no longer log in.`) + lockNote,
       });
     } catch (err) {
       toast({ title: "Failed to deactivate", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });

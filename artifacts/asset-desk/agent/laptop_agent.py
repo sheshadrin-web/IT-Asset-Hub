@@ -38,11 +38,12 @@ import shlex
 import tempfile
 import uuid
 import hashlib
+import threading
 from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.2.0"
+AGENT_VERSION       = "0.3.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
@@ -590,6 +591,139 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
         return ("failed", str(e))
 
 
+# ── remote lock (soft, persistent, non-destructive) ────────────────────────
+# A locked device shows a full-screen "locked by IT" overlay that re-asserts
+# itself and survives reboots. State is persisted locally so the lock holds even
+# if the laptop is taken offline, and is reconciled from the server on every
+# /sync. Data is never touched; IT clears the lock remotely.
+LOCK_STATE_FILE = os.path.join(os.path.expanduser("~"), ".miles-agent", "lock.state.json")
+
+_lock_state  = {"locked": False}
+_lock_thread = None
+_lock_mutex  = threading.Lock()
+
+
+def _read_local_lock() -> bool:
+    try:
+        with open(LOCK_STATE_FILE, "r", encoding="utf-8") as f:
+            return bool(json.load(f).get("locked", False))
+    except Exception:
+        return False
+
+
+def _write_local_lock(locked: bool) -> None:
+    try:
+        os.makedirs(os.path.dirname(LOCK_STATE_FILE), exist_ok=True)
+        with open(LOCK_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"locked": bool(locked)}, f)
+    except Exception:
+        pass
+
+
+def _os_lock_screen() -> None:
+    """Force the OS login/lock screen once (best-effort, cross-platform)."""
+    try:
+        if IS_WIN:
+            import ctypes
+            ctypes.windll.user32.LockWorkStation()
+        elif IS_MAC:
+            cg = ("/System/Library/CoreServices/Menu Extras/"
+                  "User.menu/Contents/Resources/CGSession")
+            if os.path.exists(cg):
+                subprocess.run([cg, "-suspend"], timeout=10)
+            else:
+                subprocess.run(["pmset", "displaysleepnow"], timeout=10)
+        elif IS_LIN:
+            for c in (["loginctl", "lock-session"], ["xdg-screensaver", "lock"],
+                      ["gnome-screensaver-command", "-l"], ["dm-tool", "lock"]):
+                if shutil.which(c[0]):
+                    subprocess.run(c, timeout=10)
+                    break
+    except Exception:
+        pass
+
+
+def _run_lock_overlay() -> None:
+    """Full-screen, always-on-top lockout window. Stays until the lock clears.
+    Falls back to a periodic OS screen-lock loop if no GUI toolkit is present."""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+    except Exception:
+        # No GUI toolkit / no display — keep nudging the OS lock screen instead.
+        while _lock_state["locked"]:
+            _os_lock_screen()
+            time.sleep(15)
+        return
+
+    root.title("Device Locked")
+    root.configure(bg="#0b1220")
+    try:
+        root.attributes("-fullscreen", True)
+    except Exception:
+        root.geometry("3000x2000+0+0")
+    try:
+        root.attributes("-topmost", True)
+    except Exception:
+        pass
+    root.protocol("WM_DELETE_WINDOW", lambda: None)
+    root.bind("<Escape>", lambda e: "break")
+
+    tk.Label(root, text="\U0001F512", fg="#ffffff", bg="#0b1220",
+             font=("Helvetica", 64)).pack(pady=(0, 10))
+    tk.Label(root, text="This device has been locked by Miles Education IT",
+             fg="#ffffff", bg="#0b1220", font=("Helvetica", 26, "bold"),
+             justify="center").pack()
+    tk.Label(root, text="Please contact the IT team to regain access.",
+             fg="#cbd5e1", bg="#0b1220", font=("Helvetica", 18),
+             justify="center").pack(pady=(12, 0))
+    tk.Label(root,
+             text=("Your files are safe and have not been deleted.\n"
+                   "This lock will be removed remotely by IT."),
+             fg="#94a3b8", bg="#0b1220", font=("Helvetica", 13),
+             justify="center").pack(pady=(24, 0))
+
+    def keep_alive():
+        if not _lock_state["locked"]:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+            return
+        try:
+            root.attributes("-fullscreen", True)
+            root.attributes("-topmost", True)
+            root.lift()
+            root.focus_force()
+        except Exception:
+            pass
+        root.after(1500, keep_alive)
+
+    root.after(500, keep_alive)
+    try:
+        root.mainloop()
+    except Exception:
+        pass
+
+
+def set_lock(locked: bool) -> None:
+    """Idempotently apply or clear the lock. Safe to call on every sync."""
+    global _lock_thread
+    with _lock_mutex:
+        locked = bool(locked)
+        if locked and not _lock_state["locked"]:
+            _lock_state["locked"] = True
+            _os_lock_screen()
+            # Guard against a still-draining overlay thread from a rapid
+            # unlock->relock: only spawn a fresh one if none is alive.
+            if _lock_thread is None or not _lock_thread.is_alive():
+                _lock_thread = threading.Thread(target=_run_lock_overlay, daemon=True)
+                _lock_thread.start()
+        elif not locked and _lock_state["locked"]:
+            # The overlay thread polls _lock_state and tears itself down.
+            _lock_state["locked"] = False
+
+
 # ── commands ────────────────────────────────────────────────────────────────
 def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     """Returns (status, result_message, error_message)."""
@@ -605,6 +739,14 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         if status == "none":
             return ("completed", "no active wallpaper", None)
         return ("failed", None, err)
+    if ctype == "lock_screen":
+        _write_local_lock(True)
+        set_lock(True)
+        return ("completed", "device locked", None)
+    if ctype == "unlock":
+        _write_local_lock(False)
+        set_lock(False)
+        return ("completed", "device unlocked", None)
     return ("failed", None, f"unsupported command: {ctype}")
 
 
@@ -639,9 +781,20 @@ def register() -> int:
 def run_loop() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN is not set", file=sys.stderr); return 2
+    # Enforce the last-known lock immediately so a reboot — even offline — keeps
+    # the device locked before the first /sync round-trips.
+    try:
+        if _read_local_lock():
+            set_lock(True)
+    except Exception:
+        pass
     while True:
         try:
-            _post("/sync", {"payload": collect_system_info()})
+            sync = _post("/sync", {"payload": collect_system_info()})
+            if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
+                locked = bool(sync.get("locked"))
+                _write_local_lock(locked)
+                set_lock(locked)
             apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
             poll_commands()
         except Exception as e:

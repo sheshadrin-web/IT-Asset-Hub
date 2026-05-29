@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
+  Lock, Unlock,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +29,9 @@ interface ManagedDevice {
   mac_address:         string | null;
   agent_version:       string | null;
   last_seen_at:        string | null;
+  is_locked:           boolean | null;
+  locked_at:           string | null;
+  lock_reason:         string | null;
 }
 interface AgentToken {
   id:               string;
@@ -55,6 +59,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
 
   const [newToken, setNewToken] = useState<string | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
+  const [showLock, setShowLock] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -99,6 +104,31 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       return;
     }
     toast({ title: "Agent key revoked" });
+    await load();
+  }
+
+  async function lockDevice() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("lock_device", { p_asset_id: assetId, p_reason: null });
+    setBusy(false);
+    setShowLock(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to lock device", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Device lock requested", description: "The laptop will lock within a few minutes (next agent sync)." });
+    await load();
+  }
+
+  async function unlockDevice() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("unlock_device", { p_asset_id: assetId });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to unlock device", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Device unlock requested", description: "Access will be restored within a few minutes (next agent sync)." });
     await load();
   }
 
@@ -273,6 +303,20 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               </div>
             )}
 
+            {device?.is_locked && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 flex items-center gap-2">
+                <Lock className="h-4 w-4 text-red-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-red-800">Device locked</p>
+                  <p className="text-[11px] text-red-700">
+                    End-user access is blocked
+                    {device.locked_at ? <> since {new Date(device.locked_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
+                    {" "}Files are preserved. Unlock below to restore access.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {isSuperAdmin && (
               <div className="flex flex-wrap gap-2 pt-1">
                 {!token && (
@@ -289,6 +333,17 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                       <Power className="h-4 w-4" /> Revoke
                     </Button>
                   </>
+                )}
+                {device && (
+                  device.is_locked ? (
+                    <Button size="sm" variant="outline" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy} data-testid="button-unlock-device">
+                      <Unlock className="h-4 w-4" /> Unlock Device
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setShowLock(true)} disabled={busy} data-testid="button-lock-device">
+                      <Lock className="h-4 w-4" /> Lock Device
+                    </Button>
+                  )
                 )}
                 <Button size="sm" variant="ghost" className="gap-2" onClick={() => void load()}>
                   <RefreshCw className="h-4 w-4" /> Refresh
@@ -545,6 +600,22 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowRevoke(false)}>Cancel</Button>
             <Button variant="destructive" onClick={revoke} disabled={busy}>Revoke Key</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lock confirmation */}
+      <Dialog open={showLock} onOpenChange={setShowLock}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Lock this device?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The laptop will show a full-screen lock message and the end user won't be able to use it.
+            Their files are <b>not</b> deleted. The lock applies within a few minutes, stays after a restart,
+            and you can unlock it anytime from this page.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLock(false)}>Cancel</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={lockDevice} disabled={busy}>Lock Device</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
