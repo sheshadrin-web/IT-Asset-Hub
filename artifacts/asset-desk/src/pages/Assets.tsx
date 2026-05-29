@@ -8,6 +8,7 @@ import {
   Users, CheckSquare, Package, Mail, Loader2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { isOnline, isManaged, type DeviceLike } from "@/lib/deviceHealth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,6 +199,9 @@ export default function Assets() {
   const [locationFilter, setLocationFilter] = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
   const [ackFilter, setAckFilter]       = useState<"all" | "acknowledged" | "pending">("all");
+  const [deviceFilter, setDeviceFilter] = useState<"all" | "online" | "offline" | "managed" | "unmanaged" | "agent_installed" | "agent_missing">("all");
+  const [deviceMap, setDeviceMap]       = useState<Map<string, DeviceLike>>(new Map());
+  const [deviceMapLoaded, setDeviceMapLoaded] = useState(false);
   const [sendingReminders, setSendingReminders] = useState(false);
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
@@ -215,11 +219,13 @@ export default function Assets() {
 
   const hasColFilters = Object.values(colFilters).some(s => s.size > 0);
   const hasAnyFilter  = search !== "" || typeFilter !== "all" || statusFilter !== "all"
-    || locationFilter !== "all" || deptFilter !== "all" || ackFilter !== "all" || hasColFilters;
+    || locationFilter !== "all" || deptFilter !== "all" || ackFilter !== "all"
+    || deviceFilter !== "all" || hasColFilters;
 
   const clearAllFilters = () => {
     setSearch(""); setTypeFilter("all"); setStatusFilter("all");
     setLocationFilter("all"); setDeptFilter("all"); setAckFilter("all");
+    setDeviceFilter("all");
     setColFilters(makeEmptyColFilters());
   };
 
@@ -333,7 +339,24 @@ export default function Assets() {
       ackFilter === "all"        ? true :
       ackFilter === "acknowledged" ? (a.status === "Assigned" && !!a.acknowledged) :
       /* pending */                  (a.status === "Assigned" && !a.acknowledged);
-    return matchSearch && matchType && matchStatus && matchLocation && matchDept && matchAck;
+    // Device filters only apply to laptops (the only asset type the agent manages).
+    // A non-laptop never matches an agent/online filter; "all" passes everything.
+    const dev = a.id ? deviceMap.get(a.id) : undefined;
+    const isLaptop = a.assetType === "Laptop";
+    // Until the device map has actually loaded, don't let "negative" filters
+    // (offline / unmanaged / agent_missing) classify every laptop as a match —
+    // that would be a false positive. Positive filters naturally match nothing
+    // on an empty map, so they're safe to evaluate immediately.
+    const matchDevice =
+      deviceFilter === "all"             ? true :
+      deviceFilter === "online"          ? isOnline(dev) :
+      deviceFilter === "managed"         ? isManaged(dev) :
+      deviceFilter === "agent_installed" ? !!dev :
+      !deviceMapLoaded                   ? false :
+      deviceFilter === "offline"         ? (isLaptop && isManaged(dev) && !isOnline(dev)) :
+      deviceFilter === "unmanaged"       ? (isLaptop && !isManaged(dev)) :
+      /* agent_missing */                  (isLaptop && !dev);
+    return matchSearch && matchType && matchStatus && matchLocation && matchDept && matchAck && matchDevice;
   });
 
   const filtered = baseFiltered.filter(a =>
@@ -355,7 +378,7 @@ export default function Assets() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, ackFilter, colFilters]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, locationFilter, deptFilter, ackFilter, deviceFilter, colFilters]);
 
   const paged          = sorted.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const pagedIds       = paged.map(a => a.assetId);
@@ -368,6 +391,26 @@ export default function Assets() {
     if (selectAllRef.current)
       (selectAllRef.current as unknown as HTMLInputElement).indeterminate = someSelected;
   }, [someSelected]);
+
+  // Load the managed-device status for every laptop so the device filters
+  // (Online / Managed / Agent Installed …) work. Failure is non-fatal: the map
+  // stays empty and the device filters simply match nothing rather than crashing.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("managed_devices")
+        .select("laptop_asset_id, status, is_managed, last_seen_at, agent_removed_at, uptime_seconds");
+      if (cancelled || error || !data) return;
+      const m = new Map<string, DeviceLike>();
+      for (const d of data as Array<DeviceLike & { laptop_asset_id?: string | null }>) {
+        if (d.laptop_asset_id) m.set(String(d.laptop_asset_id), d);
+      }
+      setDeviceMap(m);
+      setDeviceMapLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const toggleAll = () => {
     if (allSelected) {
@@ -709,6 +752,29 @@ export default function Assets() {
                     <span className="h-2 w-2 rounded-full bg-orange-500" /> Pending Acknowledgement
                   </span>
                 </SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Device / agent filter — applies to laptops managed by the agent */}
+            <Select value={deviceFilter} onValueChange={(v) => setDeviceFilter(v as typeof deviceFilter)}>
+              <SelectTrigger className="w-[200px] h-10 text-sm" data-testid="select-device-filter">
+                <SelectValue placeholder="Device" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Devices</SelectItem>
+                <SelectItem value="online">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Online
+                  </span>
+                </SelectItem>
+                <SelectItem value="offline">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-slate-400" /> Offline
+                  </span>
+                </SelectItem>
+                <SelectItem value="managed">Managed</SelectItem>
+                <SelectItem value="unmanaged">Unmanaged</SelectItem>
+                <SelectItem value="agent_installed">Agent Installed</SelectItem>
+                <SelectItem value="agent_missing">Agent Missing</SelectItem>
               </SelectContent>
             </Select>
           </div>

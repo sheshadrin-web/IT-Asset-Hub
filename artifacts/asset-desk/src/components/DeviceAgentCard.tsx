@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
-  Lock, Unlock, Trash2, Ban,
+  Lock, Unlock, Trash2, Ban, Image as ImageIcon, ImageOff, ShieldOff, Zap,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -229,6 +229,24 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       },
     };
     toast(labels[type]);
+    await load();
+  }
+
+  // Push the currently-active wallpaper to this device. Same RPC the wallpaper
+  // manager uses; surfaced here as a quick action. Honest about "no active wallpaper".
+  async function pushWallpaper() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("wallpaper_push_to_asset", { p_asset_id: assetId });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Couldn't push wallpaper",
+        description: error?.message ?? data?.error ?? "Set an active wallpaper first, then push it to the device.",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({ title: "Wallpaper push requested", description: "The device applies it on its next agent sync." });
     await load();
   }
 
@@ -526,6 +544,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
           <p className="text-xs text-muted-foreground">Loading…</p>
         ) : (
           <>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Agent Information</p>
             <Row label="Managed by Agent" value={!device || agentRemoved ? "No" : "Yes"} />
             <Row label="Last Seen"       value={lastSeen} />
             {device && (
@@ -721,64 +740,117 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
             )}
 
             {isSuperAdmin && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {!token && (
-                  <Button size="sm" variant="outline" className="gap-2" onClick={generate} disabled={busy} data-testid="button-generate-agent-key">
-                    <KeyRound className="h-4 w-4" /> Generate Agent Key
+              <div className="pt-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Quick Actions</p>
+                  <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={() => void load()}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Refresh
                   </Button>
-                )}
-                {token && (
-                  <>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={generate} disabled={busy} data-testid="button-regenerate-agent-key">
-                      <RefreshCw className="h-4 w-4" /> Regenerate
-                    </Button>
-                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowRevoke(true)} disabled={busy} data-testid="button-revoke-agent-key">
-                      <Power className="h-4 w-4" /> Revoke
-                    </Button>
-                  </>
-                )}
-                {device && !agentRemoved && (
-                  device.is_locked ? (
-                    <Button size="sm" variant="outline" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy || removalPending} data-testid="button-unlock-device">
-                      <Unlock className="h-4 w-4" /> Unlock Device
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {/* Agent key */}
+                  {!token ? (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={generate} disabled={busy} data-testid="button-generate-agent-key">
+                      <KeyRound className="h-4 w-4" /> Generate Key
                     </Button>
                   ) : (
-                    <Button size="sm" variant="outline" className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setShowLock(true)} disabled={busy || removalPending} data-testid="button-lock-device">
-                      <Lock className="h-4 w-4" /> Lock Device
+                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={generate} disabled={busy} data-testid="button-regenerate-agent-key">
+                      <RefreshCw className="h-4 w-4" /> Regenerate Key
                     </Button>
-                  )
-                )}
-                {device && !agentRemoved && (
-                  <>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
-                      <Power className="h-4 w-4" /> Notify Restart
+                  )}
+
+                  {/* Lock / Unlock toggle */}
+                  {device && !agentRemoved && (
+                    device.is_locked ? (
+                      <Button size="sm" variant="outline" className="gap-2 justify-start text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy || removalPending} data-testid="button-unlock-device">
+                        <Unlock className="h-4 w-4" /> Unlock
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" className="gap-2 justify-start text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setShowLock(true)} disabled={busy || removalPending} data-testid="button-lock-device">
+                        <Lock className="h-4 w-4" /> Lock
+                      </Button>
+                    )
+                  )}
+
+                  {/* Restart (force, with grace period) */}
+                  {device && !agentRemoved && (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy || removalPending} data-testid="button-force-restart">
+                      <Power className="h-4 w-4" /> Restart
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("schedule_restart")} disabled={busy || removalPending} data-testid="button-schedule-restart">
+                  )}
+
+                  {/* Schedule restart */}
+                  {device && !agentRemoved && (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void requestRestart("schedule_restart")} disabled={busy || removalPending} data-testid="button-schedule-restart">
                       <RefreshCw className="h-4 w-4" /> Schedule Restart
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy || removalPending} data-testid="button-force-restart">
-                      <Power className="h-4 w-4" /> Force Restart
+                  )}
+
+                  {/* Push wallpaper */}
+                  {device && !agentRemoved && (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void pushWallpaper()} disabled={busy || removalPending} data-testid="button-push-wallpaper">
+                      <ImageIcon className="h-4 w-4" /> Push Wallpaper
                     </Button>
-                  </>
-                )}
-                {device && !agentRemoved && (
-                  <>
-                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowRemoveAgent(true); }} disabled={busy || removalPending} data-testid="button-remove-agent">
+                  )}
+
+                  {/* Remove wallpaper — NOT supported by the agent (no reset RPC). */}
+                  <Button
+                    size="sm" variant="outline"
+                    className="gap-2 justify-start opacity-60 cursor-not-allowed"
+                    disabled
+                    title="Resetting a device's wallpaper isn't supported by the agent yet."
+                    data-testid="button-remove-wallpaper"
+                  >
+                    <ImageOff className="h-4 w-4" /> Remove Wallpaper
+                  </Button>
+
+                  {/* Remove agent (graceful) */}
+                  {device && !agentRemoved && (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start text-red-600 border-red-300 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowRemoveAgent(true); }} disabled={busy || removalPending} data-testid="button-remove-agent">
                       <Trash2 className="h-4 w-4" /> Remove Agent
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
-                      <Ban className="h-4 w-4" /> Force Remove Agent from Portal
-                    </Button>
-                  </>
-                )}
-                {device && (
-                  <Button size="sm" variant="outline" className="gap-2" onClick={downloadUninstall} data-testid="button-download-uninstall">
-                    <Download className="h-4 w-4" /> Download Uninstall Command
+                  )}
+
+                  {/* Remote wipe — NOT supported (agent is read/control only, no wipe). */}
+                  <Button
+                    size="sm" variant="outline"
+                    className="gap-2 justify-start opacity-60 cursor-not-allowed"
+                    disabled
+                    title="Remote wipe is not available — the agent intentionally supports no destructive wipe/reset."
+                    data-testid="button-remote-wipe"
+                  >
+                    <ShieldOff className="h-4 w-4" /> Remote Wipe
                   </Button>
-                )}
-                <Button size="sm" variant="ghost" className="gap-2" onClick={() => void load()}>
-                  <RefreshCw className="h-4 w-4" /> Refresh
-                </Button>
+                </div>
+
+                {/* Secondary / advanced controls */}
+                <details className="rounded-md border bg-muted/20">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-muted-foreground">
+                    More controls
+                  </summary>
+                  <div className="flex flex-wrap gap-2 px-3 pb-3">
+                    {token && (
+                      <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowRevoke(true)} disabled={busy} data-testid="button-revoke-agent-key">
+                        <Power className="h-4 w-4" /> Revoke Key
+                      </Button>
+                    )}
+                    {device && !agentRemoved && (
+                      <>
+                        <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
+                          <Zap className="h-4 w-4" /> Notify Restart
+                        </Button>
+                        <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
+                          <Ban className="h-4 w-4" /> Force Remove Agent from Portal
+                        </Button>
+                      </>
+                    )}
+                    {device && (
+                      <Button size="sm" variant="outline" className="gap-2" onClick={downloadUninstall} data-testid="button-download-uninstall">
+                        <Download className="h-4 w-4" /> Download Uninstall Command
+                      </Button>
+                    )}
+                  </div>
+                </details>
               </div>
             )}
 

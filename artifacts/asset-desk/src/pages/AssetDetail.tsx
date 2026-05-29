@@ -5,7 +5,7 @@ import {
   User, Building, Tag, Package, Edit, AlertTriangle,
   Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
   ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
-  RefreshCw, Clock, MailCheck,
+  RefreshCw, Clock, MailCheck, Wifi, WifiOff,
 } from "lucide-react";
 import { useState, useEffect, ElementType } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,13 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import DeviceAgentCard from "@/components/DeviceAgentCard";
+import AssetKpiCards from "@/components/asset/AssetKpiCards";
+import AssetActivityTimeline, {
+  type TimelineCommand,
+} from "@/components/asset/AssetActivityTimeline";
+import { isOnline, type DeviceLike } from "@/lib/deviceHealth";
+
+type ManagedDevice = DeviceLike & Record<string, unknown>;
 
 interface HistoryRow {
   id:           string;
@@ -109,6 +116,9 @@ export default function AssetDetail() {
   const [assignReason,     setAssignReason]      = useState("");
   const [history,          setHistory]           = useState<HistoryRow[]>([]);
   const [historyLoading,   setHistoryLoading]    = useState(false);
+  const [device,           setDevice]            = useState<ManagedDevice | null>(null);
+  const [commands,         setCommands]          = useState<TimelineCommand[]>([]);
+  const [deviceLoading,    setDeviceLoading]     = useState(false);
   const [resendState,      setResendState]       = useState<"idle" | "sending" | "sent" | "error">("idle");
   // Single-flight guard for assign/status/unassign mutations — prevents
   // double-submit and freezes the relevant buttons while a write is in flight.
@@ -127,6 +137,38 @@ export default function AssetDetail() {
         setHistoryLoading(false);
       });
   }, [id]);
+
+  // Managed-device telemetry + command history (laptops only) — powers the KPI
+  // cards, online indicator and activity timeline. Read-only; the agent card
+  // owns all device mutations.
+  // The route param `id` is the human asset tag (e.g. AST-001), but the agent
+  // keys everything by the asset UUID (managed_devices.laptop_asset_id /
+  // device_command_history.p_asset_id both expect the UUID). Resolve it here.
+  const lookupAsset = getAsset(id);
+  const assetType = lookupAsset?.assetType;
+  const assetUuid = lookupAsset?.id;
+  useEffect(() => {
+    if (!assetUuid || !supabaseConfigured || assetType !== "Laptop") {
+      setDevice(null);
+      setCommands([]);
+      return;
+    }
+    let cancelled = false;
+    setDeviceLoading(true);
+    (async () => {
+      const [dRes, cRes] = await Promise.all([
+        supabase.from("managed_devices").select("*").eq("laptop_asset_id", assetUuid).maybeSingle(),
+        supabase.rpc("device_command_history", { p_asset_id: assetUuid, p_limit: 20 }),
+      ]);
+      if (cancelled) return;
+      setDevice((dRes.data as ManagedDevice | null) ?? null);
+      setCommands((cRes.data ?? []) as TimelineCommand[]);
+      setDeviceLoading(false);
+    })().catch(() => {
+      if (!cancelled) setDeviceLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [assetUuid, assetType]);
 
   const asset          = getAsset(id);
   const relatedTickets = tickets.filter(t => t.assetId === id);
@@ -266,6 +308,21 @@ export default function AssetDetail() {
                   <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
                     {asset.status}
                   </span>
+                  {asset.assetType === "Laptop" && device && (
+                    isOnline(device) ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                        </span>
+                        Online
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        <WifiOff className="h-3 w-3" /> Offline
+                      </span>
+                    )
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground">{asset.brand} {asset.model}</p>
               </div>
@@ -332,6 +389,9 @@ export default function AssetDetail() {
           )}
         </div>
       </div>
+
+      {/* ── KPI dashboard cards ────────────────────────────────────────────── */}
+      <AssetKpiCards asset={asset} device={device} />
 
       {/* ── Lifecycle tracker ──────────────────────────────────────────────── */}
       {asset.status !== "Lost" && (() => {
@@ -646,6 +706,14 @@ export default function AssetDetail() {
               )}
             </CardContent>
           </Card>
+
+          {/* ── Activity timeline ─────────────────────────────────────────── */}
+          <AssetActivityTimeline
+            history={history}
+            commands={commands}
+            agentInstalledAt={(device?.created_at as string | null | undefined) ?? null}
+            loading={historyLoading || deviceLoading}
+          />
         </div>
 
         <div className="space-y-4">
