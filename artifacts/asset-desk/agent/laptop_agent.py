@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.5.2"
+AGENT_VERSION       = "0.6.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -1399,7 +1399,126 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         delay = payload.get("delay_seconds", RESTART_GRACE_SEC)
         reason = payload.get("reason") or "IT has scheduled a restart for this computer."
         return _schedule_restart(delay, force=(ctype == "force_restart"), reason=reason)
+    if ctype == "uninstall_agent":
+        return _self_uninstall()
     return ("failed", None, f"unsupported command: {ctype}")
+
+
+# ── self-uninstall (remove the agent from this laptop) ───────────────────────
+# Removing the agent only ends the management connection: it stops the
+# background service, deletes the local agent files, and removes the saved
+# token. It never touches the user's own files or data.
+_uninstall_requested = False
+
+
+def _remaining_service_artifacts() -> list[str]:
+    """Return service/autostart paths that should be gone after uninstall but
+    still exist. We verify rather than trust the helpers' best-effort return
+    codes. On Windows the install dir holds the *running* script and can only be
+    deleted after the process exits (see _final_self_destruct), so we check the
+    Startup launcher (.vbs) — once it's gone the agent will not auto-start again;
+    the directory itself is cleaned up by the deferred job."""
+    if IS_MAC:
+        candidates = [MAC_DAEMON_PLIST_PATH, MAC_SYS_INSTALL_DIR,
+                      MAC_PLIST_PATH, MAC_INSTALL_DIR]
+    elif IS_LIN:
+        candidates = [LIN_SYS_UNIT_PATH, LIN_SYS_INSTALL_DIR,
+                      LIN_UNIT_PATH, LIN_INSTALL_DIR]
+    elif IS_WIN:
+        candidates = [WIN_VBS_PATH]
+    else:
+        candidates = []
+    return [p for p in candidates if p and os.path.exists(p)]
+
+
+def _self_uninstall() -> tuple[str, str | None, str | None]:
+    """Tear down this agent locally. The actual process exit happens in the run
+    loop *after* this status is reported back to the portal, so the portal can
+    confirm the removal (it revokes the token + marks the device removed only on
+    the confirmed 'completed')."""
+    global _uninstall_requested
+    warnings: list[str] = []   # non-fatal: removal still succeeded
+    failures: list[str] = []   # fatal: agent would keep running / stay managed
+
+    # 1. Never leave the user locked out by a half-removed agent. A failure here
+    #    does NOT block removal (it is a safety nicety), but is surfaced.
+    try:
+        with _lock_mutex:
+            _release_lock()
+    except Exception as e:
+        warnings.append(f"lock release: {e}")
+
+    # 2. Stop + remove the background service / autostart and installed files.
+    #    (Windows: removes the Startup launcher + %LOCALAPPDATA%\MilesAgent incl.
+    #     the token-bearing run.cmd. macOS: unloads launchd + removes the daemon
+    #     dir incl. the 0600 token file. Linux: disables + removes the unit.)
+    #    If this fails the service keeps running, so it is a FATAL failure: we
+    #    must NOT tell the portal the agent is gone. The platform helpers are
+    #    best-effort and swallow errors, so we VERIFY the artifacts are actually
+    #    gone afterwards rather than trusting the return code.
+    try:
+        rc = uninstall_service()
+        if rc not in (0, None):
+            failures.append(f"service removal returned {rc}")
+    except Exception as e:
+        failures.append(f"service removal: {e}")
+    for leftover in _remaining_service_artifacts():
+        failures.append(f"service/autostart still present: {leftover}")
+
+    # 3. Remove the local state dir (venv/script copy, lock + wallpaper state,
+    #    install log) and the macOS root token file. A leftover token means the
+    #    agent could re-authenticate, so a failure here is also FATAL. Verify the
+    #    paths are actually gone rather than trusting rmtree(ignore_errors=True).
+    for path in (os.path.join(os.path.expanduser("~"), ".miles-agent"),
+                 MAC_SYS_TOKEN_FILE if IS_MAC else None):
+        if not path:
+            continue
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.exists(path):
+                os.remove(path)
+            if os.path.exists(path):
+                failures.append(f"cleanup {path}: still present after removal")
+        except Exception as e:
+            failures.append(f"cleanup {path}: {e}")
+
+    # Honest confirmation: only report 'completed' when the agent is genuinely
+    # gone. On any fatal failure report 'failed' and DO NOT exit — the device
+    # stays managed so an admin can retry or Force Remove from the portal.
+    if failures:
+        return ("failed",
+                None,
+                "Uninstall did not complete; device is still managed. "
+                + "; ".join(failures + warnings))
+
+    _uninstall_requested = True
+    if warnings:
+        return ("completed",
+                "Agent management removed (with minor cleanup warnings).",
+                "; ".join(warnings))
+    return ("completed",
+            "Agent uninstalled: background service stopped, local files and saved token removed.",
+            None)
+
+
+def _final_self_destruct() -> None:
+    """Called once, after the uninstall status has been reported, to remove any
+    files that were still locked while the agent was running. On Windows the
+    running script/exe in %LOCALAPPDATA%\\MilesAgent can't delete itself, so a
+    detached cmd waits a moment and removes the directory after we exit."""
+    try:
+        if IS_WIN and WIN_INSTALL_DIR and os.path.isdir(WIN_INSTALL_DIR):
+            CREATE_NO_WINDOW = 0x08000000
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                ["cmd", "/c", "ping 127.0.0.1 -n 3 >nul & rmdir /s /q "
+                 + f'"{WIN_INSTALL_DIR}"'],
+                creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                close_fds=True,
+            )
+    except Exception:
+        pass
 
 
 _last_uptime_notice = 0.0
@@ -1440,6 +1559,11 @@ def poll_commands() -> None:
             "result": result,
             "error":  err,
         })
+        # A confirmed uninstall is terminal: the local files/token are gone, so
+        # never run any further command claimed in the same batch. The run loop
+        # sees _uninstall_requested next and exits.
+        if _uninstall_requested:
+            break
 
 
 # ── entrypoints ─────────────────────────────────────────────────────────────
@@ -1519,6 +1643,13 @@ def run_loop() -> int:
                 last_sync = now
             # Commands (lock / unlock) on the fast cycle so they apply in seconds.
             poll_commands()
+            # An uninstall command tore the agent down (and poll_commands has
+            # just reported its result to the portal). Exit cleanly now; on
+            # Windows hand off a detached job to delete the still-locked files.
+            if _uninstall_requested:
+                print("Agent uninstalled — exiting.", file=sys.stderr)
+                _final_self_destruct()
+                return 0
             # Keep a locked device locked: re-assert the Windows/macOS screen
             # lock every fast cycle (no-op on Linux / when unlocked). Runs after
             # poll_commands so an incoming unlock clears local state first and we
@@ -2039,6 +2170,21 @@ def main() -> int:
     if cmd == "run":               return run_loop()
     if cmd == "install-service":   return install_service()
     if cmd == "uninstall-service": return uninstall_service()
+    if cmd == "unregister":
+        # Full local teardown: stop the background service, delete the agent's
+        # local files, and remove the saved token. Use this to clean up a
+        # device the portal has already force-removed. Does not touch user data.
+        status, msg, warn = _self_uninstall()
+        if status != "completed":
+            # Honest exit: teardown did not fully succeed, so the device is still
+            # managed. Report the reason and a non-zero code for the operator.
+            print(f"ERROR: uninstall did not complete: {warn}", file=sys.stderr)
+            return 1
+        _final_self_destruct()
+        print(msg or "Agent unregistered.")
+        if warn:
+            print(f"Note: {warn}", file=sys.stderr)
+        return 0
     print(f"unknown command: {cmd}", file=sys.stderr); return 2
 
 

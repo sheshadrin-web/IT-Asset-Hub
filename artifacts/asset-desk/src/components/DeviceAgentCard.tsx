@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
-  Lock, Unlock,
+  Lock, Unlock, Trash2, Ban,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,10 @@ import WallpaperManager from "./WallpaperManager";
 interface ManagedDevice {
   id:                  string;
   status:              "online" | "offline" | "inactive";
+  is_managed:          boolean | null;
+  agent_removed_at:    string | null;
+  agent_removed_reason: string | null;
+  agent_remove_requested_at: string | null;
   hostname:            string | null;
   serial_number:       string | null;
   processor:           string | null;
@@ -45,6 +49,7 @@ interface AgentToken {
 interface DeviceCommand {
   id:                string;
   command_type:      string;
+  command_payload:   { reason?: string | null } | null;
   status:            "pending" | "running" | "completed" | "failed" | "cancelled" | "requires_admin";
   requested_at:      string | null;
   executed_at:       string | null;
@@ -73,6 +78,8 @@ const COMMAND_LABEL: Record<string, string> = {
   notify_restart:     "Notify user to restart",
   schedule_restart:   "Schedule restart",
   force_restart:      "Force restart",
+  uninstall_agent:    "Remove agent (uninstall)",
+  force_remove_agent: "Force remove from portal",
 };
 
 // Human-readable uptime, e.g. "3d 4h" or "5h 12m" or "8m".
@@ -111,6 +118,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const [showRevoke, setShowRevoke] = useState(false);
   const [showLock, setShowLock] = useState(false);
   const [showForceRestart, setShowForceRestart] = useState(false);
+  const [showRemoveAgent, setShowRemoveAgent] = useState(false);
+  const [showForceRemove, setShowForceRemove] = useState(false);
+  const [removeReason, setRemoveReason] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -222,6 +232,85 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     await load();
   }
 
+  // Graceful remove: queue an uninstall the laptop performs, then confirms.
+  // Keeps the token active until the agent reports back. Asset, assignment and
+  // history are always preserved — this only ends the management connection.
+  async function removeAgent() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("remove_agent", {
+      p_asset_id: assetId,
+      p_reason: removeReason.trim() || null,
+    });
+    setBusy(false);
+    setShowRemoveAgent(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to remove agent", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    setRemoveReason("");
+    toast({
+      title: "Agent removal requested",
+      description: "The laptop will uninstall the agent on its next sync. The device shows as removed only once it confirms.",
+    });
+    await load();
+  }
+
+  // Force remove (laptop not responding): immediate, server-side. Revokes the
+  // token, ends management, clears the queue. Keeps logs/asset/user/history.
+  async function forceRemoveAgent() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("force_remove_agent", {
+      p_asset_id: assetId,
+      p_reason: removeReason.trim() || null,
+    });
+    setBusy(false);
+    setShowForceRemove(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to force remove", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    setRemoveReason("");
+    toast({
+      title: "Agent force-removed from portal",
+      description: "The token is revoked and management has ended. Asset, assignment and history are preserved. Clean the laptop with the uninstall command.",
+    });
+    await load();
+  }
+
+  // Build a plain-text uninstall cheat-sheet (all OSes) for IT to run on the
+  // laptop directly — used by the "Download Uninstall Command" button.
+  function downloadUninstall() {
+    const text = [
+      "Miles Device Agent — manual uninstall",
+      "Removing the agent only ends management. It does NOT delete user files or data.",
+      "",
+      "── macOS / Linux (Terminal) ──",
+      "sudo ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py uninstall-service",
+      "rm -rf ~/.miles-agent",
+      "",
+      "── Windows (Command Prompt / PowerShell) ──",
+      `%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe %USERPROFILE%\\.miles-agent\\laptop_agent.py unregister`,
+      "",
+      "The 'unregister' command stops the background service, deletes the agent files,",
+      "and removes the saved key in one step.",
+      assetTag ? `\nDevice: ${assetTag}` : "",
+    ].join("\n");
+    try {
+      const blob = new Blob([text], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `miles-agent-uninstall${assetTag ? `-${assetTag}` : ""}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "Uninstall command downloaded" });
+    } catch {
+      toast({ title: "Download failed — copy the commands manually", variant: "destructive" });
+    }
+  }
+
   async function copy(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -235,12 +324,24 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     ? new Date(device.last_seen_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
     : "—";
 
-  const statusDot = device?.status === "online"
+  // Agent removed = the management connection has been ended (graceful confirm
+  // or force remove). The asset/assignment/history stay; only management stops.
+  const agentRemoved = !!device?.agent_removed_at;
+  // Removal queued but the laptop has not yet confirmed the uninstall.
+  const removalPending = !agentRemoved && !!device?.agent_remove_requested_at;
+
+  const statusDot = agentRemoved
+    ? "bg-gray-400"
+    : device?.status === "online"
     ? "bg-emerald-500"
     : device?.status === "offline"
     ? "bg-amber-500"
     : "bg-gray-400";
-  const statusLabel = device?.status ? device.status.charAt(0).toUpperCase() + device.status.slice(1) : "Not Installed";
+  const statusLabel = agentRemoved
+    ? "Agent Removed"
+    : removalPending
+    ? "Removal Pending"
+    : device?.status ? device.status.charAt(0).toUpperCase() + device.status.slice(1) : "Not Installed";
 
   // Install commands shown after generating. They download the Python agent from
   // this portal, create an isolated venv (avoids macOS/Ubuntu PEP-668 "externally
@@ -382,6 +483,19 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     (latestLockCmd.status === "failed" || latestLockCmd.status === "requires_admin") &&
     !device?.is_locked;
 
+  // Unlock honesty: the device only shows as unlocked once the agent confirms.
+  // Until then (or if it failed) surface the exact agent status/reason so IT is
+  // never told the device unlocked when it did not. Only relevant while the
+  // device is still locked and the most recent action was an unlock.
+  const unlockInFlight =
+    !!device?.is_locked &&
+    latestLockCmd?.command_type === "unlock" &&
+    (latestLockCmd.status === "pending" || latestLockCmd.status === "running");
+  const unlockFailed =
+    !!device?.is_locked &&
+    latestLockCmd?.command_type === "unlock" &&
+    (latestLockCmd.status === "failed" || latestLockCmd.status === "requires_admin");
+
   // Restart-required = the device has been up for more than a day.
   const restartRequired =
     device?.uptime_seconds != null && device.uptime_seconds > RESTART_REQUIRED_SECONDS;
@@ -412,7 +526,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
           <p className="text-xs text-muted-foreground">Loading…</p>
         ) : (
           <>
-            <Row label="Managed by Agent" value={device ? "Yes" : "No"} />
+            <Row label="Managed by Agent" value={!device || agentRemoved ? "No" : "Yes"} />
             <Row label="Last Seen"       value={lastSeen} />
             {device && (
               <>
@@ -496,7 +610,71 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               </div>
             )}
 
-            {lockUnenforceable && (
+            {unlockInFlight && (
+              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-sky-600 shrink-0 animate-spin" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-sky-800">
+                    Unlock {latestLockCmd?.status === "running" ? "executing" : "pending"}…
+                  </p>
+                  <p className="text-[11px] text-sky-700">
+                    Unlock requested — waiting for the device agent to apply it and confirm. The device is
+                    <b> still locked</b> until the agent reports back (next sync).
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {unlockFailed && (
+              <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-red-900">
+                    Unlock {latestLockCmd?.status === "requires_admin" ? "needs admin privileges" : "failed"} — device is STILL locked
+                  </p>
+                  <p className="text-[11px] text-red-800">
+                    {latestLockCmd?.error_message
+                      ? latestLockCmd.error_message
+                      : "The agent could not confirm the unlock."}
+                    {latestLockCmd?.status === "requires_admin"
+                      ? " The agent is not running with admin rights. Reinstall it on the device using the sudo install command below, then retry the unlock."
+                      : " Retry Unlock below once the device is back online; access is restored only after the agent confirms."}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {removalPending && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
+                <RefreshCw className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-900">Agent removal pending</p>
+                  <p className="text-[11px] text-amber-800">
+                    An uninstall was queued — waiting for the laptop to remove the agent and confirm (next sync).
+                    The device shows as <b>Agent Removed</b> only once it reports back. If the laptop is offline or
+                    unresponsive, use <b>Force Remove Agent from Portal</b>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {agentRemoved && (
+              <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 flex items-start gap-2">
+                <Trash2 className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-800">Agent removed</p>
+                  <p className="text-[11px] text-slate-700">
+                    Management ended
+                    {device?.agent_removed_at ? <> on {new Date(device.agent_removed_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
+                    {device?.agent_removed_reason ? <> Reason: {device.agent_removed_reason}.</> : null}
+                    {" "}The asset record, assigned user, and full history are <b>preserved</b>. Generate a new key
+                    and re-install to bring this device back under management. See who/when in the audit log below.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {lockUnenforceable && !agentRemoved && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
@@ -559,29 +737,44 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     </Button>
                   </>
                 )}
-                {device && (
+                {device && !agentRemoved && (
                   device.is_locked ? (
-                    <Button size="sm" variant="outline" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy} data-testid="button-unlock-device">
+                    <Button size="sm" variant="outline" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy || removalPending} data-testid="button-unlock-device">
                       <Unlock className="h-4 w-4" /> Unlock Device
                     </Button>
                   ) : (
-                    <Button size="sm" variant="outline" className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setShowLock(true)} disabled={busy} data-testid="button-lock-device">
+                    <Button size="sm" variant="outline" className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setShowLock(true)} disabled={busy || removalPending} data-testid="button-lock-device">
                       <Lock className="h-4 w-4" /> Lock Device
                     </Button>
                   )
                 )}
-                {device && (
+                {device && !agentRemoved && (
                   <>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy} data-testid="button-notify-restart">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
                       <Power className="h-4 w-4" /> Notify Restart
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("schedule_restart")} disabled={busy} data-testid="button-schedule-restart">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("schedule_restart")} disabled={busy || removalPending} data-testid="button-schedule-restart">
                       <RefreshCw className="h-4 w-4" /> Schedule Restart
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy} data-testid="button-force-restart">
+                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy || removalPending} data-testid="button-force-restart">
                       <Power className="h-4 w-4" /> Force Restart
                     </Button>
                   </>
+                )}
+                {device && !agentRemoved && (
+                  <>
+                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowRemoveAgent(true); }} disabled={busy || removalPending} data-testid="button-remove-agent">
+                      <Trash2 className="h-4 w-4" /> Remove Agent
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
+                      <Ban className="h-4 w-4" /> Force Remove Agent from Portal
+                    </Button>
+                  </>
+                )}
+                {device && (
+                  <Button size="sm" variant="outline" className="gap-2" onClick={downloadUninstall} data-testid="button-download-uninstall">
+                    <Download className="h-4 w-4" /> Download Uninstall Command
+                  </Button>
                 )}
                 <Button size="sm" variant="ghost" className="gap-2" onClick={() => void load()}>
                   <RefreshCw className="h-4 w-4" /> Refresh
@@ -610,6 +803,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                         <p className="mt-1 text-muted-foreground">
                           Requested by <span className="font-medium text-foreground">{c.requested_by_name ?? "System"}</span>
                         </p>
+                        {c.command_payload?.reason && (
+                          <p className="mt-0.5 text-muted-foreground break-words">Reason given: {c.command_payload.reason}</p>
+                        )}
                         {c.error_message && (
                           <p className="mt-0.5 text-red-700 break-words">Reason: {c.error_message}</p>
                         )}
@@ -906,6 +1102,68 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForceRestart(false)}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={() => void requestRestart("force_restart")} disabled={busy}>Force Restart</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove agent (graceful) */}
+      <Dialog open={showRemoveAgent} onOpenChange={setShowRemoveAgent}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Remove agent from this device?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This queues a clean uninstall the laptop performs on its next sync: it stops the background
+            service, removes startup, deletes the agent files and the saved key. The portal marks the
+            device <b>Agent Removed</b> only once the laptop confirms.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            The <b>asset record, assigned user, sync logs and full history are preserved</b> — only the
+            management connection ends. Use this when the laptop is online and reachable.
+          </p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Reason (saved to the audit log)</label>
+            <textarea
+              value={removeReason}
+              onChange={(e) => setRemoveReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Employee offboarded / device returned to IT"
+              className="mt-1 w-full resize-none rounded border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid="input-remove-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRemoveAgent(false)}>Cancel</Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={removeAgent} disabled={busy} data-testid="button-confirm-remove-agent">Remove Agent</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Force remove from portal (laptop unresponsive) */}
+      <Dialog open={showForceRemove} onOpenChange={setShowForceRemove}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Force remove agent from the portal?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Use this only when the laptop is <b>lost, broken or not responding</b>. It immediately revokes
+            the agent key, ends management, releases any lock, and clears the pending command queue —
+            <b> without waiting for the laptop</b>.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            The <b>asset record, assigned user, sync logs and history are kept</b>. If the laptop ever comes
+            back online, clean it with the <b>Download Uninstall Command</b> file.
+          </p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Reason (saved to the audit log)</label>
+            <textarea
+              value={removeReason}
+              onChange={(e) => setRemoveReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Laptop lost / unresponsive / hardware failure"
+              className="mt-1 w-full resize-none rounded border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid="input-force-remove-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowForceRemove(false)}>Cancel</Button>
+            <Button className="bg-red-700 hover:bg-red-800 text-white" onClick={forceRemoveAgent} disabled={busy} data-testid="button-confirm-force-remove">Force Remove</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
