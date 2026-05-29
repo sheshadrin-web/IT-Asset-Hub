@@ -39,6 +39,11 @@ interface AgentToken {
 
 interface Props { assetId: string; assetTag?: string | null; }
 
+// Placeholder shown in the always-available reference commands. The real,
+// ready-to-paste command (with the key embedded) is only shown once in the
+// one-time key dialog, since the plaintext key is never stored after generation.
+const REF_TOKEN = "YOUR-AGENT-KEY";
+
 export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const { role, session, loading: authLoading } = useAuth();
   const isSuperAdmin = role === "super_admin";
@@ -302,20 +307,62 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               <p className="text-[11px] text-muted-foreground mb-2">
                 Click <b>Generate Agent Key</b> above, then copy the one-line install command for the
                 target OS. It downloads the agent and starts it automatically — no manual download needed.
-                The files below are optional references.
+                The ready-to-paste command (with your key embedded) is shown once in the key dialog; the
+                reference commands and files below are always available.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button asChild size="sm" variant="outline" className="gap-2">
-                  <a href="/agent/laptop_agent.py" download="laptop_agent.py">
+                  <a href={`${import.meta.env.BASE_URL}agent/laptop_agent.py`} download="laptop_agent.py">
                     <Download className="h-4 w-4" /> Python script
                   </a>
                 </Button>
                 <Button asChild size="sm" variant="ghost" className="gap-2">
-                  <a href="/agent/miles-device-agent-guide.pdf" target="_blank" rel="noopener">
+                  <a href={`${import.meta.env.BASE_URL}agent/miles-device-agent-guide.pdf`} target="_blank" rel="noopener">
                     <Download className="h-4 w-4" /> Setup guide (PDF)
                   </a>
                 </Button>
               </div>
+
+              <details className="mt-3 rounded-md border bg-muted/20">
+                <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-muted-foreground">
+                  One-line install commands (reference)
+                </summary>
+                <div className="space-y-3 px-3 pb-3">
+                  <p className="text-[11px] text-muted-foreground">
+                    Replace <span className="font-mono">{REF_TOKEN}</span> with the key from{" "}
+                    <b>Generate</b>/<b>Regenerate</b> above. The command with your key already embedded is
+                    shown once in the key dialog.
+                  </p>
+                  <CmdBlock
+                    label="macOS (Terminal)"
+                    value={installCmdMac(REF_TOKEN)}
+                    rows={8}
+                    testid="button-copy-install-mac-ref"
+                    onCopy={() => copy(installCmdMac(REF_TOKEN), "macOS install command")}
+                  />
+                  <CmdBlock
+                    label="Ubuntu / Linux (Terminal)"
+                    value={installCmdLinux(REF_TOKEN)}
+                    rows={7}
+                    testid="button-copy-install-linux-ref"
+                    onCopy={() => copy(installCmdLinux(REF_TOKEN), "Linux install command")}
+                  />
+                  <CmdBlock
+                    label="Windows (Command Prompt)"
+                    value={installCmdCmd(REF_TOKEN)}
+                    rows={5}
+                    testid="button-copy-install-cmd-ref"
+                    onCopy={() => copy(installCmdCmd(REF_TOKEN), "CMD install command")}
+                  />
+                  <CmdBlock
+                    label="Windows (PowerShell)"
+                    value={installCmdPs(REF_TOKEN)}
+                    rows={5}
+                    testid="button-copy-install-ps-ref"
+                    onCopy={() => copy(installCmdPs(REF_TOKEN), "PowerShell install command")}
+                  />
+                </div>
+              </details>
             </div>
           </>
         )}
@@ -510,6 +557,30 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-2">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-right break-all">{value}</span>
+    </div>
+  );
+}
+
+function CmdBlock({
+  label, value, onCopy, rows, testid,
+}: {
+  label: string; value: string; onCopy: () => void; rows: number; testid: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{label}</label>
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={onCopy} data-testid={testid}>
+          <Copy className="h-3.5 w-3.5" /> Copy
+        </Button>
+      </div>
+      <textarea
+        readOnly
+        value={value}
+        onFocus={(e) => e.currentTarget.select()}
+        className="w-full resize-none rounded border bg-muted/40 px-3 py-2 text-xs font-mono break-all focus:outline-none focus:ring-1 focus:ring-primary"
+        rows={rows}
+      />
     </div>
   );
 }
