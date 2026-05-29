@@ -162,11 +162,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   };
 
   // ── Ubuntu / Linux (Terminal) — systemd --user service ─────────────────────
+  // Clean Ubuntu has no `curl`, so the download is done with python3 itself
+  // (always present — it's required to run the agent). The venv step self-heals
+  // if the `python3-venv` package is missing (PEP-668 / Debian split package).
   const installCmdLinux = (tok: string) => {
     const install = [
       `mkdir -p ~/.miles-agent`,
-      `curl -fsSL "${agentUrl}" -o ~/.miles-agent/laptop_agent.py`,
-      `python3 -m venv ~/.miles-agent/venv`,
+      `python3 -c "import urllib.request,os; urllib.request.urlretrieve('${agentUrl}', os.path.expanduser('~/.miles-agent/laptop_agent.py'))"`,
+      `(python3 -m venv ~/.miles-agent/venv || { sudo apt-get update && sudo apt-get install -y python3-venv && python3 -m venv ~/.miles-agent/venv; })`,
       `~/.miles-agent/venv/bin/python -m pip install -q --upgrade pip requests`,
       `export MILES_AGENT_TOKEN="${tok}"`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py register`,
