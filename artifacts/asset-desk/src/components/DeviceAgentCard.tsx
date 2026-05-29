@@ -32,6 +32,8 @@ interface ManagedDevice {
   is_locked:           boolean | null;
   locked_at:           string | null;
   lock_reason:         string | null;
+  uptime_seconds:      number | null;
+  last_boot_at:        string | null;
 }
 interface AgentToken {
   id:               string;
@@ -68,7 +70,25 @@ const COMMAND_LABEL: Record<string, string> = {
   update_wallpaper:   "Update wallpaper",
   sync_now:           "Sync now",
   collect_system_info:"Collect system info",
+  notify_restart:     "Notify user to restart",
+  schedule_restart:   "Schedule restart",
+  force_restart:      "Force restart",
 };
+
+// Human-readable uptime, e.g. "3d 4h" or "5h 12m" or "8m".
+function formatUptime(seconds: number | null | undefined): string {
+  if (seconds == null || seconds < 0) return "—";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// A device that has not rebooted in over a day should be restarted to apply
+// updates and clear memory leaks.
+const RESTART_REQUIRED_SECONDS = 86400;
 
 interface Props { assetId: string; assetTag?: string | null; }
 
@@ -90,6 +110,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
   const [showLock, setShowLock] = useState(false);
+  const [showForceRestart, setShowForceRestart] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -163,6 +184,41 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       return;
     }
     toast({ title: "Device unlock requested", description: "Access will be restored within a few minutes (next agent sync)." });
+    await load();
+  }
+
+  // Restart actions. None of these restart silently: notify only messages the
+  // user; schedule/force always warn the user first and wait a 10-minute grace
+  // period (enforced agent-side) so work can be saved.
+  async function requestRestart(type: "notify_restart" | "schedule_restart" | "force_restart") {
+    setBusy(true);
+    const reason = "IT has requested this device be restarted.";
+    const { data, error } = await supabase.rpc("request_device_command", {
+      p_asset_id: assetId,
+      p_command_type: type,
+      p_payload: { reason },
+    });
+    setBusy(false);
+    setShowForceRestart(false);
+    if (error || !data?.success) {
+      toast({ title: "Restart request failed", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    const labels: Record<typeof type, { title: string; description: string }> = {
+      notify_restart: {
+        title: "Restart reminder sent",
+        description: "The user will see a message asking them to restart when convenient.",
+      },
+      schedule_restart: {
+        title: "Restart scheduled",
+        description: "The user is warned now and the device restarts after a 10-minute grace period.",
+      },
+      force_restart: {
+        title: "Forced restart requested",
+        description: "The user is warned now; apps are closed and the device restarts after a 10-minute grace period.",
+      },
+    };
+    toast(labels[type]);
     await load();
   }
 
@@ -256,49 +312,34 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     return hostName ? `${install}\nsudo hostnamectl set-hostname "${hostName}"` : install;
   };
 
-  // ── Windows (Command Prompt) — auto-installs Python + Startup-folder service ─
-  // Python is often missing on a fresh Windows laptop (running `python` opens the
-  // Microsoft Store stub, which fails venv creation). If `python -m venv` fails we
-  // silently install the official Python (user scope, no admin) and retry, then
-  // hand off auto-start to the agent's Startup-folder launcher (also no admin) —
-  // a logon Scheduled Task needs elevation and fails with "Access is denied".
-  const PY_URL = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe";
-  const PY_FALLBACK_CMD = `"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe"`;
-  const PY = `"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe"`;
-  const SCRIPT = `"%USERPROFILE%\\.miles-agent\\laptop_agent.py"`;
-  const installCmdCmd = (tok: string) =>
-    [
-      `mkdir "%USERPROFILE%\\.miles-agent" 2>nul`,
-      `curl -fsSL "${agentUrl}" -o ${SCRIPT}`,
-      `py -3 -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || python -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || (echo Installing Python ^(one-time, no admin needed^)... && curl -fsSL "${PY_URL}" -o "%TEMP%\\miles-python-setup.exe" && "%TEMP%\\miles-python-setup.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 & ${PY_FALLBACK_CMD} -m venv "%USERPROFILE%\\.miles-agent\\venv" || py -3 -m venv "%USERPROFILE%\\.miles-agent\\venv")`,
-      `if not exist ${PY} echo [ERROR] Python setup did not complete. Install Python 3 from https://www.python.org/downloads/ - enable "Add python.exe to PATH" - then paste this command again.`,
-      `${PY} -m pip install -q --upgrade pip requests`,
-      `setx MILES_AGENT_TOKEN "${tok}"`,
-      `set MILES_AGENT_TOKEN=${tok}`,
-      `${PY} ${SCRIPT} register`,
-      `${PY} ${SCRIPT} sync`,
-      `${PY} ${SCRIPT} install-service`,
-      ...(hostName ? [`powershell -Command "Rename-Computer -NewName '${hostName}' -Force"`] : []),
-    ].join("\n");
+  // ── Windows installer (bootstrap) ──────────────────────────────────────────
+  // Both the Command Prompt and PowerShell commands run the same robust
+  // installer script (public/agent/install.ps1). It validates every step,
+  // auto-installs Python if missing, registers + syncs + installs the
+  // background service, renames the PC (skipping if the name already matches),
+  // and writes a full log to %USERPROFILE%\.miles-agent\install.log — instead
+  // of a brittle one-liner where one failed step cascades into confusing
+  // "path not found" errors. Config is passed via env vars the script reads.
+  const installPsUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${import.meta.env.BASE_URL}agent/install.ps1`
+      : "/agent/install.ps1";
 
-  // ── Windows (PowerShell) — auto-installs Python + Startup-folder service ─────
-  const PYP_FALLBACK = `"$env:LOCALAPPDATA\\Programs\\Python\\Python312\\python.exe"`;
-  const PYP = `"$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe"`;
-  const SCRIPTP = `"$env:USERPROFILE\\.miles-agent\\laptop_agent.py"`;
+  // Command Prompt: launch PowerShell to fetch and run the installer.
+  const installCmdCmd = (tok: string) =>
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "` +
+    `$env:MILES_AGENT_TOKEN='${tok}'; ` +
+    `$env:MILES_AGENT_URL='${agentUrl}'; ` +
+    (hostName ? `$env:MILES_ASSET_HOSTNAME='${hostName}'; ` : ``) +
+    `irm '${installPsUrl}' | iex"`;
+
+  // PowerShell: set the same env vars, then fetch and run the installer.
   const installCmdPs = (tok: string) =>
     [
-      `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.miles-agent" | Out-Null`,
-      `curl.exe -fsSL "${agentUrl}" -o ${SCRIPTP}`,
-      `py -3 -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null; if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { python -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null }`,
-      `if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { Write-Host "Installing Python (one-time, no admin needed)..."; curl.exe -fsSL "${PY_URL}" -o "$env:TEMP\\miles-python-setup.exe"; Start-Process "$env:TEMP\\miles-python-setup.exe" -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_launcher=1' -Wait; & ${PYP_FALLBACK} -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null; if (-not (Test-Path "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe")) { py -3 -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null } }`,
-      `if (-not (Test-Path ${PYP})) { Write-Host "[ERROR] Python setup did not complete. Install Python 3 from https://www.python.org/downloads/ - enable 'Add python.exe to PATH' - then paste this command again." }`,
-      `& ${PYP} -m pip install -q --upgrade pip requests`,
-      `setx MILES_AGENT_TOKEN "${tok}" | Out-Null`,
       `$env:MILES_AGENT_TOKEN="${tok}"`,
-      `& ${PYP} ${SCRIPTP} register`,
-      `& ${PYP} ${SCRIPTP} sync`,
-      `& ${PYP} ${SCRIPTP} install-service`,
-      ...(hostName ? [`Rename-Computer -NewName "${hostName}" -Force`] : []),
+      `$env:MILES_AGENT_URL="${agentUrl}"`,
+      ...(hostName ? [`$env:MILES_ASSET_HOSTNAME="${hostName}"`] : []),
+      `irm "${installPsUrl}" | iex`,
     ].join("\n");
 
   // Real HARD lock (OS-level account/workstation lock with honest status
@@ -341,6 +382,19 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     (latestLockCmd.status === "failed" || latestLockCmd.status === "requires_admin") &&
     !device?.is_locked;
 
+  // Restart-required = the device has been up for more than a day.
+  const restartRequired =
+    device?.uptime_seconds != null && device.uptime_seconds > RESTART_REQUIRED_SECONDS;
+  const lastBoot = device?.last_boot_at
+    ? new Date(device.last_boot_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+
+  // Most recent failed/needs-admin command across any action — surfaced as a
+  // troubleshooting banner so IT can see the latest agent error at a glance.
+  const latestErrorCmd = commands.find(
+    (c) => !!c.error_message && (c.status === "failed" || c.status === "requires_admin"),
+  );
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -372,6 +426,8 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 <Row label="IP Address"    value={device.ip_address ?? "—"} />
                 <Row label="MAC Address"   value={device.mac_address ?? "—"} />
                 <Row label="Agent Version" value={device.agent_version ?? "—"} />
+                <Row label="Uptime"        value={formatUptime(device.uptime_seconds)} />
+                <Row label="Last Restart"  value={lastBoot} />
               </>
             )}
 
@@ -454,6 +510,38 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
               </div>
             )}
 
+            {latestErrorCmd && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-red-800">
+                    Latest agent error — {COMMAND_LABEL[latestErrorCmd.command_type] ?? latestErrorCmd.command_type}
+                  </p>
+                  <p className="text-[11px] text-red-700 break-words">{latestErrorCmd.error_message}</p>
+                  <p className="text-[10px] text-red-600/80 mt-0.5">
+                    {(() => {
+                      const w = latestErrorCmd.completed_at ?? latestErrorCmd.executed_at ?? latestErrorCmd.requested_at;
+                      return w ? new Date(w).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
+                    })()}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {restartRequired && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
+                <RefreshCw className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-900">Restart recommended</p>
+                  <p className="text-[11px] text-amber-800">
+                    This device has been running for <b>{formatUptime(device?.uptime_seconds)}</b> without a
+                    restart. Restarting applies pending updates and clears memory.
+                    {isSuperAdmin ? " Use the restart controls below." : ""}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {isSuperAdmin && (
               <div className="flex flex-wrap gap-2 pt-1">
                 {!token && (
@@ -481,6 +569,19 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                       <Lock className="h-4 w-4" /> Lock Device
                     </Button>
                   )
+                )}
+                {device && (
+                  <>
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy} data-testid="button-notify-restart">
+                      <Power className="h-4 w-4" /> Notify Restart
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("schedule_restart")} disabled={busy} data-testid="button-schedule-restart">
+                      <RefreshCw className="h-4 w-4" /> Schedule Restart
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy} data-testid="button-force-restart">
+                      <Power className="h-4 w-4" /> Force Restart
+                    </Button>
+                  </>
                 )}
                 <Button size="sm" variant="ghost" className="gap-2" onClick={() => void load()}>
                   <RefreshCw className="h-4 w-4" /> Refresh
@@ -790,6 +891,21 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLock(false)}>Cancel</Button>
             <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={lockDevice} disabled={busy}>Lock Device</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showForceRestart} onOpenChange={setShowForceRestart}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Force restart this device?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The user is <b>warned immediately</b> and the device restarts after a <b>10-minute grace
+            period</b>, closing any open apps. <b>Unsaved work may be lost.</b> Prefer <b>Schedule
+            Restart</b> or <b>Notify Restart</b> when the user is mid-task. This never restarts silently.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowForceRestart(false)}>Cancel</Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={() => void requestRestart("force_restart")} disabled={busy}>Force Restart</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

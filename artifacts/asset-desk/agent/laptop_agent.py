@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.5.0"
+AGENT_VERSION       = "0.5.2"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -222,6 +222,42 @@ def _collect_linux() -> dict:
 
 
 # ── unified collection ──────────────────────────────────────────────────────
+def _uptime_seconds() -> int | None:
+    """Seconds since the machine last booted. None if it can't be determined."""
+    try:
+        if IS_WIN:
+            import ctypes
+            # GetTickCount64 = ms since boot (monotonic, unaffected by clock changes).
+            ms = ctypes.windll.kernel32.GetTickCount64()
+            return int(ms // 1000)
+        if IS_LIN:
+            with open("/proc/uptime", "r") as fh:
+                return int(float(fh.read().split()[0]))
+        if IS_MAC:
+            # kern.boottime → "{ sec = 1700000000, usec = 0 } ..."
+            r = subprocess.run(["sysctl", "-n", "kern.boottime"],
+                               capture_output=True, text=True, timeout=10)
+            import re
+            m = re.search(r"sec\s*=\s*(\d+)", r.stdout)
+            if m:
+                return max(0, int(time.time()) - int(m.group(1)))
+    except Exception:
+        pass
+    return None
+
+
+def _boot_time_iso() -> str | None:
+    """ISO8601 (UTC) timestamp of the last boot, derived from uptime."""
+    up = _uptime_seconds()
+    if up is None:
+        return None
+    try:
+        from datetime import timedelta
+        return (datetime.now(timezone.utc) - timedelta(seconds=up)).isoformat()
+    except Exception:
+        return None
+
+
 def collect_system_info() -> dict:
     hostname  = socket.gethostname()
     logged_in = os.environ.get("USERNAME") or os.environ.get("USER") or ""
@@ -281,6 +317,8 @@ def collect_system_info() -> dict:
         "ip_address":          ip_addr,
         "mac_address":         mac_addr,
         "agent_version":       AGENT_VERSION,
+        "uptime_seconds":      _uptime_seconds(),
+        "last_boot_at":        _boot_time_iso(),
     }
 
 
@@ -359,14 +397,69 @@ def _win_set_style_fill() -> None:
         pass  # registry write is best-effort; SetDeskWallpaper still works
 
 
+def _win_set_lockscreen(local_path: str) -> tuple[bool, str | None]:
+    """Set the CURRENT USER's lock-screen image — no admin required.
+
+    SystemParametersInfo only changes the desktop, never the lock screen. The
+    only reliable per-user (non-admin) way to set the lock screen on Win 10/11
+    is the WinRT API Windows.System.UserProfile.LockScreen.SetImageFileAsync,
+    which we drive from in-box PowerShell 5.1. The image is read from the user's
+    own LOCALAPPDATA, so it works while the agent runs in the user session.
+
+    Returns (ok, error). Common failure: a Group Policy that forces/locks the
+    lock-screen image throws "Access is denied" — reported, never raised.
+    """
+    # Single-quote the path for PowerShell, doubling any embedded single quotes.
+    ps_path = local_path.replace("'", "''")
+    snippet = (
+        "$ErrorActionPreference='Stop';"
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null;"
+        "$null=[Windows.System.UserProfile.LockScreen,Windows.System.UserProfile,ContentType=WindowsRuntime];"
+        "$null=[Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime];"
+        "$gen=([System.WindowsRuntimeSystemExtensions].GetMethods()|"
+        "Where-Object{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
+        "$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'})[0];"
+        "$act=([System.WindowsRuntimeSystemExtensions].GetMethods()|"
+        "Where-Object{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and -not $_.IsGenericMethod})[0];"
+        "function Await($op,$t){$m=$gen.MakeGenericMethod($t);$tk=$m.Invoke($null,@($op));$tk.Wait(-1)|Out-Null;$tk.Result};"
+        "function AwaitAction($a){$tk=$act.Invoke($null,@($a));$tk.Wait(-1)|Out-Null};"
+        f"$f=Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync('{ps_path}')) ([Windows.Storage.StorageFile]);"
+        "AwaitAction ([Windows.System.UserProfile.LockScreen]::SetImageFileAsync($f));"
+        "Write-Output 'OK'"
+    )
+    try:
+        kwargs: dict = {}
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", snippet],
+            capture_output=True, text=True, timeout=45, **kwargs,
+        )
+        if r.returncode == 0 and "OK" in (r.stdout or ""):
+            return (True, None)
+        err = (r.stderr or r.stdout or "").strip().replace("\r", " ").replace("\n", " ")
+        return (False, (err[:300] or f"powershell exit {r.returncode}"))
+    except Exception as e:
+        return (False, str(e))
+
+
 def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
     try:
         if IS_WIN:
             import ctypes
             _win_set_style_fill()
             # SPI_SETDESKWALLPAPER=20, SPIF_UPDATEINIFILE|SPIF_SENDWININICHANGE=3
-            ok = ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3)
-            return (bool(ok), None if ok else "SystemParametersInfoW returned 0")
+            ok = bool(ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3))
+            if not ok:
+                return (False, "SystemParametersInfoW returned 0")
+            # Desktop set — now also set the lock screen (separate subsystem;
+            # SPI never touches it). Best-effort, per-user, no admin.
+            lock_ok, lock_err = _win_set_lockscreen(local_path)
+            if not lock_ok:
+                # Desktop succeeded; surface the lock-screen problem without
+                # failing the whole apply (e.g. policy-locked lock screens).
+                return (True, f"desktop applied; lock screen not set: {lock_err}")
+            return (True, None)
         if IS_MAC:
             # macOS Sonoma (14) / Sequoia (15+) overhauled wallpaper storage. The
             # classic `osascript ... set picture of every desktop` updates the
@@ -1182,6 +1275,90 @@ def reassert_lock() -> None:
         pass
 
 
+# ── restart management ──────────────────────────────────────────────────────
+RESTART_GRACE_SEC = 600  # 10-minute warning before any restart actually happens.
+
+
+def _notify_user(title: str, message: str) -> bool:
+    """Best-effort, non-blocking desktop notification to the logged-in human.
+    Never raises. Returns True if a notification mechanism was invoked."""
+    try:
+        if IS_WIN:
+            CREATE_NO_WINDOW = 0x08000000
+            # msg.exe is the most reliable interactive popup and needs no admin on
+            # most editions; fall back to a WinForms message box via PowerShell.
+            try:
+                subprocess.Popen(["msg", "*", "/TIME:0", f"{title}: {message}"],
+                                 creationflags=CREATE_NO_WINDOW)
+                return True
+            except Exception:
+                ps = ("Add-Type -AssemblyName System.Windows.Forms; "
+                      "[System.Windows.Forms.MessageBox]::Show("
+                      f"{json.dumps(message)},{json.dumps(title)})")
+                subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                                  "-Command", ps], creationflags=CREATE_NO_WINDOW)
+                return True
+        if IS_MAC:
+            user = _mac_console_user() if _is_root() else None
+            script = (f'display notification {json.dumps(message)} '
+                      f'with title {json.dumps(title)}')
+            args = ["osascript", "-e", script]
+            if user:
+                # Run inside the console user's GUI session when we are root.
+                args = ["launchctl", "asuser", str(_mac_uid_for(user) or ""), *args]
+            subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        if IS_LIN:
+            subprocess.Popen(["notify-send", title, message],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _schedule_restart(delay_sec: int, force: bool, reason: str) -> tuple[str, str | None, str | None]:
+    """Schedule an OS restart after a grace period, warning the user first.
+    Always warns and always waits — there is no immediate, unannounced restart.
+    The grace period is floored at RESTART_GRACE_SEC (10 min) so a restart can
+    never be scheduled sooner, regardless of the requested delay."""
+    delay_sec = max(RESTART_GRACE_SEC, int(delay_sec or RESTART_GRACE_SEC))
+    mins = max(1, delay_sec // 60)
+    warn = (f"{reason} Your computer will restart in about {mins} minute"
+            f"{'s' if mins != 1 else ''}. Please save your work.")
+    _notify_user("Scheduled restart", warn)
+    try:
+        if IS_WIN:
+            CREATE_NO_WINDOW = 0x08000000
+            args = ["shutdown", "/r", "/t", str(delay_sec), "/c", warn[:512]]
+            if force:
+                args.insert(3, "/f")
+            r = subprocess.run(args, capture_output=True, text=True,
+                               timeout=20, creationflags=CREATE_NO_WINDOW)
+            if r.returncode != 0:
+                return ("failed", None,
+                        f"Could not schedule restart: {r.stderr.strip() or r.stdout.strip()}")
+            return ("completed",
+                    f"Restart scheduled in {mins} min (user warned).", None)
+        if IS_MAC or IS_LIN:
+            if not _is_root():
+                return ("requires_admin", None,
+                        "Scheduling a restart requires admin rights, but the agent is "
+                        "running as a normal user. Reinstall the agent as a system "
+                        "service (sudo) to enable restart actions.")
+            # `shutdown -r +<minutes>` warns logged-in users automatically.
+            r = subprocess.run(["shutdown", "-r", f"+{mins}", warn[:200]],
+                               capture_output=True, text=True, timeout=20)
+            if r.returncode != 0:
+                return ("failed", None,
+                        f"Could not schedule restart: {r.stderr.strip() or r.stdout.strip()}")
+            return ("completed",
+                    f"Restart scheduled in {mins} min (user warned).", None)
+    except Exception as e:
+        return ("failed", None, str(e))
+    return ("failed", None, f"unsupported platform: {sys.platform}")
+
+
 # ── commands ────────────────────────────────────────────────────────────────
 def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     """Returns (status, result_message, error_message). status is one of
@@ -1205,7 +1382,50 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     if ctype == "unlock":
         with _lock_mutex:
             return _release_lock()
+    if ctype == "notify_restart":
+        payload = cmd.get("payload") or {}
+        days = payload.get("uptime_days")
+        if days:
+            reason = (f"This computer has been running for {days} day"
+                      f"{'s' if str(days) != '1' else ''} without a restart.")
+        else:
+            reason = "IT is asking you to restart this computer."
+        msg = f"{reason} Please save your work and restart soon to keep it healthy and secure."
+        if _notify_user("Please restart your computer", msg):
+            return ("completed", "User notified to restart.", None)
+        return ("failed", None, "Could not show a notification to the user.")
+    if ctype in ("schedule_restart", "force_restart"):
+        payload = cmd.get("payload") or {}
+        delay = payload.get("delay_seconds", RESTART_GRACE_SEC)
+        reason = payload.get("reason") or "IT has scheduled a restart for this computer."
+        return _schedule_restart(delay, force=(ctype == "force_restart"), reason=reason)
     return ("failed", None, f"unsupported command: {ctype}")
+
+
+_last_uptime_notice = 0.0
+
+
+def _maybe_notify_long_uptime() -> None:
+    """If the machine has been up for more than a day, gently remind the user to
+    restart. Throttled to at most once every 12 hours so it never nags."""
+    global _last_uptime_notice
+    try:
+        up = _uptime_seconds()
+        if up is None or up < 86400:
+            return
+        now = time.monotonic()
+        if _last_uptime_notice and (now - _last_uptime_notice) < 12 * 3600:
+            return
+        days = up // 86400
+        _notify_user(
+            "Please restart your computer",
+            f"This computer has been running for {days} day"
+            f"{'s' if days != 1 else ''} without a restart. Please save your work "
+            f"and restart soon to keep it healthy and secure.",
+        )
+        _last_uptime_notice = now
+    except Exception:
+        pass
 
 
 def poll_commands() -> None:
@@ -1295,6 +1515,7 @@ def run_loop() -> int:
                 if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
                     reconcile_lock(bool(sync.get("locked")))
                 apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
+                _maybe_notify_long_uptime()
                 last_sync = now
             # Commands (lock / unlock) on the fast cycle so they apply in seconds.
             poll_commands()
