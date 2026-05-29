@@ -40,7 +40,7 @@ interface AgentToken {
 interface Props { assetId: string; }
 
 export default function DeviceAgentCard({ assetId }: Props) {
-  const { role } = useAuth();
+  const { role, session, loading: authLoading } = useAuth();
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
 
@@ -54,6 +54,10 @@ export default function DeviceAgentCard({ assetId }: Props) {
 
   const load = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
+    // Reads are RLS-protected (authenticated role). Wait for the Supabase
+    // session to attach before querying, otherwise the request goes out as
+    // `anon`, RLS returns nothing, and the card wrongly shows "Not Installed".
+    if (authLoading || !session) { return; }
     setLoading(true);
     const [d, t] = await Promise.all([
       supabase.from("managed_devices").select("*").eq("laptop_asset_id", assetId).maybeSingle(),
@@ -64,7 +68,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
     setDevice((d.data as ManagedDevice | null) ?? null);
     setToken((t.data as AgentToken | null) ?? null);
     setLoading(false);
-  }, [assetId]);
+  }, [assetId, session, authLoading]);
 
   useEffect(() => { void load(); }, [load]);
 
