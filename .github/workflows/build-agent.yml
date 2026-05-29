@@ -1,4 +1,5 @@
 name: Build Laptop Agent Binaries
+
 on:
   push:
     branches: [main]
@@ -6,8 +7,10 @@ on:
       - "artifacts/asset-desk/agent/laptop_agent.py"
       - ".github/workflows/build-agent.yml"
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -26,20 +29,63 @@ jobs:
           mkdir -p artifacts/asset-desk/public/agent
           cp "artifacts/asset-desk/agent/dist/miles-agent.exe" "artifacts/asset-desk/public/agent/miles-agent.exe"
       - uses: actions/upload-artifact@v4
+        with: { name: miles-agent-windows, path: artifacts/asset-desk/public/agent/miles-agent.exe }
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          name: miles-agent-windows
-          path: artifacts/asset-desk/public/agent/miles-agent.exe
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller requests
+      - working-directory: artifacts/asset-desk/agent
+        run: pyinstaller --onefile --name miles-agent-macos laptop_agent.py
+      - run: |
+          mkdir -p artifacts/asset-desk/public/agent
+          cp "artifacts/asset-desk/agent/dist/miles-agent-macos" "artifacts/asset-desk/public/agent/miles-agent-macos"
+          chmod +x artifacts/asset-desk/public/agent/miles-agent-macos
+      - uses: actions/upload-artifact@v4
+        with: { name: miles-agent-macos, path: artifacts/asset-desk/public/agent/miles-agent-macos }
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller requests
+      - working-directory: artifacts/asset-desk/agent
+        run: pyinstaller --onefile --name miles-agent-linux laptop_agent.py
+      - run: |
+          mkdir -p artifacts/asset-desk/public/agent
+          cp "artifacts/asset-desk/agent/dist/miles-agent-linux" "artifacts/asset-desk/public/agent/miles-agent-linux"
+          chmod +x artifacts/asset-desk/public/agent/miles-agent-linux
+      - uses: actions/upload-artifact@v4
+        with: { name: miles-agent-linux, path: artifacts/asset-desk/public/agent/miles-agent-linux }
+
   publish:
-    needs: [build-windows]
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with:
-          name: miles-agent-windows
-          path: artifacts/asset-desk/public/agent/
+        with: { name: miles-agent-windows, path: artifacts/asset-desk/public/agent/ }
+      - uses: actions/download-artifact@v4
+        with: { name: miles-agent-macos,   path: artifacts/asset-desk/public/agent/ }
+      - uses: actions/download-artifact@v4
+        with: { name: miles-agent-linux,   path: artifacts/asset-desk/public/agent/ }
       - run: |
           git config user.name  "miles-bot"
           git config user.email "miles-bot@users.noreply.github.com"
-          git add artifacts/asset-desk/public/agent/miles-agent.exe
-          git diff --cached --quiet || (git commit -m "chore(agent): rebuild miles-agent.exe [skip ci]" && git push)
+          chmod 755 artifacts/asset-desk/public/agent/miles-agent-macos  || true
+          chmod 755 artifacts/asset-desk/public/agent/miles-agent-linux || true
+          git add artifacts/asset-desk/public/agent/miles-agent.exe \
+                  artifacts/asset-desk/public/agent/miles-agent-macos \
+                  artifacts/asset-desk/public/agent/miles-agent-linux
+          git diff --cached --quiet || (git commit -m "chore(agent): rebuild miles-agent binaries [skip ci]" && git push)
