@@ -73,6 +73,7 @@ export default function MyAssets() {
           {myAssets.map(asset => {
             const isExpanded = expandedId === asset.assetId;
             const isMobile = asset.assetType === "Mobile" || asset.assetType === "Tab";
+            const isSim = asset.assetType === "Sim Card";
 
             return (
               <Card key={asset.assetId} className="hover:shadow-md transition-shadow" data-testid={`card-my-asset-${asset.assetId}`}>
@@ -129,8 +130,11 @@ export default function MyAssets() {
                         <DetailRow label="OS"              value={asset.operatingSystem} />
                         {isMobile && <DetailRow label="IMEI 1" value={asset.imeiNumber} />}
                         {isMobile && <DetailRow label="IMEI 2" value={asset.imei2} />}
-                        {isMobile && <DetailRow label="SIM Number" value={asset.simNumber} />}
                         {isMobile && <DetailRow label="Phone Number" value={asset.phoneNumber} />}
+                        {/* Sim Card: show only Official Mobile Number + Provider.
+                            SIM Number / ICCID is intentionally hidden from end users — sensitive carrier data, IT-only. */}
+                        {isSim && <DetailRow label="Official Mobile Number" value={asset.phoneNumber} />}
+                        {isSim && <DetailRow label="Provider" value={asset.simProvider} />}
                         <DetailRow label="Others / Notes" value={asset.others} />
                       </div>
 

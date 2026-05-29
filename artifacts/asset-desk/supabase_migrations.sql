@@ -276,9 +276,12 @@ CREATE POLICY "assignment_history_select" ON public.asset_assignment_history
   FOR SELECT TO authenticated
   USING (current_user_role() IN ('super_admin', 'it_admin', 'it_agent'));
 
+-- it_agent is included because assets_update already permits it_agent to
+-- assign/return/unassign assets; without insert rights here the audit-trail
+-- write would silently fail (RLS) and lose history for it_agent actions.
 CREATE POLICY "assignment_history_insert" ON public.asset_assignment_history
   FOR INSERT TO authenticated
-  WITH CHECK (current_user_role() IN ('super_admin', 'it_admin'));
+  WITH CHECK (current_user_role() IN ('super_admin', 'it_admin', 'it_agent'));
 
 -- ─── Asset Ownership ──────────────────────────────────────────────────────────
 -- Tracks who owns the asset (Miles, Miles-GCC, Mojo, Rented, Employee Owned,
