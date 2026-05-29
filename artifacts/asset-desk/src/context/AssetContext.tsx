@@ -317,7 +317,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         event_by:   authUser?.id ?? null,
         notes:      handoverNote ?? null,
       });
-    } catch { /* non-fatal — history logging must not block the assignment */ }
+    } catch (e) { console.warn("[history] failed to log assignment", e); /* non-fatal — must not block the assignment */ }
   };
 
   const returnAsset = async (assetId: string, finalStatus: AssetStatus, returnNote?: string): Promise<void> => {
@@ -350,7 +350,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         event_by:   authUser?.id ?? null,
         notes:      returnNote ?? null,
       });
-    } catch { /* non-fatal */ }
+    } catch (e) { console.warn("[history] failed to log return", e); /* non-fatal */ }
   };
 
   const updateStatus = async (assetId: string, status: AssetStatus): Promise<void> => {
@@ -360,6 +360,9 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   };
 
   const unassignAsset = async (assetId: string): Promise<void> => {
+    // Capture current assignment info before it is cleared, so we can log who
+    // the asset was unassigned from.
+    const assetObj = assets.find(a => a.assetId === assetId);
     const { error } = await supabase
       .from("assets")
       .update({ status: "Available", assigned_to: null, assigned_email: null, assigned_to_name: null, assigned_at: null, department: null, ack_token: null, acknowledged: false, acknowledged_at: null })
@@ -370,6 +373,20 @@ export function AssetProvider({ children }: { children: ReactNode }) {
         ? { ...a, status: "Available", assignedTo: undefined, assignedEmail: undefined, department: undefined }
         : a
     ));
+    // Log unassignment to history (non-fatal)
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      await supabase.from("asset_assignment_history").insert({
+        asset_id:   assetId,
+        asset_name: assetObj ? `${assetObj.brand} ${assetObj.model}` : assetId,
+        user_name:  assetObj?.assignedTo ?? null,
+        user_email: assetObj?.assignedEmail ?? null,
+        user_ecode: (assetObj as { assignedEcode?: string } | undefined)?.assignedEcode ?? null,
+        department: assetObj?.department ?? null,
+        event_type: "unassigned",
+        event_by:   authUser?.id ?? null,
+      });
+    } catch (e) { console.warn("[history] failed to log unassignment", e); /* non-fatal */ }
   };
 
   const deleteAssets = async (ids: string[]): Promise<void> => {
@@ -506,7 +523,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
           };
         })
       );
-    } catch { /* non-fatal */ }
+    } catch (e) { console.warn("[history] failed to log bulk assignment", e); /* non-fatal */ }
   };
 
   return (
