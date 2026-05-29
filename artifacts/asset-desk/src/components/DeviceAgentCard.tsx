@@ -214,41 +214,46 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     return hostName ? `${install}\nsudo hostnamectl set-hostname "${hostName}"` : install;
   };
 
-  // ── Windows (Command Prompt) — logon Scheduled Task ────────────────────────
+  // ── Windows (Command Prompt) — auto-installs Python + Startup-folder service ─
+  // Python is often missing on a fresh Windows laptop (running `python` opens the
+  // Microsoft Store stub, which fails venv creation). If `python -m venv` fails we
+  // silently install the official Python (user scope, no admin) and retry, then
+  // hand off auto-start to the agent's Startup-folder launcher (also no admin) —
+  // a logon Scheduled Task needs elevation and fails with "Access is denied".
+  const PY_URL = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe";
+  const PY_FALLBACK_CMD = `"%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe"`;
   const PY = `"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe"`;
   const SCRIPT = `"%USERPROFILE%\\.miles-agent\\laptop_agent.py"`;
   const installCmdCmd = (tok: string) =>
     [
       `mkdir "%USERPROFILE%\\.miles-agent" 2>nul`,
       `curl -fsSL "${agentUrl}" -o ${SCRIPT}`,
-      `python -m venv "%USERPROFILE%\\.miles-agent\\venv"`,
+      `python -m venv "%USERPROFILE%\\.miles-agent\\venv" 2>nul || (echo Installing Python ^(one-time, no admin needed^)... && curl -fsSL "${PY_URL}" -o "%TEMP%\\miles-python-setup.exe" && "%TEMP%\\miles-python-setup.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 && ${PY_FALLBACK_CMD} -m venv "%USERPROFILE%\\.miles-agent\\venv")`,
       `${PY} -m pip install -q --upgrade pip requests`,
       `setx MILES_AGENT_TOKEN "${tok}"`,
       `set MILES_AGENT_TOKEN=${tok}`,
       `${PY} ${SCRIPT} register`,
       `${PY} ${SCRIPT} sync`,
-      `schtasks /Create /SC ONLOGON /TN MilesAgent /TR "\\"%USERPROFILE%\\.miles-agent\\venv\\Scripts\\pythonw.exe\\" \\"%USERPROFILE%\\.miles-agent\\laptop_agent.py\\" run" /F`,
+      `${PY} ${SCRIPT} install-service`,
       ...(hostName ? [`powershell -Command "Rename-Computer -NewName '${hostName}' -Force"`] : []),
     ].join("\n");
 
-  // ── Windows (PowerShell) — logon Scheduled Task ────────────────────────────
-  // Uses the native ScheduledTasks cmdlets (New-ScheduledTaskAction / Register-
-  // ScheduledTask) which take the executable and arguments separately, avoiding
-  // the fragile backslash-quote escaping that schtasks /TR requires.
+  // ── Windows (PowerShell) — auto-installs Python + Startup-folder service ─────
+  const PYP_FALLBACK = `"$env:LOCALAPPDATA\\Programs\\Python\\Python312\\python.exe"`;
   const PYP = `"$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\python.exe"`;
   const SCRIPTP = `"$env:USERPROFILE\\.miles-agent\\laptop_agent.py"`;
   const installCmdPs = (tok: string) =>
     [
       `New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.miles-agent" | Out-Null`,
       `curl.exe -fsSL "${agentUrl}" -o ${SCRIPTP}`,
-      `python -m venv "$env:USERPROFILE\\.miles-agent\\venv"`,
+      `python -m venv "$env:USERPROFILE\\.miles-agent\\venv" 2>$null`,
+      `if ($LASTEXITCODE -ne 0) { Write-Host "Installing Python (one-time, no admin needed)..."; curl.exe -fsSL "${PY_URL}" -o "$env:TEMP\\miles-python-setup.exe"; Start-Process "$env:TEMP\\miles-python-setup.exe" -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_launcher=1' -Wait; & ${PYP_FALLBACK} -m venv "$env:USERPROFILE\\.miles-agent\\venv" }`,
       `& ${PYP} -m pip install -q --upgrade pip requests`,
       `setx MILES_AGENT_TOKEN "${tok}" | Out-Null`,
       `$env:MILES_AGENT_TOKEN="${tok}"`,
       `& ${PYP} ${SCRIPTP} register`,
       `& ${PYP} ${SCRIPTP} sync`,
-      `$act = New-ScheduledTaskAction -Execute "$env:USERPROFILE\\.miles-agent\\venv\\Scripts\\pythonw.exe" -Argument "\`"$env:USERPROFILE\\.miles-agent\\laptop_agent.py\`" run"`,
-      `Register-ScheduledTask -TaskName MilesAgent -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Action $act -Force | Out-Null`,
+      `& ${PYP} ${SCRIPTP} install-service`,
       ...(hostName ? [`Rename-Computer -NewName "${hostName}" -Force`] : []),
     ].join("\n");
 
@@ -576,11 +581,13 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 rows={5}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Sets the token, registers, runs a test <span className="font-mono">sync</span>, then creates a
-                logon <b>Scheduled Task</b> (<span className="font-mono">MilesAgent</span>) so it keeps syncing.
-                Refresh this page after ~10 seconds to see the device.
-                {hostName ? <> It also renames the PC to the asset tag (<span className="font-mono">{hostName}</span>) —
-                run the terminal <b>as Administrator</b> and <b>reboot</b> for the new name to take full effect.</> : null}
+                If Python is missing it is installed automatically (one-time, no admin). Then it registers, runs a
+                test <span className="font-mono">sync</span>, and adds a <b>Startup-folder</b> launcher so the agent
+                auto-starts at logon — <b>no administrator rights needed</b>. Refresh this page after ~10 seconds to
+                see the device. To remove later:
+                <span className="font-mono"> {`%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe %USERPROFILE%\\.miles-agent\\laptop_agent.py uninstall-service`}</span>.
+                {hostName ? <> The optional rename to the asset tag (<span className="font-mono">{hostName}</span>) is
+                the only step that needs the terminal run <b>as Administrator</b> plus a <b>reboot</b>.</> : null}
               </p>
             </div>
           </div>

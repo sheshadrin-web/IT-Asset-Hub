@@ -778,9 +778,45 @@ def register() -> int:
     return 0
 
 
+_SINGLETON_HANDLE = None  # kept alive for the process lifetime so the lock holds
+
+
+def _acquire_singleton() -> bool:
+    """Ensure only one `run` loop is active per user. Re-running install-service,
+    a second logon launch, or a manual `run` must not spawn a duplicate agent
+    (which would double every sync and command). Returns True if we own the lock."""
+    global _SINGLETON_HANDLE
+    if IS_WIN:
+        try:
+            import ctypes
+            ERROR_ALREADY_EXISTS = 183
+            # Per-user named mutex (Local\ namespace = current session/user).
+            h = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\MilesAgentSingleton")
+            if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+                return False
+            _SINGLETON_HANDLE = h
+            return True
+        except Exception:
+            return True  # never block the agent if the guard itself fails
+    try:
+        import fcntl
+        lock_path = os.path.join(tempfile.gettempdir(), f"miles-agent-{os.getuid()}.lock")
+        fh = open(lock_path, "w")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _SINGLETON_HANDLE = fh  # held until process exit
+        return True
+    except OSError:
+        return False
+    except Exception:
+        return True
+
+
 def run_loop() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN is not set", file=sys.stderr); return 2
+    if not _acquire_singleton():
+        print("Another Miles agent is already running for this user — exiting.", file=sys.stderr)
+        return 0
     # Enforce the last-known lock immediately so a reboot — even offline — keeps
     # the device locked before the first /sync round-trips.
     try:
@@ -985,16 +1021,99 @@ def uninstall_service_linux() -> int:
     return 0
 
 
+# ── Windows logon auto-start (Startup folder — no admin required) ────────────
+# A per-user scheduled task (schtasks /SC ONLOGON) requires elevation and fails
+# with "Access is denied" from a normal Command Prompt. The Startup folder runs
+# at every logon for the current user with no admin rights, so we drop a hidden
+# VBScript launcher there that starts the agent via pythonw (no console window).
+WIN_INSTALL_DIR = os.path.expandvars(r"%LOCALAPPDATA%\MilesAgent") if IS_WIN else ""
+WIN_STARTUP_DIR = (os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
+                   if IS_WIN else "")
+WIN_VBS_PATH    = os.path.join(WIN_STARTUP_DIR, "MilesAgent.vbs") if IS_WIN else ""
+WIN_RUN_CMD     = os.path.join(WIN_INSTALL_DIR, "run.cmd") if IS_WIN else ""
+
+
+def install_service_windows() -> int:
+    if not TOKEN:
+        print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
+              file=sys.stderr)
+        return 2
+
+    os.makedirs(WIN_INSTALL_DIR, exist_ok=True)
+    os.makedirs(WIN_STARTUP_DIR, exist_ok=True)
+
+    if getattr(sys, "frozen", False):
+        # PyInstaller binary — launch it directly.
+        exe = os.path.abspath(sys.argv[0])
+        dst = os.path.join(WIN_INSTALL_DIR, "miles-agent.exe")
+        if os.path.abspath(exe) != os.path.abspath(dst):
+            shutil.copy2(exe, dst)
+        run_line = f'start "" "{dst}" run'
+        shown = dst
+    else:
+        # Script mode — copy the .py and launch it with the windowless interpreter
+        # (pythonw.exe next to the current python, e.g. the venv) so no console shows.
+        src = os.path.abspath(sys.argv[0])
+        dst = os.path.join(WIN_INSTALL_DIR, "laptop_agent.py")
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copy2(src, dst)
+        py_dir = os.path.dirname(os.path.abspath(sys.executable))
+        pythonw = os.path.join(py_dir, "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = os.path.abspath(sys.executable)
+        run_line = f'start "" "{pythonw}" "{dst}" run'
+        shown = dst
+
+    # run.cmd embeds the token/config (same posture as the macOS plist / Linux unit)
+    # and starts the agent detached.
+    with open(WIN_RUN_CMD, "w", encoding="utf-8") as fh:
+        fh.write("@echo off\r\n")
+        fh.write(f'set "MILES_AGENT_TOKEN={TOKEN}"\r\n')
+        fh.write(f'set "MILES_AGENT_API_BASE={API_BASE}"\r\n')
+        fh.write(f'set "MILES_AGENT_SYNC_INTERVAL={SYNC_INTERVAL_SEC}"\r\n')
+        fh.write(run_line + "\r\n")
+
+    # Hidden launcher in the Startup folder (window style 0 = no flash at logon).
+    with open(WIN_VBS_PATH, "w", encoding="utf-8") as fh:
+        fh.write('CreateObject("WScript.Shell").Run "cmd /c """ & "'
+                 + WIN_RUN_CMD + '" & """", 0, False\r\n')
+
+    # Start it right now too (detached, no console window).
+    try:
+        CREATE_NO_WINDOW = 0x08000000
+        subprocess.Popen(["cmd", "/c", WIN_RUN_CMD], creationflags=CREATE_NO_WINDOW)
+    except Exception as e:
+        print(f"warning: installed, but could not start immediately: {e}", file=sys.stderr)
+
+    print("\u2713 Service installed (Startup folder) — auto-starts at logon, no admin needed.")
+    print(f"  Agent:   {shown}")
+    print(f"  Startup: {WIN_VBS_PATH}")
+    return 0
+
+
+def uninstall_service_windows() -> int:
+    try:
+        if WIN_VBS_PATH and os.path.exists(WIN_VBS_PATH):
+            os.remove(WIN_VBS_PATH)
+    except Exception:
+        pass
+    if WIN_INSTALL_DIR and os.path.isdir(WIN_INSTALL_DIR):
+        shutil.rmtree(WIN_INSTALL_DIR, ignore_errors=True)
+    print("\u2713 Service uninstalled.")
+    return 0
+
+
 def install_service() -> int:
     if IS_MAC:  return install_service_mac()
     if IS_LIN:  return install_service_linux()
-    if IS_WIN:  print("Windows: use Task Scheduler or run `miles-agent.exe run` from a startup script.", file=sys.stderr); return 2
+    if IS_WIN:  return install_service_windows()
     print("Unsupported platform for service install.", file=sys.stderr); return 2
 
 
 def uninstall_service() -> int:
     if IS_MAC: return uninstall_service_mac()
     if IS_LIN: return uninstall_service_linux()
+    if IS_WIN: return uninstall_service_windows()
     print("Service uninstall not implemented for this platform.", file=sys.stderr); return 2
 
 
