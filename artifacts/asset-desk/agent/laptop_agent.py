@@ -35,6 +35,7 @@ import platform
 import subprocess
 import shutil
 import shlex
+import tempfile
 import uuid
 import hashlib
 from datetime import datetime, timezone
@@ -332,56 +333,126 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
             ok = ctypes.windll.user32.SystemParametersInfoW(20, 0, local_path, 3)
             return (bool(ok), None if ok else "SystemParametersInfoW returned 0")
         if IS_MAC:
-            # macOS Sonoma (14) / Sequoia (15) regression: the classic
-            #   set picture of every desktop to POSIX file "..."
-            # form exits 0 but silently does NOT change the wallpaper. Passing a
-            # plain POSIX path STRING (no `POSIX file`) is what actually applies
-            # on modern macOS. We try the string form first, then fall back to the
-            # legacy form for older macOS, and finally nudge Dock/WallpaperAgent so
-            # the change is rendered immediately.
-            esc = local_path.replace('"', '\\"')
-            scripts = [
+            # macOS Sonoma (14) / Sequoia (15+) overhauled wallpaper storage. The
+            # classic `osascript ... set picture of every desktop` updates the
+            # legacy store that the LOCK SCREEN reads, but frequently does NOT
+            # refresh the LIVE DESKTOP. The reliable way to update the desktop on
+            # modern macOS is NSWorkspace.setDesktopImageURL, applied to every
+            # screen, with a reset-to-empty first to defeat the "same path, new
+            # contents" cache bug. We do BOTH the NSWorkspace call and the legacy
+            # AppleScript so the lock screen and every display update together.
+            esc = local_path.replace("\\", "\\\\").replace('"', '\\"')
+            try:
+                mac_major = int((platform.mac_ver()[0] or "0").split(".")[0])
+            except Exception:  # noqa: BLE001
+                mac_major = 0
+
+            # 1) Primary: NSWorkspace via the built-in Swift interpreter, which
+            #    actually re-renders the LIVE DESKTOP on all displays. This is the
+            #    authoritative "desktop applied" signal — the Swift program exits
+            #    nonzero if any screen fails or there is no GUI session, so we never
+            #    report a false success. Swift ships with the Command Line Tools
+            #    that python3 already needs; if it is missing we fall through to the
+            #    legacy AppleScript path below.
+            swift_src = (
+                "import AppKit\n"
+                f'let u = URL(fileURLWithPath: "{esc}")\n'
+                "let screens = NSScreen.screens\n"
+                "if screens.isEmpty {\n"
+                '  FileHandle.standardError.write("no GUI screens\\n".data(using: .utf8)!)\n'
+                "  exit(3)\n"
+                "}\n"
+                "var failed = false\n"
+                "for s in screens {\n"
+                "  try? NSWorkspace.shared.setDesktopImageURL(URL(fileURLWithPath: \"\"), for: s, options: [:])\n"
+                "  do {\n"
+                "    try NSWorkspace.shared.setDesktopImageURL(u, for: s, options: [:])\n"
+                "  } catch {\n"
+                '    failed = true\n'
+                '    FileHandle.standardError.write("setDesktopImageURL failed: \\(error)\\n".data(using: .utf8)!)\n'
+                "  }\n"
+                "}\n"
+                "exit(failed ? 1 : 0)\n"
+            )
+            desktop_ok = False
+            swift_err: str | None = None
+            tmp_path: str | None = None
+            try:
+                with tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False) as tmp:
+                    tmp.write(swift_src)
+                    tmp_path = tmp.name
+                subprocess.check_call(["swift", tmp_path], timeout=60,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                desktop_ok = True
+            except FileNotFoundError:
+                swift_err = "swift (Command Line Tools) not available"
+            except subprocess.CalledProcessError as e:
+                swift_err = (e.stderr.decode() if e.stderr else str(e)).strip() or "swift exited nonzero"
+            except Exception as e:  # noqa: BLE001
+                swift_err = str(e)
+            finally:
+                if tmp_path:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+
+            # 2) Also drive the legacy AppleScript path so the LOCK SCREEN / login
+            #    window and pre-Sonoma releases are covered.
+            legacy_ok = False
+            legacy_err: str | None = None
+            for script in (
                 f'tell application "System Events" to set picture of every desktop to "{esc}"',
-                f'tell application "System Events" to set picture of every desktop to POSIX file "{esc}"',
-            ]
-            last_err: str | None = None
-            ran_ok = False
-            for script in scripts:
+                f'tell application "Finder" to set desktop picture to POSIX file "{esc}"',
+            ):
                 try:
-                    subprocess.check_call(
-                        ["osascript", "-e", script], timeout=20,
-                        stderr=subprocess.PIPE,
-                    )
-                    ran_ok = True
-                    break
+                    subprocess.check_call(["osascript", "-e", script], timeout=20,
+                                          stderr=subprocess.PIPE)
+                    legacy_ok = True
                 except subprocess.CalledProcessError as e:
-                    last_err = (e.stderr.decode() if e.stderr else str(e)).strip()
+                    legacy_err = (e.stderr.decode() if e.stderr else str(e)).strip()
                 except Exception as e:  # noqa: BLE001
-                    last_err = str(e)
-            if not ran_ok:
-                return (False, last_err or "osascript failed to set wallpaper")
-            # Force the desktop to re-render the new picture (best-effort).
+                    legacy_err = str(e)
+
+            if not (desktop_ok or legacy_ok):
+                return (False, swift_err or legacy_err or "failed to set wallpaper on macOS")
+
+            # Force an immediate re-render of the desktop + lock screen.
             for proc in ("Dock", "WallpaperAgent"):
                 try:
                     subprocess.call(["killall", proc], timeout=10,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:  # noqa: BLE001
                     pass
-            # Verify the desktop actually changed — osascript can exit 0 while the
-            # picture silently stays the same on modern macOS. If the read-back
-            # doesn't reference our file, report failure so the portal shows the
-            # real state instead of a false "applied".
+
+            # Best-effort read-back: does the live desktop now reference our file?
+            verified: bool | None = None
             try:
                 out = subprocess.check_output(
                     ["osascript", "-e",
                      'tell application "System Events" to get picture of desktop 1'],
                     timeout=15, stderr=subprocess.DEVNULL,
                 ).decode().strip()
-                if os.path.basename(local_path) in out:
-                    return (True, None)
-                return (False, f"wallpaper set call succeeded but desktop still shows '{out or 'unknown'}'")
-            except Exception:  # noqa: BLE001 — verification unavailable, trust the apply
+                verified = (
+                    os.path.abspath(local_path) == out
+                    or os.path.basename(local_path) in out
+                )
+            except Exception:  # noqa: BLE001 — verification unavailable
+                verified = None
+
+            # Decide honestly. NSWorkspace success means the desktop was updated on
+            # every display; a positive read-back independently confirms it.
+            if desktop_ok or verified:
                 return (True, None)
+            # On Sonoma+ (macOS 14+) the legacy AppleScript path alone typically
+            # updates only the lock screen, not the live desktop — report that
+            # truthfully instead of a false "applied".
+            if mac_major >= 14:
+                return (False, swift_err or
+                        "lock screen updated but live desktop did not change "
+                        "(NSWorkspace unavailable on macOS 14+)")
+            # Older macOS: the legacy AppleScript path does update the desktop.
+            return (True, None)
         if IS_LIN:
             if shutil.which("gsettings"):
                 subprocess.check_call([
