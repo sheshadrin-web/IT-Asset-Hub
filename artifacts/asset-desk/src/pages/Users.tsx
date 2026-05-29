@@ -11,6 +11,7 @@ import {
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
 import ManagerSearchField from "@/components/ManagerSearchField";
+import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import LocationSelect from "@/components/LocationSelect";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -140,7 +141,7 @@ function exportUsers(users: Profile[]) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
-  const { users, loading, refresh, updateUser, deleteUser } = useUsers();
+  const { users, loading, error, refresh, updateUser, deleteUser } = useUsers();
   const { assets, refresh: refreshAssets } = useAssets();
   const { tickets } = useTickets();
   const { currentUser } = useAuth();
@@ -861,6 +862,7 @@ export default function Users() {
 
   return (
     <div className="space-y-5">
+      {error && !loading && <LoadErrorBanner message={error} onRetry={refresh} busy={loading} />}
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">

@@ -110,6 +110,9 @@ export default function AssetDetail() {
   const [history,          setHistory]           = useState<HistoryRow[]>([]);
   const [historyLoading,   setHistoryLoading]    = useState(false);
   const [resendState,      setResendState]       = useState<"idle" | "sending" | "sent" | "error">("idle");
+  // Single-flight guard for assign/status/unassign mutations — prevents
+  // double-submit and freezes the relevant buttons while a write is in flight.
+  const [actionBusy,       setActionBusy]        = useState(false);
 
   useEffect(() => {
     if (!id || !supabaseConfigured) return;
@@ -185,13 +188,16 @@ export default function AssetDetail() {
   };
 
   const handleAssignConfirm = async () => {
-    if (!asset || !selectedUser) return;
+    if (!asset || !selectedUser || actionBusy) return;
+    setActionBusy(true);
     try {
       await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "", undefined, assignReason);
       toast({ title: "Asset assigned", description: `Assigned to ${selectedUser.full_name}` });
       closeAssignDialog();
     } catch (err) {
       toast({ title: "Failed to assign asset", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -205,22 +211,28 @@ export default function AssetDetail() {
       });
 
   const handleUpdateStatus = async (status: AssetStatus) => {
-    if (!asset) return;
+    if (!asset || actionBusy) return;
+    setActionBusy(true);
     try {
       await updateStatus(asset.assetId, status);
       toast({ title: `Marked as ${status}` });
     } catch (err) {
       toast({ title: "Update failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleUnassign = async () => {
-    if (!asset) return;
+    if (!asset || actionBusy) return;
+    setActionBusy(true);
     try {
       await unassignAsset(asset.assetId);
       toast({ title: "Asset unassigned" });
     } catch (err) {
       toast({ title: "Update failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -264,25 +276,25 @@ export default function AssetDetail() {
         <div className="flex items-center gap-2 flex-wrap">
           {/* Move to Inventory — for In Procurement only */}
           {isAdmin && asset.status === "In Procurement" && (
-            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-move-inventory">
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-move-inventory">
               <PackageCheck className="h-4 w-4" /> Move to Inventory
             </Button>
           )}
           {/* Receive back into inventory — for Recovery Stage (clears assigned user) */}
           {isAdmin && asset.status === "Recovery Stage" && (
-            <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleUpdateStatus("Available")} data-testid="button-receive-available">
+            <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-receive-available">
               <PackageCheck className="h-4 w-4" /> Receive — Mark Available
             </Button>
           )}
           {/* Mark Available — for Under Repair, Retired, Lost */}
           {isAdmin && (asset.status === "Under Repair" || asset.status === "Retired" || asset.status === "Lost") && (
-            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} data-testid="button-mark-available">
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-mark-available">
               <CheckCircle2 className="h-4 w-4" /> Mark Available
             </Button>
           )}
           {/* Assign — for Available or Under Repair (not Assigned, not Retired) */}
           {isAdmin && (asset.status === "Available" || asset.status === "Under Repair") && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => { setAssignDialogOpen(true); setAssignUserId(""); }} data-testid="button-assign">
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => { setAssignDialogOpen(true); setAssignUserId(""); }} disabled={actionBusy} data-testid="button-assign">
               <UserPlus className="h-4 w-4" /> Assign
             </Button>
           )}
@@ -294,20 +306,20 @@ export default function AssetDetail() {
                   <RotateCcw className="h-4 w-4" /> Return Asset
                 </Button>
               </Link>
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleUnassign}>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleUnassign} disabled={actionBusy}>
                 <UserPlus className="h-4 w-4" /> Unassign
               </Button>
             </>
           )}
           {/* Mark Repair — for Available or Assigned */}
           {isAdmin && (asset.status === "Available" || asset.status === "Assigned") && (
-            <Button variant="outline" size="sm" className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => handleUpdateStatus("Under Repair")} data-testid="button-mark-repair">
+            <Button variant="outline" size="sm" className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => handleUpdateStatus("Under Repair")} disabled={actionBusy} data-testid="button-mark-repair">
               <Wrench className="h-4 w-4" /> Mark Repair
             </Button>
           )}
           {/* Retire — for anything except already Retired */}
           {isAdmin && asset.status !== "Retired" && (
-            <Button variant="outline" size="sm" className="gap-2 text-muted-foreground" onClick={() => handleUpdateStatus("Retired")} data-testid="button-retire">
+            <Button variant="outline" size="sm" className="gap-2 text-muted-foreground" onClick={() => handleUpdateStatus("Retired")} disabled={actionBusy} data-testid="button-retire">
               <Archive className="h-4 w-4" /> Retire
             </Button>
           )}
@@ -966,7 +978,7 @@ export default function AssetDetail() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeAssignDialog}>Cancel</Button>
-            <Button onClick={handleAssignConfirm} disabled={!assignUserId || !assignReason} data-testid="button-confirm-assign-detail">
+            <Button onClick={handleAssignConfirm} disabled={!assignUserId || !assignReason || actionBusy} data-testid="button-confirm-assign-detail">
               Assign
             </Button>
           </DialogFooter>

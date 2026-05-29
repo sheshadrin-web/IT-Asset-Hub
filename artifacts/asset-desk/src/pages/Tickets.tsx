@@ -6,6 +6,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -54,7 +55,7 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function Tickets() {
-  const { tickets, updateTicket, deleteTicket, deleteTickets } = useTickets();
+  const { tickets, loading, error, refresh, updateTicket, deleteTicket, deleteTickets } = useTickets();
   const { currentUser, supabaseUser } = useAuth();
   const { users } = useUsers();
   const { toast } = useToast();
@@ -77,6 +78,8 @@ export default function Tickets() {
 
   const [selected, setSelected]             = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  // Single-flight guard: blocks duplicate assign/delete writes from double-clicks.
+  const [actionBusy, setActionBusy]         = useState(false);
   const [page, setPage]                     = useState(1);
   const [rowsPerPage, setRowsPerPage]       = useState(50);
 
@@ -135,26 +138,35 @@ export default function Tickets() {
   };
 
   const handleAssignToSelf = async (ticketId: string) => {
-    if (!currentUser) return;
+    if (!currentUser || actionBusy) return;
+    setActionBusy(true);
     try {
       await updateTicket(ticketId, { assignedAgentId: supabaseUser?.id, status: "Assigned" });
       toast({ title: "Ticket assigned to you", description: ticketId });
     } catch {
       toast({ title: "Failed to assign", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleDeleteSingle = async (ticketId: string) => {
+    if (actionBusy) return;
+    setActionBusy(true);
     try {
       await deleteTicket(ticketId);
       setDeleteTarget(null);
       toast({ title: "Ticket deleted", description: ticketId });
     } catch {
       toast({ title: "Failed to delete", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleBulkDelete = async () => {
+    if (actionBusy) return;
+    setActionBusy(true);
     const ids = [...selected].filter((id) => allFilteredIds.includes(id));
     try {
       await deleteTickets(ids);
@@ -163,6 +175,8 @@ export default function Tickets() {
       toast({ title: `${ids.length} ticket${ids.length !== 1 ? "s" : ""} deleted` });
     } catch {
       toast({ title: "Failed to delete tickets", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -170,6 +184,7 @@ export default function Tickets() {
 
   return (
     <div className="space-y-5 pb-20">
+      {error && !loading && <LoadErrorBanner message={error} onRetry={refresh} busy={loading} />}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground">
@@ -370,7 +385,7 @@ export default function Tickets() {
                               </Link>
                             </DropdownMenuItem>
                             {(isAgent || isAdmin) && !ticket.assignedAgentId && !ticket.assignedAgent && (
-                              <DropdownMenuItem onClick={() => handleAssignToSelf(ticket.ticketId)} className="flex items-center gap-2 cursor-pointer">
+                              <DropdownMenuItem disabled={actionBusy} onClick={() => handleAssignToSelf(ticket.ticketId)} className="flex items-center gap-2 cursor-pointer">
                                 <UserCheck className="h-3.5 w-3.5 text-blue-500" /> Assign to Me
                               </DropdownMenuItem>
                             )}
@@ -434,6 +449,7 @@ export default function Tickets() {
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => deleteTarget && handleDeleteSingle(deleteTarget)}
+              disabled={actionBusy}
             >
               Delete
             </AlertDialogAction>
@@ -454,6 +470,7 @@ export default function Tickets() {
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleBulkDelete}
+              disabled={actionBusy}
             >
               Delete
             </AlertDialogAction>

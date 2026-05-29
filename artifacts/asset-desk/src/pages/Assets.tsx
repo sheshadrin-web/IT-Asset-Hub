@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -186,7 +187,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
+  const { assets, loading, error, refresh, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -578,6 +579,7 @@ export default function Assets() {
 
   return (
     <div className="space-y-5 pb-20">
+      {error && !loading && <LoadErrorBanner message={error} onRetry={refresh} busy={loading} />}
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

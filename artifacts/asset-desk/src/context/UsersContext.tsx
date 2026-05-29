@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Profile, UserRole, UserStatus } from "@/data/mockData";
+import { toast } from "@/hooks/use-toast";
 
 interface UpdateProfileInput {
   full_name:         string;
@@ -15,6 +16,7 @@ interface UpdateProfileInput {
 interface UsersContextType {
   users:      Profile[];
   loading:    boolean;
+  error:      string | null;
   refresh:    () => Promise<void>;
   updateUser: (id: string, data: UpdateProfileInput) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
@@ -25,15 +27,23 @@ const UsersContext = createContext<UsersContextType | null>(null);
 export function UsersProvider({ children }: { children: ReactNode }) {
   const [users,   setUsers]   = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error: fetchError } = await supabase
       .from("profiles")
       .select("*")
       .order("created_at", { ascending: true });
-    if (!error && data) setUsers(data as Profile[]);
+    if (fetchError) {
+      // Surface the failure instead of silently showing an empty user list.
+      setError(fetchError.message);
+      toast({ title: "Failed to load users", description: fetchError.message, variant: "destructive" });
+    } else if (data) {
+      setError(null);
+      setUsers(data as Profile[]);
+    }
     setLoading(false);
   }, []);
 
@@ -70,7 +80,7 @@ export function UsersProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <UsersContext.Provider value={{ users, loading, refresh: fetchUsers, updateUser, deleteUser }}>
+    <UsersContext.Provider value={{ users, loading, error, refresh: fetchUsers, updateUser, deleteUser }}>
       {children}
     </UsersContext.Provider>
   );

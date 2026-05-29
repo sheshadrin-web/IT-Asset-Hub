@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Ticket, TicketComment, TicketPriority, TicketStatus } from "@/data/mockData";
+import { toast } from "@/hooks/use-toast";
 
 // ─── Case normalizers (DB stores lowercase, app uses title-case) ──────────────
 const PRIORITY_MAP: Record<string, TicketPriority> = {
@@ -82,6 +83,7 @@ interface AddTicketInput {
 interface TicketContextType {
   tickets:      Ticket[];
   loading:      boolean;
+  error:        string | null;
   getTicket:    (id: string) => Ticket | undefined;
   refresh:      () => Promise<void>;
   addTicket:    (data: AddTicketInput) => Promise<Ticket>;
@@ -96,15 +98,23 @@ const TicketContext = createContext<TicketContextType | null>(null);
 export function TicketProvider({ children }: { children: ReactNode }) {
   const [tickets,  setTickets]  = useState<Ticket[]>([]);
   const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
 
   const fetchTickets = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error: fetchError } = await supabase
       .from("tickets")
       .select("*, assets(asset_id), profiles!tickets_raised_by_fkey(full_name), agent_profile:profiles!tickets_assigned_agent_fkey(full_name)")
       .order("created_at", { ascending: false });
-    if (!error && data) setTickets(data.map(mapFromDB));
+    if (fetchError) {
+      // Surface the failure instead of silently showing an empty ticket list.
+      setError(fetchError.message);
+      toast({ title: "Failed to load tickets", description: fetchError.message, variant: "destructive" });
+    } else if (data) {
+      setError(null);
+      setTickets(data.map(mapFromDB));
+    }
     setLoading(false);
   }, []);
 
@@ -181,13 +191,14 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     const ticket = tickets.find(t => t.ticketId === ticketId);
     if (!ticket) return;
     const updatedComments = [...ticket.comments, comment];
-    // Persist comments as JSONB. Requires: ALTER TABLE tickets ADD COLUMN IF NOT EXISTS comments JSONB DEFAULT '[]'::jsonb;
-    // If the column doesn't exist the update returns an error which we ignore —
-    // the comments still appear in the current session via local state.
-    await supabase
+    // Persist comments as JSONB (the `comments` column exists in the DB). If the
+    // write fails we throw so the caller can surface it — never keep a local-only
+    // "phantom" comment that vanishes on refresh and breaks the audit trail.
+    const { error } = await supabase
       .from("tickets")
       .update({ comments: updatedComments, updated_at: new Date().toISOString() })
       .eq("ticket_id", ticketId);
+    if (error) throw new Error(error.message);
     const today = new Date().toISOString().split("T")[0];
     setTickets(prev =>
       prev.map(t =>
@@ -218,6 +229,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
 
   return (
     <TicketContext.Provider value={{
+      error,
       tickets, loading, getTicket, refresh: fetchTickets,
       addTicket, updateTicket, addComment, deleteTicket, deleteTickets,
     }}>

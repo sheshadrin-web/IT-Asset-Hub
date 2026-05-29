@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Asset, AssetStatus, AssetType, AssetOwnership } from "@/data/mockData";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from "@/hooks/use-toast";
 
 // Explicit column list for non-privileged (end user) reads. It deliberately
 // OMITS `sim_number` (ICCID) — sensitive carrier data that must never reach an
@@ -126,6 +127,7 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
 interface AssetContextType {
   assets:             Asset[];
   loading:            boolean;
+  error:              string | null;
   getAsset:           (id: string) => Asset | undefined;
   refresh:            () => Promise<void>;
   addAsset:           (data: Omit<Asset, "id">) => Promise<Asset>;
@@ -146,6 +148,7 @@ const AssetContext = createContext<AssetContextType | null>(null);
 export function AssetProvider({ children }: { children: ReactNode }) {
   const [assets,  setAssets]  = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
   const { role } = useAuth();
 
   // Only IT staff may receive the full row (incl. sim_number/ICCID). Default to
@@ -158,11 +161,19 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     const columns = isPrivileged
       ? "*, profiles!assets_assigned_to_fkey(full_name, email, ecode)"
       : SAFE_ASSET_COLUMNS;
-    const { data, error } = await supabase
+    const { data, error: fetchError } = await supabase
       .from("assets")
       .select(columns)
       .order("created_at", { ascending: false });
-    if (!error && data) setAssets((data as unknown as Record<string, unknown>[]).map(mapFromDB));
+    if (fetchError) {
+      // Surface the failure loudly instead of silently rendering an empty list,
+      // which is indistinguishable from "no assets" and hides real outages.
+      setError(fetchError.message);
+      toast({ title: "Failed to load assets", description: fetchError.message, variant: "destructive" });
+    } else if (data) {
+      setError(null);
+      setAssets((data as unknown as Record<string, unknown>[]).map(mapFromDB));
+    }
     setLoading(false);
   }, [isPrivileged]);
 
@@ -583,7 +594,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
 
   return (
     <AssetContext.Provider value={{
-      assets, loading, getAsset, refresh: fetchAssets,
+      assets, loading, error, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
       updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, markAcknowledged,
     }}>

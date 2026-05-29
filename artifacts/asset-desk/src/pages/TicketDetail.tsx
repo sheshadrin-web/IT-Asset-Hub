@@ -76,6 +76,9 @@ export default function TicketDetail() {
   const [deleteOpen,      setDeleteOpen]      = useState(false);
   const [rejectOpen,      setRejectOpen]      = useState(false);
   const [saved,           setSaved]           = useState(false);
+  // Single-flight guard: blocks duplicate writes from double-clicks and disables
+  // the action buttons while any mutation is in flight.
+  const [actionBusy,      setActionBusy]      = useState(false);
 
   const ticket = getTicket(id);
   const isSuperAdmin = currentUser?.role === "super_admin";
@@ -108,7 +111,8 @@ export default function TicketDetail() {
   const adminStatusOptions: TicketStatus[] = ["Open", "Assigned", "In Progress", "Waiting for User", "Resolved", "Closed", "Rejected"];
 
   const handleSaveChanges = async () => {
-    if (!ticket) return;
+    if (!ticket || actionBusy) return;
+    setActionBusy(true);
     try {
       // Detect what changed (compared to the current ticket) so we can post
       // system comments that narrate the action.
@@ -179,11 +183,14 @@ export default function TicketDetail() {
       toast({ title: "Ticket updated", description: "Changes saved successfully." });
     } catch (err) {
       toast({ title: "Failed to save", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleAddComment = async () => {
-    if (!newComment.trim() || !currentUser || !ticket) return;
+    if (!newComment.trim() || !currentUser || !ticket || actionBusy) return;
+    setActionBusy(true);
     const comment: TicketComment = {
       id:     `c${Date.now()}`,
       author: currentUser.name,
@@ -216,11 +223,14 @@ export default function TicketDetail() {
       }
     } catch (err) {
       toast({ title: "Failed to add comment", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleAssignToSelf = async () => {
-    if (!ticket || !currentUser) return;
+    if (!ticket || !currentUser || actionBusy) return;
+    setActionBusy(true);
     try {
       await updateTicket(ticket.ticketId, { assignedAgentId: supabaseUser?.id, status: "Assigned" });
       setDraftAgent(supabaseUser?.id ?? "");
@@ -228,25 +238,42 @@ export default function TicketDetail() {
       toast({ title: "Assigned to you", description: ticket.ticketId });
     } catch (err) {
       toast({ title: "Failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleClose = async () => {
-    if (!ticket) return;
-    await updateTicket(ticket.ticketId, { status: "Closed" });
-    setDraftStatus("Closed");
-    toast({ title: "Ticket closed" });
+    if (!ticket || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await updateTicket(ticket.ticketId, { status: "Closed" });
+      setDraftStatus("Closed");
+      toast({ title: "Ticket closed" });
+    } catch (err) {
+      toast({ title: "Failed to close", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleReopen = async () => {
-    if (!ticket) return;
-    await updateTicket(ticket.ticketId, { status: "Open" });
-    setDraftStatus("Open");
-    toast({ title: "Ticket reopened" });
+    if (!ticket || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await updateTicket(ticket.ticketId, { status: "Open" });
+      setDraftStatus("Open");
+      toast({ title: "Ticket reopened" });
+    } catch (err) {
+      toast({ title: "Failed to reopen", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleReject = async () => {
-    if (!ticket) return;
+    if (!ticket || actionBusy) return;
+    setActionBusy(true);
     try {
       await updateTicket(ticket.ticketId, { status: "Rejected" });
       setDraftStatus("Rejected");
@@ -254,17 +281,21 @@ export default function TicketDetail() {
       toast({ title: "Ticket rejected" });
     } catch (err) {
       toast({ title: "Failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!ticket) return;
+    if (!ticket || actionBusy) return;
+    setActionBusy(true);
     try {
       await deleteTicket(ticket.ticketId);
       toast({ title: "Ticket deleted" });
       setLocation("/tickets");
     } catch (err) {
       toast({ title: "Failed to delete", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+      setActionBusy(false);
     }
   };
 
@@ -307,22 +338,22 @@ export default function TicketDetail() {
 
         <div className="flex items-center gap-2 flex-wrap">
           {isAgent && !ticket.assignedAgentId && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={handleAssignToSelf} data-testid="button-assign-self">
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleAssignToSelf} disabled={actionBusy} data-testid="button-assign-self">
               <UserCheck className="h-4 w-4" /> Assign to Me
             </Button>
           )}
           {isAdmin && ticket.status !== "Closed" && ticket.status !== "Rejected" && (
-            <Button variant="outline" size="sm" className="gap-2 text-gray-600" onClick={handleClose} data-testid="button-close-ticket">
+            <Button variant="outline" size="sm" className="gap-2 text-gray-600" onClick={handleClose} disabled={actionBusy} data-testid="button-close-ticket">
               <CheckCircle className="h-4 w-4" /> Close
             </Button>
           )}
           {isAdmin && (ticket.status === "Closed" || ticket.status === "Rejected") && (
-            <Button variant="outline" size="sm" className="gap-2 text-blue-600" onClick={handleReopen} data-testid="button-reopen-ticket">
+            <Button variant="outline" size="sm" className="gap-2 text-blue-600" onClick={handleReopen} disabled={actionBusy} data-testid="button-reopen-ticket">
               <RefreshCw className="h-4 w-4" /> Reopen
             </Button>
           )}
           {isAdmin && ticket.status !== "Rejected" && ticket.status !== "Closed" && (
-            <Button variant="outline" size="sm" className="gap-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => setRejectOpen(true)} data-testid="button-reject-ticket">
+            <Button variant="outline" size="sm" className="gap-2 text-red-600 border-red-200 hover:bg-red-50" onClick={() => setRejectOpen(true)} disabled={actionBusy} data-testid="button-reject-ticket">
               <XCircle className="h-4 w-4" /> Reject
             </Button>
           )}
@@ -421,8 +452,8 @@ export default function TicketDetail() {
                 </div>
                 <Textarea placeholder="Write your comment here…" value={newComment} onChange={e => setNewComment(e.target.value)} rows={3} data-testid="input-comment" />
                 <div className="flex justify-end">
-                  <Button size="sm" onClick={handleAddComment} disabled={!newComment.trim()} className="gap-2" data-testid="button-add-comment">
-                    <Send className="h-3.5 w-3.5" /> Post Comment
+                  <Button size="sm" onClick={handleAddComment} disabled={!newComment.trim() || actionBusy} className="gap-2" data-testid="button-add-comment">
+                    <Send className="h-3.5 w-3.5" /> {actionBusy ? "Posting…" : "Post Comment"}
                   </Button>
                 </div>
               </div>
@@ -557,9 +588,10 @@ export default function TicketDetail() {
                 <Button
                   className={cn("w-full gap-2", saved && "bg-emerald-600 hover:bg-emerald-600")}
                   onClick={handleSaveChanges}
+                  disabled={actionBusy}
                   data-testid="button-save-ticket"
                 >
-                  {saved ? <><CheckCircle className="h-3.5 w-3.5" /> Saved!</> : "Save Changes"}
+                  {saved ? <><CheckCircle className="h-3.5 w-3.5" /> Saved!</> : actionBusy ? "Saving…" : "Save Changes"}
                 </Button>
               </CardContent>
             </Card>
