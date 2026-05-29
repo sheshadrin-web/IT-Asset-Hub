@@ -37,9 +37,9 @@ interface AgentToken {
   revoked_at:       string | null;
 }
 
-interface Props { assetId: string; }
+interface Props { assetId: string; assetTag?: string | null; }
 
-export default function DeviceAgentCard({ assetId }: Props) {
+export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const { role, session, loading: authLoading } = useAuth();
   const isSuperAdmin = role === "super_admin";
   const { toast } = useToast();
@@ -210,7 +210,7 @@ export default function DeviceAgentCard({ assetId }: Props) {
             <Row label="Last Seen"       value={lastSeen} />
             {device && (
               <>
-                <Row label="Hostname"      value={device.hostname ?? "—"} />
+                <Row label="Hostname"      value={assetTag ?? device.hostname ?? "—"} />
                 <Row label="Serial Number" value={device.serial_number ?? "—"} />
                 <Row label="OS"            value={[device.os_name, device.os_version].filter(Boolean).join(" ") || "—"} />
                 <Row label="Processor"     value={device.processor ?? "—"} />

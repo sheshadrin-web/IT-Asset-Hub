@@ -772,7 +772,7 @@ export default function AssetDetail() {
           </Card>
 
           {/* ── Device Agent (Laptops only) ───────────────── */}
-          {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} />}
+          {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
 
           {/* ── User History ──────────────────────────────── */}
           <Card>
