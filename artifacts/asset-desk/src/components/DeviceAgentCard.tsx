@@ -257,6 +257,24 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       ...(hostName ? [`Rename-Computer -NewName "${hostName}" -Force`] : []),
     ].join("\n");
 
+  // Remote lock/unlock only exists in agent v0.3.0+. An older agent (e.g. v0.2.0)
+  // ignores the lock command entirely, so the portal can show "Locked" while the
+  // laptop stays fully usable. Detect that mismatch and warn IT to update the agent.
+  const LOCK_MIN_VERSION = [0, 3, 0];
+  const parseVer = (v: string | null | undefined): number[] =>
+    (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
+  const lockEnforceable = (() => {
+    if (!device?.agent_version) return false; // unknown version → assume too old
+    const p = parseVer(device.agent_version);
+    for (let i = 0; i < 3; i++) {
+      const a = p[i] ?? 0;
+      const b = LOCK_MIN_VERSION[i];
+      if (a !== b) return a > b;
+    }
+    return true;
+  })();
+  const lockUnenforceable = !!device?.is_locked && !lockEnforceable;
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -317,6 +335,20 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     End-user access is blocked
                     {device.locked_at ? <> since {new Date(device.locked_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
                     {" "}Files are preserved. Unlock below to restore access.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {lockUnenforceable && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-900">Lock not enforced — agent too old</p>
+                  <p className="text-[11px] text-amber-800">
+                    This device runs agent <span className="font-mono">v{device?.agent_version ?? "?"}</span>, which
+                    does not support remote lock (needs <span className="font-mono">v0.3.0</span>+). The lock is recorded
+                    here but the laptop stays usable. Reinstall the agent on the device to enforce it.
                   </p>
                 </div>
               </div>
