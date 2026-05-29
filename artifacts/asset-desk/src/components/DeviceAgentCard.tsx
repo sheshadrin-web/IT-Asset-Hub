@@ -218,7 +218,12 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `export MILES_AGENT_TOKEN="${tok}"`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py register`,
       `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py sync`,
-      `~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
+      // install-service runs under sudo so the agent is registered as a root
+      // system LaunchDaemon — required for the real login-window hard lock
+      // (disable the account + show the IT banner). MILES_AGENT_TOKEN and the
+      // SUDO_USER are passed through so the daemon authenticates and can target
+      // the human console user. Without sudo the lock reports "requires_admin".
+      `sudo MILES_AGENT_TOKEN="${tok}" ~/.miles-agent/venv/bin/python ~/.miles-agent/laptop_agent.py install-service`,
     ].join(" && \\\n");
     if (!hostName) return install;
     const rename = [
@@ -295,12 +300,16 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     ].join("\n");
 
   // Real HARD lock (OS-level account/workstation lock with honest status
-  // reporting) needs agent v0.4.3+. Older agents either ignore the command, show
-  // a dismissable overlay, or — on macOS/Windows ≤0.4.2 — lock the screen only
-  // once (the user types their password and is back in while the portal still
-  // shows Locked). v0.4.3 re-asserts the screen lock so it actually persists.
+  // reporting) needs a recent agent. Older agents either ignore the command,
+  // show a dismissable overlay, or lock the screen only once (the user types
+  // their password and is back in while the portal still shows Locked).
+  //   * Windows/Linux: v0.4.3+ (re-asserts / account-locks so it persists).
+  //   * macOS: v0.5.0+ — the TRUE login-window lock (disable the account + IT
+  //     banner, run as a root LaunchDaemon) only exists from 0.5.0. Earlier mac
+  //     agents could not truly lock, so they must be reinstalled.
   // Detect the mismatch and warn IT to update the agent.
-  const LOCK_MIN_VERSION = [0, 4, 3];
+  const isMac = /mac|os\s*x|darwin/i.test(device?.os_name ?? "");
+  const LOCK_MIN_VERSION = isMac ? [0, 5, 0] : [0, 4, 3];
   const parseVer = (v: string | null | undefined): number[] =>
     (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
   const lockEnforceable = (() => {
@@ -421,7 +430,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     {latestLockCmd?.error_message
                       ? latestLockCmd.error_message
                       : "The agent could not apply the lock."}
-                    {" "}You can retry the lock below once the issue is resolved.
+                    {latestLockCmd?.status === "requires_admin"
+                      ? " The agent is not running with admin rights. Reinstall it on the device using the sudo install command below, then retry the lock."
+                      : " You can retry the lock below once the issue is resolved."}
                   </p>
                 </div>
               </div>
@@ -434,7 +445,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   <p className="text-xs font-medium text-amber-900">Lock not enforced — agent too old</p>
                   <p className="text-[11px] text-amber-800">
                     This device runs agent <span className="font-mono">v{device?.agent_version ?? "?"}</span>, which
-                    does not support the real hard lock (needs <span className="font-mono">v0.4.3</span>+). The lock is
+                    does not support the real hard lock (needs <span className="font-mono">v{LOCK_MIN_VERSION.join(".")}</span>+). The lock is
                     recorded here but the laptop may stay usable. Reinstall the agent on the device to enforce it.
                   </p>
                 </div>

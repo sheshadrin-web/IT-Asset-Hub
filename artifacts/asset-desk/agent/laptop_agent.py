@@ -43,10 +43,9 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.4.3"
+AGENT_VERSION       = "0.5.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
-TOKEN               = os.environ.get("MILES_AGENT_TOKEN", "")
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
 # Commands (lock / unlock / etc.) are polled far more frequently than the heavy
 # system sync so admin actions take effect within seconds, not minutes.
@@ -59,6 +58,27 @@ EMPLOYEE_ECODE      = os.environ.get("MILES_EMPLOYEE_ECODE", "")
 IS_WIN  = sys.platform.startswith("win")
 IS_MAC  = sys.platform == "darwin"
 IS_LIN  = sys.platform.startswith("linux")
+
+# The macOS root LaunchDaemon must NOT carry the auth token in its world-readable
+# plist (any local user could read it and forge command status). Instead the token
+# is written to this root-only (0600) file at install time and read back here.
+MAC_SYS_TOKEN_FILE = "/Library/Application Support/MilesAgent/agent.token"
+
+
+def _load_token() -> str:
+    t = os.environ.get("MILES_AGENT_TOKEN", "")
+    if t:
+        return t.strip()
+    if IS_MAC:
+        try:
+            with open(MAC_SYS_TOKEN_FILE) as fh:
+                return fh.read().strip()
+        except OSError:
+            pass
+    return ""
+
+
+TOKEN = _load_token()
 
 
 # ── shell helper ────────────────────────────────────────────────────────────
@@ -210,6 +230,10 @@ def collect_system_info() -> dict:
     # portal keeps showing the employee, not the service account.
     if IS_LIN and _is_root():
         cu = _linux_console_user()
+        if cu:
+            logged_in = cu
+    if IS_MAC and _is_root():
+        cu = _mac_console_user()
         if cu:
             logged_in = cu
 
@@ -392,7 +416,13 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
                 with tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False) as tmp:
                     tmp.write(swift_src)
                     tmp_path = tmp.name
-                subprocess.check_call(["swift", tmp_path], timeout=60,
+                # When root, the swift program runs as the console user (see
+                # _mac_gui_argv) and must be able to read this temp file.
+                try:
+                    os.chmod(tmp_path, 0o644)
+                except OSError:
+                    pass
+                subprocess.check_call(_mac_gui_argv(["swift", tmp_path]), timeout=60,
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 desktop_ok = True
             except FileNotFoundError:
@@ -417,7 +447,7 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
                 f'tell application "Finder" to set desktop picture to POSIX file "{esc}"',
             ):
                 try:
-                    subprocess.check_call(["osascript", "-e", script], timeout=20,
+                    subprocess.check_call(_mac_gui_argv(["osascript", "-e", script]), timeout=20,
                                           stderr=subprocess.PIPE)
                     legacy_ok = True
                 except subprocess.CalledProcessError as e:
@@ -431,7 +461,7 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
             # Force an immediate re-render of the desktop + lock screen.
             for proc in ("Dock", "WallpaperAgent"):
                 try:
-                    subprocess.call(["killall", proc], timeout=10,
+                    subprocess.call(_mac_gui_argv(["killall", proc]), timeout=10,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:  # noqa: BLE001
                     pass
@@ -440,8 +470,8 @@ def _set_wallpaper(local_path: str) -> tuple[bool, str | None]:
             verified: bool | None = None
             try:
                 out = subprocess.check_output(
-                    ["osascript", "-e",
-                     'tell application "System Events" to get picture of desktop 1'],
+                    _mac_gui_argv(["osascript", "-e",
+                     'tell application "System Events" to get picture of desktop 1']),
                     timeout=15, stderr=subprocess.DEVNULL,
                 ).decode().strip()
                 verified = (
@@ -490,10 +520,21 @@ def _wallpaper_cache_dir() -> str:
     if IS_WIN:
         base = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "MilesAgent")
     elif IS_MAC:
-        base = os.path.expanduser("~/Library/Application Support/MilesAgent")
+        if _is_root():
+            # The agent runs as a root LaunchDaemon, but the wallpaper is applied
+            # inside the console user's GUI session — which cannot read root's home
+            # (/var/root). Stage the image in a world-readable shared location.
+            base = "/Users/Shared/MilesAgent"
+        else:
+            base = os.path.expanduser("~/Library/Application Support/MilesAgent")
     else:
         base = os.path.expanduser("~/.cache/miles-agent")
     os.makedirs(base, exist_ok=True)
+    if IS_MAC and _is_root():
+        try:
+            os.chmod(base, 0o755)
+        except OSError:
+            pass
     return base
 
 
@@ -572,6 +613,13 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
         with open(dst, "wb") as f:
             for chunk in r.iter_content(chunk_size=64 * 1024):
                 if chunk: f.write(chunk)
+        if IS_MAC and _is_root():
+            # The wallpaper is applied inside the console user's GUI session, which
+            # must be able to read this file (root's umask would otherwise make it 0600).
+            try:
+                os.chmod(dst, 0o644)
+            except OSError:
+                pass
 
         # Verify hash if server supplied one (preserves quality / integrity)
         if sha:
@@ -603,22 +651,21 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
 
 # ── remote HARD lock (real OS lockout, honest reporting) ───────────────────
 # A locked device is locked at the OS level — NOT a dismissable overlay:
-#   * Windows : LockWorkStation() drops to the secure desktop.
-#   * macOS   : login.framework SACLockScreenImmediate() drops to the login
-#               window (CGSession -suspend fallback on older systems).
+#   * Windows : LockWorkStation() drops to the secure desktop. This is dismissed
+#               the instant the user types their password, so we RE-ASSERT it
+#               every fast cycle (see reassert_lock) to keep them out.
+#   * macOS   : the account is DISABLED (pwpolicy/DisabledUser) and the user is
+#               dropped to the login window, where a custom banner tells them to
+#               contact IT. Their password is rejected — a genuine login-window
+#               lock, not a screen saver. Needs root (system LaunchDaemon).
 #   * Linux   : the account is password-locked (usermod -L) and the active
-#               session is terminated. This needs root, so the agent must run
-#               as a system service. If it is NOT root we report
-#               "requires_admin" rather than faking success.
-# The Windows/macOS screen lock is dismissed the instant the user types their
-# password, so a one-shot lock would let a "locked" device become usable again
-# while the portal still shows Locked. To make the lock real and persistent we
-# RE-ASSERT the screen lock every fast cycle (see reassert_lock) while the
-# device is meant to be locked — the user gets locked out again within seconds.
-# Linux needs no re-assertion because the account stays password-locked.
+#               session is terminated. Needs root (system service).
+# macOS/Linux use a PERSISTENT account lock, so they need no re-assertion. On
+# macOS/Linux, if the agent is NOT root we report "requires_admin" (reinstall
+# with sudo) rather than faking success.
 # We NEVER report 'completed' unless the OS lock actually took effect, and we
 # surface the exact failure reason to the portal. Local state persists so the
-# lock re-asserts on reboot and is reconciled from the server every /sync.
+# lock re-applies on reboot and is reconciled from the server every /sync.
 LOCK_STATE_FILE = os.path.join(os.path.expanduser("~"), ".miles-agent", "lock.state.json")
 
 _lock_mutex = threading.Lock()
@@ -651,6 +698,196 @@ def _is_root() -> bool:
         return hasattr(os, "geteuid") and os.geteuid() == 0
     except Exception:
         return False
+
+
+# ── macOS hard-lock helpers ───────────────────────────────────────────────────
+# The login-window banner shown to a locked-out user. Set via
+# `defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText`.
+MAC_LOCK_MESSAGE = "This device is managed by Miles Education. Please contact IT Admin."
+
+
+def _mac_console_user() -> str | None:
+    """The human currently logged into the GUI (Aqua) session, or None when the
+    Mac is sitting at the login window. Reads the owner of /dev/console, which is
+    the console user; falls back to SystemConfiguration. System/service accounts
+    (root, _windowserver, loginwindow, names starting with '_') are ignored."""
+    def _is_human(name: str | None) -> bool:
+        return bool(name) and name not in ("root", "loginwindow", "_windowserver") \
+            and not name.startswith("_")
+    try:
+        out = subprocess.run(["stat", "-f", "%Su", "/dev/console"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        if _is_human(out):
+            return out
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(["scutil"], input="show State:/Users/ConsoleUser\n",
+                             capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            if "Name :" in line:
+                name = line.split(":", 1)[1].strip()
+                if _is_human(name):
+                    return name
+    except Exception:
+        pass
+    return None
+
+
+def _mac_uid_for(user: str) -> int | None:
+    try:
+        import pwd
+        return pwd.getpwnam(user).pw_uid
+    except Exception:
+        return None
+
+
+def _mac_console_uid() -> int | None:
+    u = _mac_console_user()
+    return _mac_uid_for(u) if u else None
+
+
+def _mac_human_users() -> list[str]:
+    """All local human accounts (UID >= 500, name not starting with '_'). Used to
+    pick a lock target when nobody is at the console (e.g. lost/stolen at the
+    login window)."""
+    users: list[str] = []
+    try:
+        out = subprocess.run(["dscl", ".", "-list", "/Users", "UniqueID"],
+                             capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                name, uid = parts[0], int(parts[1])
+                if uid >= 500 and name != "root" and not name.startswith("_"):
+                    users.append(name)
+    except Exception:
+        pass
+    return users
+
+
+def _mac_gui_argv(argv: list[str]) -> list[str]:
+    """Wrap argv so it executes inside the console user's Aqua GUI session when the
+    agent runs as root (a LaunchDaemon). NSWorkspace / osascript / killall must run
+    in the user's session, not the bare root daemon context, or they no-op. When the
+    agent is not root (legacy per-user LaunchAgent) the argv runs unchanged."""
+    if IS_MAC and _is_root():
+        uid = _mac_console_uid()
+        user = _mac_console_user()
+        if uid is not None and user:
+            return ["launchctl", "asuser", str(uid), "sudo", "-u", user, *argv]
+    return argv
+
+
+def _mac_account_disabled(user: str) -> bool | None:
+    """Whether `user` is barred from logging in. Deterministic check via the
+    account's AuthenticationAuthority (contains ';DisabledUser;' when disabled),
+    with pwpolicy as a secondary signal. Returns True/False, or None if it cannot
+    be determined (so we never report a false 'locked')."""
+    try:
+        r = subprocess.run(["dscl", ".", "-read", f"/Users/{user}", "AuthenticationAuthority"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            if "DisabledUser" in r.stdout:
+                return True
+            # We could read the record and it is not disabled — unless pwpolicy
+            # says otherwise below.
+            authoritative_false = True
+        else:
+            authoritative_false = False
+    except Exception:
+        authoritative_false = False
+    try:
+        r = subprocess.run(["pwpolicy", "-u", user, "-getpolicy"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            blob = r.stdout.replace(" ", "").lower()
+            if "isdisabled=1" in blob or "isdisabled=true" in blob:
+                return True
+            return False
+    except Exception:
+        pass
+    return False if authoritative_false else None
+
+
+def _mac_disable_account(user: str) -> tuple[bool, str]:
+    """Bar `user` from logging in. Tries pwpolicy then a direct DisabledUser
+    authority append, verifying after each. Returns (ok, detail) where ok is True
+    only when the account is CONFIRMED disabled."""
+    subprocess.run(["pwpolicy", "-u", user, "-disableuser"],
+                   capture_output=True, text=True, timeout=15)
+    if _mac_account_disabled(user) is True:
+        return (True, "pwpolicy -disableuser")
+    subprocess.run(["dscl", ".", "-append", f"/Users/{user}",
+                    "AuthenticationAuthority", ";DisabledUser;"],
+                   capture_output=True, text=True, timeout=15)
+    if _mac_account_disabled(user) is True:
+        return (True, "dscl DisabledUser")
+    return (False, "account could not be disabled (verification failed)")
+
+
+def _mac_enable_account(user: str) -> tuple[bool, str]:
+    """Re-enable `user`. Uses both pwpolicy and DisabledUser removal, then
+    verifies. Returns (ok, detail); ok True only when CONFIRMED not disabled."""
+    subprocess.run(["pwpolicy", "-u", user, "-enableuser"],
+                   capture_output=True, text=True, timeout=15)
+    subprocess.run(["dscl", ".", "-delete", f"/Users/{user}",
+                    "AuthenticationAuthority", ";DisabledUser;"],
+                   capture_output=True, text=True, timeout=15)
+    state = _mac_account_disabled(user)
+    if state is False:
+        return (True, "account re-enabled")
+    if state is None:
+        return (False, "re-enable attempted but could not be verified")
+    return (False, "account is still disabled after re-enable")
+
+
+def _mac_set_login_message(msg: str) -> bool:
+    """Show a banner on the login window. Root-only. Returns True only if the
+    banner was written AND read back identically, so the caller can report an
+    honest status instead of assuming the banner is showing."""
+    try:
+        subprocess.run(["defaults", "write",
+                        "/Library/Preferences/com.apple.loginwindow",
+                        "LoginwindowText", msg],
+                       capture_output=True, text=True, timeout=10)
+        out = subprocess.run(["defaults", "read",
+                              "/Library/Preferences/com.apple.loginwindow",
+                              "LoginwindowText"],
+                             capture_output=True, text=True, timeout=10)
+        return out.returncode == 0 and out.stdout.strip() == msg.strip()
+    except Exception:
+        return False
+
+
+def _mac_clear_login_message() -> None:
+    try:
+        subprocess.run(["defaults", "delete",
+                        "/Library/Preferences/com.apple.loginwindow",
+                        "LoginwindowText"],
+                       capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
+
+
+def _mac_user_has_session(user: str) -> bool:
+    """True while `user` still owns the live GUI session (i.e. they are at their
+    desktop, not the login window)."""
+    return _mac_console_user() == user
+
+
+def _mac_force_logout(user: str) -> None:
+    """Kick `user` to the login window. `launchctl bootout` ends their GUI session;
+    if that does not stick we escalate to killing their processes."""
+    uid = _mac_uid_for(user)
+    if uid is not None:
+        subprocess.run(["launchctl", "bootout", f"user/{uid}"],
+                       capture_output=True, text=True, timeout=20)
+        time.sleep(1)
+    if _mac_user_has_session(user):
+        subprocess.run(["pkill", "-KILL", "-u", user],
+                       capture_output=True, text=True, timeout=15)
+        time.sleep(1)
 
 
 def _linux_console_user() -> str | None:
@@ -744,40 +981,6 @@ def _win_lock_now() -> tuple[bool, str | None]:
         return (False, f"LockWorkStation unavailable ({e})")
 
 
-def _mac_lock_now() -> tuple[bool, str | None]:
-    """Drop the Mac to the login window. Returns (ok, error). Idempotent —
-    safe to call when the screen is already locked.
-
-    Modern macOS (Big Sur and later) REMOVED the old CGSession Menu Extras
-    binary, so the preferred method is login.framework's SACLockScreenImmediate(),
-    which drops to the real login window and requires the password — a genuine
-    lock. We fall back to the legacy CGSession binary only on older systems that
-    still ship it. pmset only sleeps the display and does NOT guarantee a
-    password gate, so it is never treated as a successful lock."""
-    mac_err = None
-    try:
-        import ctypes
-        login_fw = ctypes.CDLL(
-            "/System/Library/PrivateFrameworks/login.framework/login")
-        login_fw.SACLockScreenImmediate.restype = ctypes.c_int
-        rc = login_fw.SACLockScreenImmediate()
-        if rc == 0:
-            return (True, None)
-        mac_err = f"SACLockScreenImmediate returned {rc}"
-    except Exception as e:
-        mac_err = f"SACLockScreenImmediate unavailable ({e})"
-    cg = ("/System/Library/CoreServices/Menu Extras/"
-          "User.menu/Contents/Resources/CGSession")
-    if os.path.exists(cg):
-        r = subprocess.run([cg, "-suspend"], capture_output=True, text=True, timeout=15)
-        if r.returncode == 0:
-            return (True, None)
-        return (False,
-                f"{mac_err}; CGSession -suspend exited {r.returncode}: "
-                f"{r.stderr.strip()}")
-    return (False, f"Could not lock this Mac: {mac_err}. The device was NOT locked.")
-
-
 def _apply_hard_lock() -> tuple[str, str | None, str | None]:
     """Lock the device at the OS level. Returns (status, result, error) where
     status is 'completed' (truly locked), 'failed', or 'requires_admin'.
@@ -791,11 +994,54 @@ def _apply_hard_lock() -> tuple[str, str | None, str | None]:
             return ("failed", None, err)
 
         if IS_MAC:
-            ok, err = _mac_lock_now()
-            if ok:
-                _write_lock_state({"locked": True, "platform": "macos"})
-                return ("completed", "Screen locked (login window)", None)
-            return ("failed", None, err)
+            # TRUE login-window lock: bar the account from logging in and drop the
+            # user to the login window, where a custom banner tells them to contact
+            # IT. The user's password is rejected — this is NOT a dismissable screen
+            # lock. It needs root, so the agent must run as a system LaunchDaemon.
+            if not _is_root():
+                return ("requires_admin", None,
+                        "Hard lock requires admin. This Mac's agent is running as a "
+                        "normal user and cannot lock the login window, so the device "
+                        "was NOT locked. Reinstall the agent with admin rights (sudo) "
+                        "using the portal install command, then retry.")
+            user = _mac_console_user()
+            if not user:
+                humans = _mac_human_users()
+                user = humans[0] if len(humans) == 1 else None
+            if not user:
+                return ("failed", None,
+                        "Could not determine which macOS account to lock (no user at "
+                        "the console and the account is ambiguous).")
+            # 1) Show the login-window banner (verified by read-back).
+            banner_ok = _mac_set_login_message(MAC_LOCK_MESSAGE)
+            # 2) Disable the account so the password is rejected at the login window.
+            ok, detail = _mac_disable_account(user)
+            if not ok:
+                _mac_clear_login_message()
+                return ("failed", None,
+                        f"Failed to lock account '{user}': {detail}. The device was "
+                        f"NOT locked.")
+            # 3) Kick the user to the login window so the lock takes effect now.
+            _mac_force_logout(user)
+            if _mac_user_has_session(user):
+                # Could not evict the live session: the person can keep using the Mac.
+                # Roll the lock back to a consistent UNLOCKED state and report honestly.
+                _mac_enable_account(user)
+                _mac_clear_login_message()
+                return ("failed", None,
+                        f"Account '{user}' was disabled but the active session could "
+                        f"not be ended, so the user can still use the Mac. The lock was "
+                        f"rolled back — please retry.")
+            _write_lock_state({"locked": True, "platform": "macos", "user": user})
+            # The password rejection (account disable) is the actual lock; the banner
+            # is informational. Report success honestly but flag if the banner could
+            # not be confirmed so IT knows the message may not be visible.
+            banner_note = ("" if banner_ok
+                           else "; WARNING: the login-window banner could not be "
+                                "confirmed and may not be visible")
+            return ("completed",
+                    f"Account '{user}' locked at the login window ({detail}){banner_note}",
+                    None)
 
         if IS_LIN:
             if not _is_root():
@@ -874,7 +1120,29 @@ def _release_lock() -> tuple[str, str | None, str | None]:
                 return ("failed", None, f"Failed to unlock account '{user}': {detail}")
             _write_lock_state({"locked": False})
             return ("completed", f"Account '{user}' unlocked ({detail})", None)
-        # Windows / macOS workstation locks leave nothing persistent to undo.
+        if IS_MAC:
+            if not _is_root():
+                # A non-root agent can never apply a confirmed macOS lock (it returns
+                # requires_admin), so any unlock reaching it corresponds to a lock a
+                # root agent applied — which this agent cannot undo. Report honestly so
+                # the server's is_locked is never falsely cleared.
+                return ("requires_admin", None,
+                        "Cannot unlock: undoing a macOS login-window lock requires "
+                        "admin, but this agent is running as a normal user. Reinstall "
+                        "the agent with admin rights (sudo), then retry the unlock.")
+            user = _read_lock_state().get("user") or _mac_console_user()
+            if not user:
+                humans = _mac_human_users()
+                user = humans[0] if len(humans) == 1 else None
+            if not user:
+                return ("failed", None, "Could not determine which account to unlock.")
+            ok, detail = _mac_enable_account(user)
+            _mac_clear_login_message()
+            if not ok:
+                return ("failed", None, f"Failed to unlock account '{user}': {detail}")
+            _write_lock_state({"locked": False})
+            return ("completed", f"Account '{user}' unlocked ({detail})", None)
+        # Windows workstation lock leaves nothing persistent to undo.
         _write_lock_state({"locked": False})
         return ("completed", "Access restored", None)
     except Exception as e:
@@ -895,13 +1163,13 @@ def reconcile_lock(server_locked: bool) -> None:
 
 def reassert_lock() -> None:
     """While the device is meant to be locked, keep the OS lock asserted. The
-    Windows/macOS screen lock is dismissed the moment the user types their
-    password, so without re-asserting a 'locked' device becomes usable again
-    while the portal still shows Locked. Re-issuing the screen lock each fast
-    cycle keeps the user out — they are locked again within seconds. Linux uses
-    a persistent account lock, so it needs no re-assertion here. Best-effort and
-    silent: never reports a command status, never flips local state."""
-    if IS_LIN:
+    Windows workstation lock is dismissed the moment the user types their password,
+    so without re-asserting a 'locked' device becomes usable again while the portal
+    still shows Locked. Re-issuing the screen lock each fast cycle keeps the user
+    out. macOS and Linux use a persistent ACCOUNT lock (login-window lock / password
+    lock), so they need no re-assertion here. Best-effort and silent: never reports a
+    command status, never flips local state."""
+    if not IS_WIN:
         return
     try:
         if not _read_local_lock():
@@ -909,10 +1177,7 @@ def reassert_lock() -> None:
         with _lock_mutex:
             if not _read_local_lock():
                 return
-            if IS_WIN:
-                _win_lock_now()
-            elif IS_MAC:
-                _mac_lock_now()
+            _win_lock_now()
     except Exception:
         pass
 
@@ -1050,6 +1315,13 @@ MAC_INSTALL_DIR = os.path.expanduser("~/Library/Application Support/MilesAgent")
 MAC_LOG_OUT     = os.path.expanduser("~/Library/Logs/miles-agent.out.log")
 MAC_LOG_ERR     = os.path.expanduser("~/Library/Logs/miles-agent.err.log")
 
+# Root install (required for the TRUE login-window hard lock): a system-wide
+# LaunchDaemon that runs as root and survives reboot/logout.
+MAC_DAEMON_PLIST_PATH = f"/Library/LaunchDaemons/{MAC_PLIST_LABEL}.plist"
+MAC_SYS_INSTALL_DIR   = "/Library/Application Support/MilesAgent"
+MAC_SYS_LOG_OUT       = "/Library/Logs/miles-agent.out.log"
+MAC_SYS_LOG_ERR       = "/Library/Logs/miles-agent.err.log"
+
 
 def _xml_escape(s: str) -> str:
     return (s.replace("&", "&amp;").replace("<", "&lt;")
@@ -1057,8 +1329,109 @@ def _xml_escape(s: str) -> str:
 
 
 def install_service_mac() -> int:
-    """Install a per-user launchd agent that runs `miles-agent run` and survives reboot."""
+    """Install the launchd service that runs `miles-agent run` and survives reboot.
+    ROOT  -> a system LaunchDaemon (required for the login-window hard lock).
+    non-root -> a per-user LaunchAgent (convenient, but lock reports requires_admin)."""
+    if _is_root():
+        return _install_service_mac_system()
     return _install_service_mac_impl()
+
+
+def _remove_legacy_mac_user_agent() -> None:
+    """Tear down a previously-installed per-user LaunchAgent so it does not poll
+    alongside the new root daemon (which would double-execute and let a non-root
+    agent claim lock commands). Runs as the SUDO_USER who launched the install."""
+    su = os.environ.get("SUDO_USER")
+    if not su or su == "root":
+        return
+    uid = _mac_uid_for(su)
+    legacy_plist = f"/Users/{su}/Library/LaunchAgents/{MAC_PLIST_LABEL}.plist"
+    if uid is not None:
+        subprocess.run(["launchctl", "bootout", f"gui/{uid}/{MAC_PLIST_LABEL}"],
+                       capture_output=True, text=True)
+        subprocess.run(["sudo", "-u", su, "launchctl", "unload", legacy_plist],
+                       capture_output=True, text=True)
+    try:
+        if os.path.exists(legacy_plist):
+            os.remove(legacy_plist)
+    except Exception:
+        pass
+
+
+def _install_service_mac_system() -> int:
+    """Root install: a system-wide LaunchDaemon that runs as root so it can enforce
+    the macOS login-window hard lock (disable account + login banner)."""
+    if not TOKEN:
+        print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
+              file=sys.stderr)
+        return 2
+
+    _remove_legacy_mac_user_agent()
+    os.makedirs(MAC_SYS_INSTALL_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(MAC_SYS_LOG_OUT), exist_ok=True)
+
+    # Store the auth token in a ROOT-ONLY file rather than the world-readable
+    # plist, so a local standard user cannot steal it and forge command status.
+    try:
+        fd = os.open(MAC_SYS_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as tf:
+            tf.write(TOKEN)
+        os.chown(MAC_SYS_TOKEN_FILE, 0, 0)
+        os.chmod(MAC_SYS_TOKEN_FILE, 0o600)
+    except OSError as e:
+        print(f"ERROR: could not write secure token file {MAC_SYS_TOKEN_FILE}: {e}",
+              file=sys.stderr)
+        return 1
+
+    prog_args, dst = _service_program_args(MAC_SYS_INSTALL_DIR)
+    prog_xml = "\n".join(f"    <string>{_xml_escape(a)}</string>" for a in prog_args)
+
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{MAC_PLIST_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+{prog_xml}
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MILES_AGENT_API_BASE</key><string>{_xml_escape(API_BASE)}</string>
+    <key>MILES_AGENT_SYNC_INTERVAL</key><string>{SYNC_INTERVAL_SEC}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{_xml_escape(MAC_SYS_LOG_OUT)}</string>
+  <key>StandardErrorPath</key><string>{_xml_escape(MAC_SYS_LOG_ERR)}</string>
+</dict>
+</plist>
+"""
+    with open(MAC_DAEMON_PLIST_PATH, "w") as fh:
+        fh.write(plist)
+    # LaunchDaemons must be owned root:wheel and not group/world writable or launchd
+    # refuses to load them.
+    try:
+        os.chown(MAC_DAEMON_PLIST_PATH, 0, 0)
+    except Exception:
+        pass
+    os.chmod(MAC_DAEMON_PLIST_PATH, 0o644)
+
+    subprocess.run(["launchctl", "unload", MAC_DAEMON_PLIST_PATH],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    r = subprocess.run(["launchctl", "load", "-w", MAC_DAEMON_PLIST_PATH],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if r.returncode != 0:
+        print("ERROR: launchctl load failed:", r.stderr.decode(errors="ignore"), file=sys.stderr)
+        return 1
+
+    print(f"✓ System service '{MAC_PLIST_LABEL}' installed and started (root).")
+    print(f"  Binary:   {dst}")
+    print(f"  Plist:    {MAC_DAEMON_PLIST_PATH}")
+    print(f"  Logs:     {MAC_SYS_LOG_OUT}")
+    print(f"  Sync every: {SYNC_INTERVAL_SEC} seconds (auto-starts at boot)")
+    print("  Hard lock: ENABLED (login-window lock with custom message)")
+    return 0
 
 
 def _service_program_args(install_dir: str) -> tuple[list[str], str]:
@@ -1140,6 +1513,17 @@ def _install_service_mac_impl() -> int:
 
 
 def uninstall_service_mac() -> int:
+    # System LaunchDaemon (root install).
+    if os.path.exists(MAC_DAEMON_PLIST_PATH):
+        subprocess.run(["launchctl", "unload", MAC_DAEMON_PLIST_PATH],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            os.remove(MAC_DAEMON_PLIST_PATH)
+        except Exception:
+            pass
+        if os.path.isdir(MAC_SYS_INSTALL_DIR):
+            shutil.rmtree(MAC_SYS_INSTALL_DIR, ignore_errors=True)
+    # Per-user LaunchAgent (legacy / non-root install).
     if os.path.exists(MAC_PLIST_PATH):
         subprocess.run(["launchctl", "unload", MAC_PLIST_PATH],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
