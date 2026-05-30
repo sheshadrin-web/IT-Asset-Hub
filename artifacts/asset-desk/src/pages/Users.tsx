@@ -177,7 +177,7 @@ export default function Users() {
   const [editingUser,      setEditingUser]       = useState<Profile | null>(null);
   const [editOpen,         setEditOpen]          = useState(false);
   const [viewingUser,      setViewingUser]       = useState<Profile | null>(null);
-  const [viewUserTab,      setViewUserTab]       = useState<"hardware" | "tickets">("hardware");
+  const [viewUserTab,      setViewUserTab]       = useState<"hardware" | "tickets" | "team">("hardware");
   const [deactivateTarget, setDeactivateTarget] = useState<Profile | null>(null);
   const [deleteTarget,     setDeleteTarget]     = useState<Profile | null>(null);
 
@@ -210,6 +210,9 @@ export default function Users() {
   // Manager-change history (loaded when the View dialog opens)
   const [managerHistory,     setManagerHistory]     = useState<ManagerHistoryEntry[]>([]);
   const [historyLoading,     setHistoryLoading]     = useState(false);
+  // Guards against a stale history fetch overwriting a newer one when the user
+  // quickly switches between profiles (e.g. clicking through direct reports).
+  const historyReqRef = useRef(0);
 
   // Deactivate-with-reportees warning
   const [deactivateReports,  setDeactivateReports]  = useState<Profile[]>([]);
@@ -675,10 +678,11 @@ export default function Users() {
     setViewingUser(user);
     setManagerHistory([]);
     setHistoryLoading(true);
+    const reqId = ++historyReqRef.current;
     fetchManagerHistory(user.id)
-      .then(setManagerHistory)
-      .catch(() => setManagerHistory([]))
-      .finally(() => setHistoryLoading(false));
+      .then(h => { if (reqId === historyReqRef.current) setManagerHistory(h); })
+      .catch(() => { if (reqId === historyReqRef.current) setManagerHistory([]); })
+      .finally(() => { if (reqId === historyReqRef.current) setHistoryLoading(false); });
   };
 
   // ── Reporting manager transfer ───────────────────────────────────────────────
@@ -1355,143 +1359,79 @@ export default function Users() {
                   </div>
                 </DialogHeader>
 
-                {/* ── Body: two-column layout ─────────────────────────────────── */}
-                <div className="px-6 py-6 grid gap-5 lg:grid-cols-[300px_1fr]">
-                  {/* Left — Contact & Details */}
-                  <Card className="self-start">
-                    <CardContent className="p-5">
-                      <h3 className="text-base font-semibold text-foreground mb-4">Contact &amp; Details</h3>
-                      <div className="space-y-4">
-                        {[
-                          { icon: Mail,         label: "Email",             value: vu.email,              mono: true  },
-                          { icon: Hash,         label: "E-Code",            value: vu.ecode || "—",       mono: true  },
-                          { icon: Building2,    label: "Department",        value: vu.department || "—" },
-                          { icon: Briefcase,    label: "Role",              value: ROLE_LABELS[vu.role] },
-                          { icon: MapPin,       label: "Location",          value: vu.location || "—" },
-                          { icon: UserCircle,   label: "Reporting Manager", value: resolvedManager },
-                        ].map(({ icon: Icon, label, value, mono }) => (
-                          <div key={label} className="flex items-start gap-3">
-                            <div className="h-8 w-8 rounded-md bg-muted/70 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <Icon className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
-                              <p className={cn("text-sm text-foreground leading-snug break-words", mono && "font-mono")}>{value}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      {addedDate && (
-                        <div className="mt-5 pt-4 border-t border-border/70 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          <span>Added {addedDate}</span>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Left — Team & Reporting */}
-                  <Card className="self-start lg:col-start-1">
-                    <CardContent className="p-5">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-base font-semibold text-foreground">Team &amp; Reporting</h3>
-                        {isAdmin && directReports.length > 0 && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5 h-7 text-xs"
-                            onClick={() => { setViewingUser(null); openTransferForManager(vu); }}
-                            data-testid="button-view-user-transfer-reportees"
-                          >
-                            <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
-                          </Button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-3">
-                        <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <UsersIcon className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-2xl font-bold text-foreground leading-none">{directReports.length}</p>
-                          <p className="text-[11px] text-muted-foreground mt-1">Total Direct Reports</p>
-                        </div>
-                      </div>
-                      {directReports.length > 0 && (
-                        <div className="mt-3 max-h-44 overflow-y-auto rounded-lg border border-border divide-y divide-border">
-                          {directReports.map(r => (
-                            <button
-                              key={r.id}
-                              type="button"
-                              onClick={() => openView(r)}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 transition-colors"
-                            >
-                              <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                <UserCircle className="h-4 w-4 text-muted-foreground" />
+                {/* ── Body: sidebar + tabbed main panel ───────────────────────── */}
+                <div className="px-6 py-6 grid gap-5 lg:grid-cols-[300px_1fr] items-stretch">
+                  {/* Left — profile sidebar */}
+                  <div className="flex flex-col gap-4">
+                    <Card className="flex-1">
+                      <CardContent className="p-5 h-full flex flex-col">
+                        <h3 className="text-base font-semibold text-foreground mb-4">Contact &amp; Details</h3>
+                        <div className="space-y-4">
+                          {[
+                            { icon: Mail,         label: "Email",             value: vu.email,              mono: true  },
+                            { icon: Hash,         label: "E-Code",            value: vu.ecode || "—",       mono: true  },
+                            { icon: Building2,    label: "Department",        value: vu.department || "—" },
+                            { icon: Briefcase,    label: "Role",              value: ROLE_LABELS[vu.role] },
+                            { icon: MapPin,       label: "Location",          value: vu.location || "—" },
+                            { icon: UserCircle,   label: "Reporting Manager", value: resolvedManager },
+                          ].map(({ icon: Icon, label, value, mono }) => (
+                            <div key={label} className="flex items-start gap-3">
+                              <div className="h-8 w-8 rounded-md bg-muted/70 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <Icon className="h-4 w-4 text-muted-foreground" />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium text-foreground truncate">{r.full_name}</p>
-                                <p className="text-xs text-muted-foreground truncate">{r.department || r.email}</p>
+                                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+                                <p className={cn("text-sm text-foreground leading-snug break-words", mono && "font-mono")}>{value}</p>
                               </div>
-                            </button>
+                            </div>
                           ))}
                         </div>
-                      )}
-
-                      {/* Manager-change history */}
-                      <div className="mt-5 pt-4 border-t border-border/70">
-                        <div className="flex items-center gap-1.5 mb-3">
-                          <History className="h-3.5 w-3.5 text-muted-foreground" />
-                          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Manager History</h4>
-                        </div>
-                        {historyLoading ? (
-                          <p className="text-xs text-muted-foreground">Loading history…</p>
-                        ) : managerHistory.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No manager changes recorded.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {managerHistory.map(h => (
-                              <div key={h.id} className="flex gap-2.5">
-                                <div className="flex flex-col items-center pt-1">
-                                  <div className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
-                                  <div className="w-px flex-1 bg-border mt-1" />
-                                </div>
-                                <div className="min-w-0 flex-1 pb-1">
-                                  <p className="text-xs text-foreground">
-                                    {h.event_type === "unassigned" ? (
-                                      <>Manager <span className="font-medium">unassigned</span></>
-                                    ) : (
-                                      <>
-                                        Moved to <span className="font-medium">{h.new_manager_name || h.new_manager_email || "—"}</span>
-                                      </>
-                                    )}
-                                    {h.old_manager_name && (
-                                      <span className="text-muted-foreground"> (from {h.old_manager_name})</span>
-                                    )}
-                                  </p>
-                                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                                    {new Date(h.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
-                                    {h.event_by_name ? ` · by ${h.event_by_name}` : ""}
-                                  </p>
-                                  {h.notes && <p className="text-[10px] text-muted-foreground italic mt-0.5">"{h.notes}"</p>}
-                                </div>
-                              </div>
-                            ))}
+                        {addedDate && (
+                          <div className="mt-auto pt-4 border-t border-border/70 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <CalendarDays className="h-3.5 w-3.5" />
+                            <span>Added {addedDate}</span>
                           </div>
                         )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
 
-                  {/* Right — Tabs: Assigned Hardware / Tickets */}
-                  <div className="min-w-0">
+                    {/* Quick stats — also act as tab shortcuts */}
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: "Reports", value: directReports.length, icon: UsersIcon,   tab: "team"     as const },
+                        { label: "Assets",  value: userAssets.length,    icon: Monitor,     tab: "hardware" as const },
+                        { label: "Tickets", value: userTickets.length,   icon: TicketIcon,  tab: "tickets"  as const },
+                      ].map(({ label, value, icon: Icon, tab }) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => setViewUserTab(tab)}
+                          data-testid={`stat-user-${tab}`}
+                          className={cn(
+                            "rounded-xl border bg-card px-3 py-3 text-left transition-all hover:border-primary/40 hover:shadow-sm",
+                            activeTab === tab ? "border-primary/50 ring-1 ring-primary/20" : "border-border"
+                          )}
+                        >
+                          <Icon className={cn("h-4 w-4 mb-2", activeTab === tab ? "text-primary" : "text-muted-foreground")} />
+                          <p className="text-xl font-bold text-foreground leading-none">{value}</p>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">{label}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right — main panel with tabs */}
+                  <div className="min-w-0 flex flex-col">
                     {/* Tab switcher */}
-                    <div className="flex items-center gap-1 mb-4 border-b border-border/70">
+                    <div role="tablist" aria-label="User details" className="flex items-center gap-1 mb-4 border-b border-border/70 overflow-x-auto">
                       <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === "hardware"}
                         onClick={() => setViewUserTab("hardware")}
                         data-testid="tab-user-hardware"
                         className={cn(
-                          "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-colors",
+                          "inline-flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px whitespace-nowrap transition-colors",
                           activeTab === "hardware"
                             ? "border-b-2 border-primary text-foreground"
                             : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
@@ -1502,10 +1442,12 @@ export default function Users() {
                       </button>
                       <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === "tickets"}
                         onClick={() => setViewUserTab("tickets")}
                         data-testid="tab-user-tickets"
                         className={cn(
-                          "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px transition-colors",
+                          "inline-flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px whitespace-nowrap transition-colors",
                           activeTab === "tickets"
                             ? "border-b-2 border-primary text-foreground"
                             : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
@@ -1514,7 +1456,25 @@ export default function Users() {
                         <TicketIcon className={cn("h-4 w-4", activeTab === "tickets" ? "text-primary" : "text-muted-foreground")} />
                         Tickets ({userTickets.length})
                       </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === "team"}
+                        onClick={() => setViewUserTab("team")}
+                        data-testid="tab-user-team"
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-semibold -mb-px whitespace-nowrap transition-colors",
+                          activeTab === "team"
+                            ? "border-b-2 border-primary text-foreground"
+                            : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <UsersIcon className={cn("h-4 w-4", activeTab === "team" ? "text-primary" : "text-muted-foreground")} />
+                        Team &amp; Reporting ({directReports.length})
+                      </button>
                     </div>
+
+                    <div role="tabpanel" className="flex-1">
 
                     {/* Hardware tab */}
                     {activeTab === "hardware" && (
@@ -1624,6 +1584,101 @@ export default function Users() {
                         </div>
                       )
                     )}
+
+                    {/* Team & Reporting tab */}
+                    {activeTab === "team" && (
+                      <div className="space-y-6">
+                        {isAdmin && directReports.length > 0 && (
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5 h-8 text-xs"
+                              onClick={() => { setViewingUser(null); openTransferForManager(vu); }}
+                              data-testid="button-view-user-transfer-reportees"
+                            >
+                              <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer Reportees
+                            </Button>
+                          </div>
+                        )}
+
+                        {directReports.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
+                            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                              <UsersIcon className="h-5 w-5 text-muted-foreground/60" />
+                            </div>
+                            <p className="text-sm font-medium text-foreground">No direct reports</p>
+                            <p className="text-xs text-muted-foreground">No employees currently report to this user.</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Direct Reports ({directReports.length})</h4>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {directReports.map(r => (
+                                <button
+                                  key={r.id}
+                                  type="button"
+                                  onClick={() => openView(r)}
+                                  className="flex items-center gap-2.5 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-muted/50 hover:border-primary/40 transition-colors"
+                                >
+                                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                    <UserCircle className="h-4 w-4 text-muted-foreground" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium text-foreground truncate">{r.full_name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{r.department || r.email}</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Manager-change history */}
+                        <div className="pt-1">
+                          <div className="flex items-center gap-1.5 mb-3">
+                            <History className="h-3.5 w-3.5 text-muted-foreground" />
+                            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Manager History</h4>
+                          </div>
+                          {historyLoading ? (
+                            <p className="text-xs text-muted-foreground">Loading history…</p>
+                          ) : managerHistory.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No manager changes recorded.</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {managerHistory.map(h => (
+                                <div key={h.id} className="flex gap-2.5">
+                                  <div className="flex flex-col items-center pt-1">
+                                    <div className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
+                                    <div className="w-px flex-1 bg-border mt-1" />
+                                  </div>
+                                  <div className="min-w-0 flex-1 pb-1">
+                                    <p className="text-xs text-foreground">
+                                      {h.event_type === "unassigned" ? (
+                                        <>Manager <span className="font-medium">unassigned</span></>
+                                      ) : (
+                                        <>
+                                          Moved to <span className="font-medium">{h.new_manager_name || h.new_manager_email || "—"}</span>
+                                        </>
+                                      )}
+                                      {h.old_manager_name && (
+                                        <span className="text-muted-foreground"> (from {h.old_manager_name})</span>
+                                      )}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                                      {new Date(h.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                                      {h.event_by_name ? ` · by ${h.event_by_name}` : ""}
+                                    </p>
+                                    {h.notes && <p className="text-[10px] text-muted-foreground italic mt-0.5">"{h.notes}"</p>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    </div>
                   </div>
                 </div>
               </>
