@@ -870,11 +870,14 @@ export default function Users() {
   // so a manager is never left active-looking with reportees half-detached.
   const runDeactivation = async (
     target: Profile,
-  ): Promise<{ recoveryCount: number; lockedCount: number }> => {
+    roster: Profile[] = users,
+  ): Promise<{ recoveryCount: number; lockedCount: number; unassignedIds: string[] }> => {
     // 0. Unassign direct reports so they are not left pointing at an inactive
     //    manager. "Transfer Now" reassigns them first; "Continue Anyway" lands
-    //    here and detaches them.
-    const reports = getDirectReports(target, users);
+    //    here and detaches them. Reportee discovery uses the caller-supplied
+    //    roster so a sequential bulk loop sees prior iterations' unassignments
+    //    rather than a stale render-time snapshot.
+    const reports = getDirectReports(target, roster);
     if (reports.length > 0) {
       await changeReportingManager(
         reports.map(r => r.id),
@@ -921,7 +924,7 @@ export default function Users() {
       /* swallow — locking is best-effort and must not block deactivation */
     }
 
-    return { recoveryCount, lockedCount };
+    return { recoveryCount, lockedCount, unassignedIds: reports.map(r => r.id) };
   };
 
   const handleDeactivate = async () => {
@@ -964,8 +967,23 @@ export default function Users() {
     setBulkBusy(true);
     let ok = 0;
     const failed: string[] = [];
+    // Live working snapshot: each iteration's unassignments are reflected here so
+    // subsequent iterations discover reportees against up-to-date relationships
+    // instead of the stale render-time `users` array.
+    let roster: Profile[] = users.map(u => ({ ...u }));
     for (const u of targets) {
-      try { await runDeactivation(u); ok++; } catch { failed.push(u.full_name); }
+      try {
+        const { unassignedIds } = await runDeactivation(u, roster);
+        const unassigned = new Set(unassignedIds);
+        roster = roster.map(r =>
+          r.id === u.id
+            ? { ...r, status: "inactive" as UserStatus }
+            : unassigned.has(r.id)
+              ? { ...r, reporting_manager: "" }
+              : r,
+        );
+        ok++;
+      } catch { failed.push(u.full_name); }
     }
     setBulkBusy(false);
     setBulkDeactivateOpen(false);
