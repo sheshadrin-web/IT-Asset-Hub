@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
   TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight,
-  UserX,
+  UserX, Users as UsersIcon, UserMinus, Network, Award,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
-import { getUsersWithUnassignedManager, managerDisplayName } from "@/lib/reportingManager";
+import { getUsersWithUnassignedManager, managerDisplayName, buildReportingStructure } from "@/lib/reportingManager";
+import { cn } from "@/lib/utils";
 
 const PRIORITY_COLORS: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-500 border-red-500/20",
@@ -223,6 +224,21 @@ export default function Dashboard() {
     users.filter(u => u.status === "active"),
   );
 
+  // Manager hierarchy overview metrics
+  const reportingGroups = buildReportingStructure(users);
+  const totalManagers = reportingGroups.length;
+  const managersWithReports = reportingGroups.filter(g => g.manager.status === "active").length;
+  const employeesWithoutManager = users.filter(
+    u => u.status === "active" && !(u.reporting_manager ?? "").trim(),
+  ).length;
+  const largestTeamSize = reportingGroups.reduce((m, g) => Math.max(m, g.reports.length), 0);
+  const hierarchyStats = [
+    { label: "Total Managers", value: totalManagers, icon: UsersIcon, color: "text-blue-600", bg: "bg-blue-500/10" },
+    { label: "Employees Without Manager", value: employeesWithoutManager, icon: UserMinus, color: "text-amber-600", bg: "bg-amber-500/10" },
+    { label: "Managers With Direct Reports", value: managersWithReports, icon: Network, color: "text-violet-600", bg: "bg-violet-500/10" },
+    { label: "Largest Team Size", value: largestTeamSize, icon: Award, color: "text-emerald-600", bg: "bg-emerald-500/10" },
+  ];
+
   const assetStatusData = [
     { name: "In Procurement", value: assets.filter((a) => a.status === "In Procurement").length, color: "#f97316" },
     { name: "Available",      value: assets.filter((a) => a.status === "Available").length,      color: "#22c55e" },
@@ -276,6 +292,31 @@ export default function Dashboard() {
           <StatCard key={card.label} {...card} />
         ))}
       </div>
+
+      {/* Manager Hierarchy Overview */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Network className="h-4 w-4 text-muted-foreground" />
+            Manager Hierarchy Overview
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {hierarchyStats.map((s) => (
+              <div key={s.label} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+                <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0", s.bg)}>
+                  <s.icon className={cn("h-5 w-5", s.color)} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-2xl font-bold text-foreground leading-none">{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1 leading-tight">{s.label}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Pending acknowledgement alert */}
       {pendingAck > 0 && (

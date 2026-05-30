@@ -7,7 +7,7 @@ import {
   Upload, CheckSquare, User, KeyRound,
   ChevronUp, ChevronDown, ChevronsUpDown,
   Mail, Building2, MapPin, Hash, Briefcase, UserCircle, Monitor, CalendarDays, Ticket as TicketIcon,
-  Users as UsersIcon, ArrowRightLeft, History, ArrowRight,
+  Users as UsersIcon, ArrowRightLeft, History, ArrowRight, UserCheck, Shield,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
@@ -245,6 +245,64 @@ export default function Users() {
   };
 
   const clearSelection = () => setSelectedUserIds(new Set());
+
+  // ── Bulk status / role / export actions ──────────────────────────────────────
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const bulkSetStatus = async (status: UserStatus) => {
+    const targets = users.filter(u => selectedUserIds.has(u.id) && u.status !== status);
+    if (targets.length === 0) {
+      toast({ title: "Nothing to update", description: `All selected users are already ${status}.` });
+      return;
+    }
+    setBulkBusy(true);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const u of targets) {
+      try { await updateUser(u.id, { ...u, status }); ok++; } catch { failed.push(u.full_name); }
+    }
+    setBulkBusy(false);
+    const verb = status === "active" ? "activated" : "deactivated";
+    if (failed.length === 0) {
+      clearSelection();
+      toast({ title: status === "active" ? "Users activated" : "Users deactivated", description: `${ok} user${ok !== 1 ? "s" : ""} ${verb}.` });
+    } else {
+      toast({
+        title: "Partial update",
+        description: `${ok} ${verb}, ${failed.length} failed${failed.length <= 3 ? ` (${failed.join(", ")})` : ""}. Selection kept so you can retry.`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const bulkAssignRole = async (role: UserRole) => {
+    const targets = users.filter(u => selectedUserIds.has(u.id) && u.role !== role);
+    if (targets.length === 0) {
+      toast({ title: "Nothing to update", description: `All selected users already have the ${ROLE_LABELS[role]} role.` });
+      return;
+    }
+    setBulkBusy(true);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const u of targets) {
+      try { await updateUser(u.id, { ...u, role }); ok++; } catch { failed.push(u.full_name); }
+    }
+    setBulkBusy(false);
+    if (failed.length === 0) {
+      clearSelection();
+      toast({ title: "Role assigned", description: `${ok} user${ok !== 1 ? "s" : ""} set to ${ROLE_LABELS[role]}.` });
+    } else {
+      toast({
+        title: "Partial update",
+        description: `${ok} set to ${ROLE_LABELS[role]}, ${failed.length} failed${failed.length <= 3 ? ` (${failed.join(", ")})` : ""}. Selection kept so you can retry.`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const exportSelected = () => {
+    exportUsers(users.filter(u => selectedUserIds.has(u.id)));
+  };
 
   const handleBulkDelete = async () => {
     const ids = [...selectedUserIds];
@@ -1043,17 +1101,42 @@ export default function Users() {
         <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg text-sm">
           <CheckSquare className="h-4 w-4 text-primary" />
           <span className="font-medium text-primary">{selectedUserIds.size} selected</span>
-          <div className="flex items-center gap-2 ml-auto">
-            <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={clearSelection}>
+          <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
+            <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={clearSelection} disabled={bulkBusy}>
               <X className="h-3.5 w-3.5" /> Clear
             </Button>
             {isAdmin && (
-              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={openTransferForSelection}>
-                <ArrowRightLeft className="h-3.5 w-3.5" /> Change Reporting Manager
-              </Button>
+              <>
+                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => bulkSetStatus("active")} disabled={bulkBusy}>
+                  <UserCheck className="h-3.5 w-3.5" /> Activate
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => bulkSetStatus("inactive")} disabled={bulkBusy}>
+                  <UserX className="h-3.5 w-3.5" /> Deactivate
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={exportSelected} disabled={bulkBusy}>
+                  <Download className="h-3.5 w-3.5" /> Export
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" disabled={bulkBusy}>
+                      <Shield className="h-3.5 w-3.5" /> Assign Role
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                      <DropdownMenuItem key={r} onClick={() => bulkAssignRole(r)} className="cursor-pointer">
+                        {ROLE_LABELS[r]}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={openTransferForSelection} disabled={bulkBusy}>
+                  <ArrowRightLeft className="h-3.5 w-3.5" /> Change Reporting Manager
+                </Button>
+              </>
             )}
             {isSuperAdmin && (
-              <Button size="sm" variant="destructive" className="gap-1.5 h-7 text-xs" onClick={() => setBulkDeleteOpen(true)}>
+              <Button size="sm" variant="destructive" className="gap-1.5 h-7 text-xs" onClick={() => setBulkDeleteOpen(true)} disabled={bulkBusy}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete Selected
               </Button>
             )}

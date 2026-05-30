@@ -21,7 +21,7 @@ import { useUsers } from "@/context/UsersContext";
 import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { ASSET_TYPE_CATEGORIES, getAssetEmoji } from "@/lib/assetEmoji";
-import { buildReportingStructure } from "@/lib/reportingManager";
+import { buildReportingStructure, managerDisplayName } from "@/lib/reportingManager";
 
 const tooltipStyle = {
   backgroundColor: "hsl(var(--card))",
@@ -89,30 +89,29 @@ function exportUsersCsv(users: Profile[]) {
   downloadCsv(csv, `users_report_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
-// ── Reporting structure (manager → direct reports) ──────────────────────────
+// ── Reporting structure (employee → reporting manager) ──────────────────────
 const REPORTING_HEADER = [
-  "Manager", "Manager Email", "Manager Role", "Direct Reports",
-  "Report Name", "Report Email", "Report Role", "Report Department",
+  "Employee", "Employee ID", "Reporting Manager", "Department", "Location", "Status",
 ];
 
+const statusLabel = (s: Profile["status"]) => (s === "active" ? "Active" : "Inactive");
+
+/** One row per employee, sorted by reporting manager then employee name. */
 function reportingStructureRows(users: Profile[]): string[][] {
-  const groups = buildReportingStructure(users);
-  const rows: string[][] = [];
-  for (const g of groups) {
-    for (const r of g.reports) {
-      rows.push([
-        g.manager.full_name,
-        g.manager.email,
-        ROLE_LABELS[g.manager.role],
-        String(g.reports.length),
-        r.full_name,
-        r.email,
-        ROLE_LABELS[r.role],
-        r.department || "",
-      ]);
-    }
-  }
-  return rows;
+  return [...users]
+    .sort((a, b) => {
+      const ma = managerDisplayName(a.reporting_manager, users);
+      const mb = managerDisplayName(b.reporting_manager, users);
+      return ma.localeCompare(mb) || a.full_name.localeCompare(b.full_name);
+    })
+    .map((u) => [
+      u.full_name,
+      u.ecode || "",
+      managerDisplayName(u.reporting_manager, users),
+      u.department || "",
+      u.location || "",
+      statusLabel(u.status),
+    ]);
 }
 
 function exportReportingStructureCsv(users: Profile[]) {
@@ -127,8 +126,7 @@ async function exportReportingStructureXlsx(users: Profile[]) {
   const rows = reportingStructureRows(users);
   const ws = XLSX.utils.aoa_to_sheet([REPORTING_HEADER, ...rows]);
   ws["!cols"] = [
-    { wch: 22 }, { wch: 28 }, { wch: 14 }, { wch: 14 },
-    { wch: 22 }, { wch: 28 }, { wch: 14 }, { wch: 20 },
+    { wch: 24 }, { wch: 14 }, { wch: 24 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Reporting Structure");
@@ -138,7 +136,6 @@ async function exportReportingStructureXlsx(users: Profile[]) {
 async function exportReportingStructurePdf(users: Profile[]) {
   const { jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
-  const groups = buildReportingStructure(users);
   const doc = new jsPDF({ orientation: "landscape" });
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
@@ -149,27 +146,19 @@ async function exportReportingStructurePdf(users: Profile[]) {
   doc.text(`Miles Education IT Asset Hub · Generated ${dateStr}`, 14, 22);
   doc.setTextColor(0);
 
-  const body = groups.flatMap((g) =>
-    g.reports.map((r, i) => [
-      i === 0 ? `${g.manager.full_name} (${g.reports.length})` : "",
-      r.full_name,
-      r.email,
-      ROLE_LABELS[r.role],
-      r.department || "—",
-    ]),
-  );
+  const body = reportingStructureRows(users);
 
   if (body.length === 0) {
     doc.setFontSize(11);
-    doc.text("No reporting relationships have been defined yet.", 14, 34);
+    doc.text("No employees have been added yet.", 14, 34);
   } else {
     autoTable(doc, {
       startY: 28,
-      head: [["Manager", "Direct Report", "Email", "Role", "Department"]],
+      head: [REPORTING_HEADER],
       body,
       styles: { fontSize: 9, cellPadding: 2.5 },
       headStyles: { fillColor: [99, 102, 241], textColor: 255 },
-      columnStyles: { 0: { fontStyle: "bold", cellWidth: 55 } },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 50 } },
       alternateRowStyles: { fillColor: [245, 245, 250] },
     });
   }
@@ -830,21 +819,21 @@ export default function Reports() {
           <div className="flex items-center gap-2">
             <Button
               variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={managerGroups.length === 0}
+              disabled={users.length === 0}
               onClick={() => handleExport(() => exportReportingStructureCsv(users), "Reporting structure")}
             >
               <Download className="h-3.5 w-3.5" /> CSV
             </Button>
             <Button
               variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={managerGroups.length === 0}
+              disabled={users.length === 0}
               onClick={() => handleExportAsync(() => exportReportingStructureXlsx(users), "Reporting structure (Excel)")}
             >
               <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" /> Excel
             </Button>
             <Button
               variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={managerGroups.length === 0}
+              disabled={users.length === 0}
               onClick={() => handleExportAsync(() => exportReportingStructurePdf(users), "Reporting structure (PDF)")}
             >
               <FileText className="h-3.5 w-3.5 text-red-500" /> PDF
