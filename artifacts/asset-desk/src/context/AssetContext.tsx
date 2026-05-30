@@ -149,7 +149,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
   const [assets,  setAssets]  = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
-  const { role } = useAuth();
+  const { role, isAuthenticated } = useAuth();
 
   // Only IT staff may receive the full row (incl. sim_number/ICCID). Default to
   // the redacted projection whenever the role is not yet resolved or is end_user.
@@ -177,17 +177,16 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, [isPrivileged]);
 
-  // Fetch once on mount, then re-fetch whenever auth session changes (so end
-  // users — whose RLS-filtered view depends on having a valid JWT — always see
-  // their own assets even if the session was not yet hydrated on first render.
-  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  // Only fetch when authenticated. This provider wraps the whole app, including
+  // public pages like the acknowledgement link, which must not trigger a full
+  // assets read. `isAuthenticated` (session AND profile) only flips true once the
+  // profile/role has resolved, so `fetchAssets` already carries the correct
+  // role-based projection — a single fetch, no race, no double read.
   useEffect(() => {
-    if (!supabaseConfigured) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) fetchAssets();
-    });
-    return () => subscription.unsubscribe();
-  }, [fetchAssets]);
+    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
+    fetchAssets();
+  }, [isAuthenticated, fetchAssets]);
 
   const getAsset = (id: string) => assets.find(a => a.assetId === id);
 

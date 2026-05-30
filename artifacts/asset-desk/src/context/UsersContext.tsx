@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Profile, UserRole, UserStatus } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 
 interface UpdateProfileInput {
   full_name:         string;
@@ -28,6 +29,7 @@ export function UsersProvider({ children }: { children: ReactNode }) {
   const [users,   setUsers]   = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
+  const { isAuthenticated } = useAuth();
 
   const fetchUsers = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -47,14 +49,14 @@ export function UsersProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  // Only fetch when authenticated — public pages (e.g. the acknowledgement link)
+  // must not trigger a profiles read. `isAuthenticated` flips true once session
+  // and profile resolve, then flips false on sign-out: one fetch, no race.
   useEffect(() => {
-    if (!supabaseConfigured) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) fetchUsers();
-    });
-    return () => subscription.unsubscribe();
-  }, [fetchUsers]);
+    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
+    fetchUsers();
+  }, [isAuthenticated, fetchUsers]);
 
   const updateUser = async (id: string, data: UpdateProfileInput): Promise<void> => {
     const { error } = await supabase

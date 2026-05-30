@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { Ticket, TicketComment, TicketPriority, TicketStatus } from "@/data/mockData";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 
 // ─── Case normalizers (DB stores lowercase, app uses title-case) ──────────────
 const PRIORITY_MAP: Record<string, TicketPriority> = {
@@ -99,6 +100,7 @@ export function TicketProvider({ children }: { children: ReactNode }) {
   const [tickets,  setTickets]  = useState<Ticket[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState<string | null>(null);
+  const { isAuthenticated } = useAuth();
 
   const fetchTickets = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -118,16 +120,14 @@ export function TicketProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  // Re-fetch when auth session changes so end-users (whose RLS view depends on
-  // a valid JWT) always see their own tickets after login.
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  // Only fetch when authenticated — public pages (e.g. the acknowledgement link)
+  // must not trigger a tickets read. `isAuthenticated` flips true once session
+  // and profile resolve, then flips false on sign-out: one fetch, no race.
   useEffect(() => {
-    if (!supabaseConfigured) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) fetchTickets();
-    });
-    return () => subscription.unsubscribe();
-  }, [fetchTickets]);
+    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
+    fetchTickets();
+  }, [isAuthenticated, fetchTickets]);
 
   const getTicket = (id: string) => tickets.find(t => t.ticketId === id);
 

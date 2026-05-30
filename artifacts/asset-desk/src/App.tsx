@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -15,25 +15,29 @@ import { TicketProvider } from "@/context/TicketContext";
 import { UsersProvider } from "@/context/UsersContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
-import AcknowledgePage from "@/pages/AcknowledgePage";
-import Forbidden from "@/pages/Forbidden";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import Assets from "@/pages/Assets";
-import AddAsset from "@/pages/AddAsset";
-import EditAsset from "@/pages/EditAsset";
-import AssetDetail from "@/pages/AssetDetail";
-import Tickets from "@/pages/Tickets";
-import RaiseTicket from "@/pages/RaiseTicket";
-import TicketDetail from "@/pages/TicketDetail";
-import Users from "@/pages/Users";
-import Reports from "@/pages/Reports";
-import Settings from "@/pages/Settings";
-import MyAssets from "@/pages/MyAssets";
-import ReturnAsset from "@/pages/ReturnAsset";
-import BulkImport from "@/pages/BulkImport";
-import SupabaseCheck from "@/pages/SupabaseCheck";
-import NotFound from "@/pages/not-found";
+
+// Route pages are code-split so each route only downloads what it needs. The
+// public acknowledgement link and the end-user portal no longer pull the full
+// admin bundle (Dashboard charts, bulk import, reports, etc.).
+const AcknowledgePage = lazy(() => import("@/pages/AcknowledgePage"));
+const Forbidden = lazy(() => import("@/pages/Forbidden"));
+const Login = lazy(() => import("@/pages/Login"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Assets = lazy(() => import("@/pages/Assets"));
+const AddAsset = lazy(() => import("@/pages/AddAsset"));
+const EditAsset = lazy(() => import("@/pages/EditAsset"));
+const AssetDetail = lazy(() => import("@/pages/AssetDetail"));
+const Tickets = lazy(() => import("@/pages/Tickets"));
+const RaiseTicket = lazy(() => import("@/pages/RaiseTicket"));
+const TicketDetail = lazy(() => import("@/pages/TicketDetail"));
+const Users = lazy(() => import("@/pages/Users"));
+const Reports = lazy(() => import("@/pages/Reports"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const MyAssets = lazy(() => import("@/pages/MyAssets"));
+const ReturnAsset = lazy(() => import("@/pages/ReturnAsset"));
+const BulkImport = lazy(() => import("@/pages/BulkImport"));
+const SupabaseCheck = lazy(() => import("@/pages/SupabaseCheck"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 const queryClient = new QueryClient();
 
@@ -198,6 +202,7 @@ function Router() {
   if (loading) return <LoadingScreen />;
 
   return (
+    <Suspense fallback={<LoadingScreen />}>
     <Switch>
       {/* Diagnostic page — requires login to prevent public exposure of system info */}
       <Route path="/supabase-check">
@@ -277,6 +282,7 @@ function Router() {
           : <Redirect to="/login" />}
       </Route>
     </Switch>
+    </Suspense>
   );
 }
 
