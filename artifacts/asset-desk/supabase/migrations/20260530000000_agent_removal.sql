@@ -368,5 +368,47 @@ BEGIN
   RETURN v_rows;
 END $$;
 
+-- ── Admin: clear the "Agent removed" notice ─────────────────────────────────
+-- Dismisses the removal banner for a device whose agent was removed. Clears the
+-- removal markers (the same columns agent_register clears on re-onboard) so the
+-- card returns to a clean "pending re-enrol" state. Management stays OFF until
+-- the agent actually re-registers; this only clears the informational notice.
+-- Asset, assignment, history and sync logs are untouched. Writes an audit row.
+CREATE OR REPLACE FUNCTION public.clear_agent_removal(p_asset_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_dev RECORD;
+BEGIN
+  IF NOT public._is_super_admin() THEN
+    RAISE EXCEPTION 'forbidden: super_admin required';
+  END IF;
+  SELECT id, agent_removed_at INTO v_dev
+    FROM public.managed_devices WHERE laptop_asset_id = p_asset_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'no managed device for this asset'; END IF;
+  IF v_dev.agent_removed_at IS NULL THEN
+    RETURN jsonb_build_object('success', true, 'noop', true);
+  END IF;
+
+  UPDATE public.managed_devices
+     SET agent_removed_at          = NULL,
+         agent_removed_by          = NULL,
+         agent_removed_reason      = NULL,
+         agent_remove_requested_at = NULL,
+         updated_at                = now()
+   WHERE id = v_dev.id;
+
+  INSERT INTO public.device_commands
+    (managed_device_id, command_type, command_payload, status, requested_by,
+     executed_at, completed_at, result_message)
+  VALUES
+    (v_dev.id, 'force_remove_agent', jsonb_build_object('action', 'clear_removal_notice'),
+     'completed', v_uid, now(), now(),
+     'Removal notice cleared from portal. Device awaits re-enrolment; asset, assignment and history preserved.');
+
+  RETURN jsonb_build_object('success', true);
+END $$;
+
 GRANT EXECUTE ON FUNCTION public.remove_agent(uuid, text)        TO authenticated;
 GRANT EXECUTE ON FUNCTION public.force_remove_agent(uuid, text)  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.clear_agent_removal(uuid)       TO authenticated;

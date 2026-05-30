@@ -52,16 +52,34 @@ function Stop-Install {
   exit 1
 }
 
-function Test-VenvReady { return (Test-Path $VenvPy) }
+# A venv is only usable if BOTH the interpreter AND its pyvenv.cfg exist and the
+# interpreter actually runs. Checking python.exe alone lets a broken/partial venv
+# (left by a previous failed or force-removed install) slip through, which later
+# fails with "No pyvenv.cfg file" the moment pip is invoked.
+function Test-VenvReady {
+  if (-not (Test-Path $VenvPy)) { return $false }
+  if (-not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) { return $false }
+  try { & $VenvPy -c 'import sys' 2>$null | Out-Null } catch { return $false }
+  return ($LASTEXITCODE -eq 0)
+}
+
+# Remove any half-built venv so we always recreate from a clean slate.
+function Remove-Venv {
+  if (Test-Path $VenvDir) {
+    try { Remove-Item -Path $VenvDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+  }
+}
 
 function Try-Venv {
   param([string]$Exe, [string[]]$Pre = @())
+  Remove-Venv
   try { & $Exe @Pre -m venv $VenvDir 2>$null | Out-Null } catch { }
   return (Test-VenvReady)
 }
 
 function New-Venv {
   if (Test-VenvReady) { return $true }
+  Remove-Venv
   if (Try-Venv 'py' @('-3')) { return $true }
   if (Try-Venv 'python' @())  { return $true }
   return $false
@@ -105,7 +123,7 @@ if (-not (New-Venv)) {
     Stop-Install ("Could not download or install Python automatically — " + $_.Exception.Message + ". Install Python 3 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH'), then run this installer again.")
   }
   $fallbackPy = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
-  if (Test-Path $fallbackPy) { & $fallbackPy -m venv $VenvDir 2>$null | Out-Null }
+  if (Test-Path $fallbackPy) { Remove-Venv; & $fallbackPy -m venv $VenvDir 2>$null | Out-Null }
   if (-not (Test-VenvReady)) { New-Venv | Out-Null }
 }
 if (-not (Test-VenvReady)) {
@@ -115,9 +133,20 @@ Write-Log 'Python environment ready.' 'OK'
 
 # ── 3. Dependencies ─────────────────────────────────────────────────────────
 Write-Log 'Installing agent dependencies...'
-& $VenvPy -m pip install -q --upgrade pip requests
-if ($LASTEXITCODE -ne 0) {
-  Stop-Install 'Could not install the Python dependencies (pip failed). Check the internet connection and try again.'
+# Make sure pip exists inside the venv (some minimal Pythons ship without it),
+# then install with a few retries. We log pip's real output so a genuine failure
+# (network, proxy, SSL) is visible in install.log instead of a generic message.
+& $VenvPy -m ensurepip --upgrade 2>&1 | ForEach-Object { Write-Log $_ } 
+& $VenvPy -m pip install --disable-pip-version-check --upgrade pip 2>&1 | ForEach-Object { Write-Log $_ }
+$pipOk = $false
+foreach ($attempt in 1..3) {
+  $pipOut = (& $VenvPy -m pip install --disable-pip-version-check requests 2>&1 | Out-String)
+  if ($LASTEXITCODE -eq 0) { $pipOk = $true; break }
+  Write-Log ("pip attempt $attempt failed (exit $LASTEXITCODE): " + $pipOut.Trim()) 'WARN'
+  Start-Sleep -Seconds 3
+}
+if (-not $pipOk) {
+  Stop-Install 'Could not install the Python dependencies (pip failed). Check the internet connection (or proxy/SSL) and try again — see the pip output above in this log.'
 }
 Write-Log 'Dependencies installed.' 'OK'
 

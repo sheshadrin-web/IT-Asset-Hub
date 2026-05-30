@@ -299,6 +299,21 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     await load();
   }
 
+  async function clearRemoval() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("clear_agent_removal", { p_asset_id: assetId });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to clear notice", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: "Removal notice cleared",
+      description: "The device is now ready to re-enrol. Generate a key and re-install to bring it back under management.",
+    });
+    await load();
+  }
+
   // Build a plain-text uninstall cheat-sheet (all OSes) for IT to run on the
   // laptop directly — used by the "Download Uninstall Command" button.
   function downloadUninstall() {
@@ -731,6 +746,19 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     {" "}The asset record, assigned user, and full history are <b>preserved</b>. Generate a new key
                     and re-install to bring this device back under management. See who/when in the audit log below.
                   </p>
+                  {isSuperAdmin && (
+                    <div className="mt-2">
+                      <Button
+                        size="sm" variant="outline"
+                        className="h-7 gap-1.5 text-[11px]"
+                        onClick={clearRemoval}
+                        disabled={busy}
+                        data-testid="button-clear-agent-removal"
+                      >
+                        <X className="h-3.5 w-3.5" /> Clear Notice
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
