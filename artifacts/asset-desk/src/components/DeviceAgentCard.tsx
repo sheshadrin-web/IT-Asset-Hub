@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -6,7 +6,8 @@ import {
 } from "@/components/ui/dialog";
 import {
   Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
-  Lock, Unlock, Trash2, Ban, Image as ImageIcon, ImageOff, ShieldOff, Zap,
+  Lock, Unlock, Trash2, Ban, ShieldOff, Zap,
+  FileText, X,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -123,6 +124,27 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const [removeReason, setRemoveReason] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Locally-remembered "cleared" agent error. We store the dismissed command's
+  // id (per asset) in localStorage so the banner stays hidden across refreshes,
+  // without ever touching the DB — the command stays in the audit log untouched.
+  // A *different* (newer) error has a different id, so it surfaces again.
+  const errorDismissKey = `agentErrorDismissed:${assetId}`;
+  const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(() => {
+    try { return localStorage.getItem(`agentErrorDismissed:${assetId}`); }
+    catch { return null; }
+  });
+  // Reload the dismissed-error id when the card is reused for a different asset
+  // (assetId can change without a remount), so one device's dismissal never
+  // leaks into another's view.
+  useEffect(() => {
+    try { setDismissedErrorId(localStorage.getItem(errorDismissKey)); }
+    catch { setDismissedErrorId(null); }
+  }, [errorDismissKey]);
+
+  // Controlled audit-log disclosure so "View Logs" can open + scroll to it.
+  const [auditLogOpen, setAuditLogOpen] = useState(false);
+  const auditLogRef = useRef<HTMLDetailsElement>(null);
+
   const load = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
     // Reads are RLS-protected (authenticated role). Wait for the Supabase
@@ -229,24 +251,6 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       },
     };
     toast(labels[type]);
-    await load();
-  }
-
-  // Push the currently-active wallpaper to this device. Same RPC the wallpaper
-  // manager uses; surfaced here as a quick action. Honest about "no active wallpaper".
-  async function pushWallpaper() {
-    setBusy(true);
-    const { data, error } = await supabase.rpc("wallpaper_push_to_asset", { p_asset_id: assetId });
-    setBusy(false);
-    if (error || !data?.success) {
-      toast({
-        title: "Couldn't push wallpaper",
-        description: error?.message ?? data?.error ?? "Set an active wallpaper first, then push it to the device.",
-        variant: "destructive",
-      });
-      return;
-    }
-    toast({ title: "Wallpaper push requested", description: "The device applies it on its next agent sync." });
     await load();
   }
 
@@ -521,11 +525,40 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     ? new Date(device.last_boot_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
     : "—";
 
-  // Most recent failed/needs-admin command across any action — surfaced as a
-  // troubleshooting banner so IT can see the latest agent error at a glance.
-  const latestErrorCmd = commands.find(
-    (c) => !!c.error_message && (c.status === "failed" || c.status === "requires_admin"),
-  );
+  // Surface ONLY an active, unresolved agent error. `commands` is newest-first.
+  // An error is "active" only if NO later command of the SAME command_type has
+  // succeeded — a later success (completed) auto-resolves it. A later pending /
+  // running retry does NOT resolve it; the error stays until the retry succeeds.
+  // We show the most recent such failure. Dismissed errors are hidden too.
+  const succeededTypes = new Set<string>();
+  let activeErrorCmd: DeviceCommand | undefined;
+  for (const c of commands) {
+    if (c.status === "completed") {
+      succeededTypes.add(c.command_type); // newer success for this type
+      continue;
+    }
+    if (
+      (c.status === "failed" || c.status === "requires_admin") &&
+      !succeededTypes.has(c.command_type)
+    ) {
+      activeErrorCmd = c;
+      break;
+    }
+  }
+  const latestErrorCmd =
+    activeErrorCmd && activeErrorCmd.id !== dismissedErrorId ? activeErrorCmd : undefined;
+
+  function clearAgentError() {
+    if (!activeErrorCmd) return;
+    setDismissedErrorId(activeErrorCmd.id);
+    try { localStorage.setItem(errorDismissKey, activeErrorCmd.id); } catch { /* ignore */ }
+  }
+
+  function viewAgentLogs() {
+    setAuditLogOpen(true);
+    // Let the disclosure render open, then bring it into view.
+    requestAnimationFrame(() => auditLogRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
 
   return (
     <Card>
@@ -714,13 +747,38 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   <p className="text-xs font-medium text-red-800">
                     Latest agent error — {COMMAND_LABEL[latestErrorCmd.command_type] ?? latestErrorCmd.command_type}
                   </p>
-                  <p className="text-[11px] text-red-700 break-words">{latestErrorCmd.error_message}</p>
+                  <p className="text-[11px] text-red-700 break-words">
+                    {latestErrorCmd.error_message?.trim() ||
+                      (latestErrorCmd.status === "requires_admin"
+                        ? "The agent needs administrator privileges to finish this action."
+                        : "The agent reported a failure without a detailed message. Check the command audit log.")}
+                  </p>
                   <p className="text-[10px] text-red-600/80 mt-0.5">
                     {(() => {
                       const w = latestErrorCmd.completed_at ?? latestErrorCmd.executed_at ?? latestErrorCmd.requested_at;
                       return w ? new Date(w).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
                     })()}
                   </p>
+                  {isSuperAdmin && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        size="sm" variant="outline"
+                        className="h-7 gap-1.5 text-[11px] text-red-700 border-red-300 hover:bg-red-100"
+                        onClick={clearAgentError}
+                        data-testid="button-clear-agent-error"
+                      >
+                        <X className="h-3.5 w-3.5" /> Clear Error
+                      </Button>
+                      <Button
+                        size="sm" variant="outline"
+                        className="h-7 gap-1.5 text-[11px]"
+                        onClick={viewAgentLogs}
+                        data-testid="button-view-agent-logs"
+                      >
+                        <FileText className="h-3.5 w-3.5" /> View Logs
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -759,6 +817,13 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     </Button>
                   )}
 
+                  {/* Revoke agent key */}
+                  {token && (
+                    <Button size="sm" variant="outline" className="gap-2 justify-start text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowRevoke(true)} disabled={busy} data-testid="button-revoke-agent-key">
+                      <Power className="h-4 w-4" /> Revoke
+                    </Button>
+                  )}
+
                   {/* Lock / Unlock toggle */}
                   {device && !agentRemoved && (
                     device.is_locked ? (
@@ -786,23 +851,16 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     </Button>
                   )}
 
-                  {/* Push wallpaper */}
+                  {/* Wallpaper actions intentionally live only in the Company
+                      Wallpaper section below — kept out of Quick Actions to avoid
+                      duplicate buttons. */}
+
+                  {/* Notify restart */}
                   {device && !agentRemoved && (
-                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void pushWallpaper()} disabled={busy || removalPending} data-testid="button-push-wallpaper">
-                      <ImageIcon className="h-4 w-4" /> Push Wallpaper
+                    <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
+                      <Zap className="h-4 w-4" /> Notify Restart
                     </Button>
                   )}
-
-                  {/* Remove wallpaper — NOT supported by the agent (no reset RPC). */}
-                  <Button
-                    size="sm" variant="outline"
-                    className="gap-2 justify-start opacity-60 cursor-not-allowed"
-                    disabled
-                    title="Resetting a device's wallpaper isn't supported by the agent yet."
-                    data-testid="button-remove-wallpaper"
-                  >
-                    <ImageOff className="h-4 w-4" /> Remove Wallpaper
-                  </Button>
 
                   {/* Remove agent (graceful) */}
                   {device && !agentRemoved && (
@@ -829,20 +887,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     More controls
                   </summary>
                   <div className="flex flex-wrap gap-2 px-3 pb-3">
-                    {token && (
-                      <Button size="sm" variant="outline" className="gap-2 text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowRevoke(true)} disabled={busy} data-testid="button-revoke-agent-key">
-                        <Power className="h-4 w-4" /> Revoke Key
-                      </Button>
-                    )}
                     {device && !agentRemoved && (
-                      <>
-                        <Button size="sm" variant="outline" className="gap-2" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
-                          <Zap className="h-4 w-4" /> Notify Restart
-                        </Button>
-                        <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
-                          <Ban className="h-4 w-4" /> Force Remove Agent from Portal
-                        </Button>
-                      </>
+                      <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
+                        <Ban className="h-4 w-4" /> Force Remove Agent from Portal
+                      </Button>
                     )}
                     {device && (
                       <Button size="sm" variant="outline" className="gap-2" onClick={downloadUninstall} data-testid="button-download-uninstall">
@@ -855,7 +903,12 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
             )}
 
             {isSuperAdmin && device && commands.length > 0 && (
-              <details className="rounded-md border bg-muted/20 mt-1">
+              <details
+                ref={auditLogRef}
+                className="rounded-md border bg-muted/20 mt-1"
+                open={auditLogOpen}
+                onToggle={(e) => setAuditLogOpen((e.currentTarget as HTMLDetailsElement).open)}
+              >
                 <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-muted-foreground">
                   Command audit log ({commands.length})
                 </summary>
