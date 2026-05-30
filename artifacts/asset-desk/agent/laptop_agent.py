@@ -59,6 +59,13 @@ IS_WIN  = sys.platform.startswith("win")
 IS_MAC  = sys.platform == "darwin"
 IS_LIN  = sys.platform.startswith("linux")
 
+# On Windows the agent runs windowless (pythonw via the Startup launcher), but
+# every child process we spawn — powershell, wmic, etc. — would otherwise pop up
+# its own console window. collect_system_info() runs these on every /sync poll,
+# so without this flag a PowerShell/cmd window flashes on the user's screen
+# repeatedly. CREATE_NO_WINDOW keeps those children windowless. 0 on non-Windows.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WIN else 0
+
 # The macOS root LaunchDaemon must NOT carry the auth token in its world-readable
 # plist (any local user could read it and forge command status). Instead the token
 # is written to this root-only (0600) file at install time and read back here.
@@ -83,9 +90,14 @@ TOKEN = _load_token()
 
 # ── shell helper ────────────────────────────────────────────────────────────
 def _run(cmd: list[str], timeout: int = 15) -> str:
-    """Run a command and return stripped stdout. Empty string on any failure."""
+    """Run a command and return stripped stdout. Empty string on any failure.
+    Spawns children windowless on Windows (see _NO_WINDOW) so polling never
+    flashes a PowerShell/cmd console on the user's screen."""
     try:
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=timeout)
+        out = subprocess.check_output(
+            cmd, stderr=subprocess.DEVNULL, timeout=timeout,
+            creationflags=_NO_WINDOW,
+        )
         return out.decode("utf-8", errors="ignore").strip()
     except Exception:
         return ""
