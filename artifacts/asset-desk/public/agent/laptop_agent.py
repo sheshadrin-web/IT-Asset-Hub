@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.6.0"
+AGENT_VERSION       = "0.6.1"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -1559,10 +1559,23 @@ def _maybe_notify_long_uptime() -> None:
         pass
 
 
-def poll_commands() -> None:
+def _looks_revoked(resp: dict) -> bool:
+    """True only when the server EXPLICITLY rejected our token (the portal
+    Force-Removed this device), never for a transient network/5xx error.
+    agent_sync / agent_fetch_commands return success:false with this exact
+    message once the token row is revoked."""
+    if not isinstance(resp, dict) or resp.get("success"):
+        return False
+    err = str(resp.get("error", "")).lower()
+    return "revoked token" in err or "invalid or revoked" in err
+
+
+def poll_commands() -> bool:
+    """Poll + execute queued commands. Returns True if the portal has revoked our
+    token (so the caller can tear the agent down and exit)."""
     resp = _get("/commands")
     if not resp.get("success"):
-        return
+        return _looks_revoked(resp)
     for cmd in resp.get("commands", []):
         status, result, err = execute_command(cmd)
         _post("/commands/status", {
@@ -1576,6 +1589,7 @@ def poll_commands() -> None:
         # sees _uninstall_requested next and exits.
         if _uninstall_requested:
             break
+    return False
 
 
 # ── entrypoints ─────────────────────────────────────────────────────────────
@@ -1642,6 +1656,7 @@ def run_loop() -> int:
     except Exception:
         pass
     last_sync = 0.0
+    revoked_strikes = 0
     while True:
         now = time.monotonic()
         try:
@@ -1654,7 +1669,24 @@ def run_loop() -> int:
                 _maybe_notify_long_uptime()
                 last_sync = now
             # Commands (lock / unlock) on the fast cycle so they apply in seconds.
-            poll_commands()
+            # poll_commands() also reports if the portal has revoked our token
+            # (Force Remove from Portal). Two consecutive revoked polls — never a
+            # one-off network blip — means we must stop managing this laptop:
+            # tear ourselves down and exit so no background process or console
+            # window is left running.
+            if poll_commands():
+                revoked_strikes += 1
+                if revoked_strikes >= 2:
+                    try:
+                        _self_uninstall()
+                    except Exception:
+                        pass
+                    print("Agent token revoked by portal — uninstalling and exiting.",
+                          file=sys.stderr)
+                    _final_self_destruct()
+                    return 0
+            else:
+                revoked_strikes = 0
             # An uninstall command tore the agent down (and poll_commands has
             # just reported its result to the portal). Exit cleanly now; on
             # Windows hand off a detached job to delete the still-locked files.
@@ -2103,7 +2135,9 @@ def install_service_windows() -> int:
         dst = os.path.join(WIN_INSTALL_DIR, "miles-agent.exe")
         if os.path.abspath(exe) != os.path.abspath(dst):
             shutil.copy2(exe, dst)
-        run_line = f'start "" "{dst}" run'
+        # Run the binary directly inside the (hidden) launcher cmd — do NOT use
+        # `start`, which spawns a SEPARATE window that stays visible.
+        run_line = f'"{dst}" run'
         shown = dst
     else:
         # Script mode — copy the .py and launch it with the windowless interpreter
@@ -2116,11 +2150,17 @@ def install_service_windows() -> int:
         pythonw = os.path.join(py_dir, "pythonw.exe")
         if not os.path.exists(pythonw):
             pythonw = os.path.abspath(sys.executable)
-        run_line = f'start "" "{pythonw}" "{dst}" run'
+        # Run the interpreter directly inside the (hidden) launcher cmd. We must
+        # NOT use `start ""` here: `start` opens a brand-new console window that
+        # stays visible whenever pythonw.exe is missing and we fall back to the
+        # console python.exe — that is the persistent black cmd window users saw.
+        # Running in-place keeps the agent inside the VBS-launched hidden cmd.
+        run_line = f'"{pythonw}" "{dst}" run'
         shown = dst
 
     # run.cmd embeds the token/config (same posture as the macOS plist / Linux unit)
-    # and starts the agent detached.
+    # and runs the agent in-place (the VBS launches this cmd hidden, so the agent
+    # inherits that hidden console instead of opening its own visible window).
     with open(WIN_RUN_CMD, "w", encoding="utf-8") as fh:
         fh.write("@echo off\r\n")
         fh.write(f'set "MILES_AGENT_TOKEN={TOKEN}"\r\n')
@@ -2133,10 +2173,14 @@ def install_service_windows() -> int:
         fh.write('CreateObject("WScript.Shell").Run "cmd /c """ & "'
                  + WIN_RUN_CMD + '" & """", 0, False\r\n')
 
-    # Start it right now too (detached, no console window).
+    # Start it right now too (detached, no console window). DETACHED_PROCESS so
+    # it survives the installer exiting; CREATE_NO_WINDOW so nothing flashes.
     try:
         CREATE_NO_WINDOW = 0x08000000
-        subprocess.Popen(["cmd", "/c", WIN_RUN_CMD], creationflags=CREATE_NO_WINDOW)
+        DETACHED_PROCESS = 0x00000008
+        subprocess.Popen(["cmd", "/c", WIN_RUN_CMD],
+                         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                         close_fds=True)
     except Exception as e:
         print(f"warning: installed, but could not start immediately: {e}", file=sys.stderr)
 
