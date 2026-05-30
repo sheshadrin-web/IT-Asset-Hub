@@ -320,7 +320,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       "Open PowerShell and paste all four lines. This kills any running agent and",
       "removes its auto-start and files so no window can come back:",
       "",
-      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'MilesAgent|laptop_agent\\.py|\\.miles-agent' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'MilesAgent\\\\|laptop_agent\\.py|\\.miles-agent' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
       "Remove-Item \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\MilesAgent.vbs\" -Force -ErrorAction SilentlyContinue",
       "Remove-Item \"$env:LOCALAPPDATA\\MilesAgent\" -Recurse -Force -ErrorAction SilentlyContinue",
       "Remove-Item \"$env:USERPROFILE\\.miles-agent\" -Recurse -Force -ErrorAction SilentlyContinue",

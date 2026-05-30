@@ -1677,12 +1677,18 @@ def run_loop() -> int:
             if poll_commands():
                 revoked_strikes += 1
                 if revoked_strikes >= 2:
+                    # Token revoked server-side: the device is already removed, so
+                    # staying alive serves no purpose — we always stop. Still run
+                    # the local teardown and report its result honestly rather
+                    # than silently assuming the cleanup succeeded.
                     try:
-                        _self_uninstall()
-                    except Exception:
-                        pass
-                    print("Agent token revoked by portal — uninstalling and exiting.",
-                          file=sys.stderr)
+                        status, _msg, warn = _self_uninstall()
+                        if status != "completed":
+                            print(f"Token revoked; local cleanup incomplete: {warn}",
+                                  file=sys.stderr)
+                    except Exception as e:
+                        print(f"Token revoked; local cleanup error: {e}", file=sys.stderr)
+                    print("Agent token revoked by portal — exiting.", file=sys.stderr)
                     _final_self_destruct()
                     return 0
             else:
