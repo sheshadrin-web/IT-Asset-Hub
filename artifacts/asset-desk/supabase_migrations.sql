@@ -366,3 +366,17 @@ ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_role_check
   CHECK (role = ANY (ARRAY['super_admin'::text, 'it_admin'::text, 'hr_admin'::text, 'it_agent'::text, 'end_user'::text]));
+
+-- Allow the "Sim Card" asset type (follow-up fix).
+ALTER TABLE public.assets DROP CONSTRAINT IF EXISTS assets_asset_type_check;
+
+ALTER TABLE public.assets
+  ADD CONSTRAINT assets_asset_type_check
+  CHECK (asset_type = ANY (ARRAY[
+    'Laptop'::text, 'Desktop'::text, 'Monitor'::text, 'Mobile'::text, 'Tab'::text,
+    'Sim Card'::text, 'Camera'::text, 'CPU'::text, 'Generic Asset'::text,
+    'Keyboard'::text, 'Mouse'::text, 'Headset'::text, 'Hard Disk'::text,
+    'Speaker'::text, 'Docking Station'::text, 'Printer'::text, 'Router'::text,
+    'Server'::text, 'CCTV'::text, 'Smart TV'::text, 'Projector'::text,
+    'Network Device'::text, 'Firewall'::text
+  ]));
