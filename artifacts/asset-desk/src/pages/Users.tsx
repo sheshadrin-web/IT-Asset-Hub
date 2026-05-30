@@ -7,10 +7,12 @@ import {
   Upload, CheckSquare, User, KeyRound,
   ChevronUp, ChevronDown, ChevronsUpDown,
   Mail, Building2, MapPin, Hash, Briefcase, UserCircle, Monitor, CalendarDays, Ticket as TicketIcon,
+  Users as UsersIcon, ArrowRightLeft, History, ArrowRight,
 } from "lucide-react";
 import ColumnFilterDropdown from "@/components/ColumnFilterDropdown";
 import TablePagination from "@/components/TablePagination";
 import ManagerSearchField from "@/components/ManagerSearchField";
+import TransferReporteesModal from "@/components/TransferReporteesModal";
 import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import LocationSelect from "@/components/LocationSelect";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,7 +40,8 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
 import { Link } from "wouter";
-import { useUsers } from "@/context/UsersContext";
+import { useUsers, ManagerHistoryEntry } from "@/context/UsersContext";
+import { getDirectReports } from "@/lib/reportingManager";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useAuth } from "@/context/AuthContext";
@@ -51,6 +54,7 @@ import { cn } from "@/lib/utils";
 const roleColors: Record<UserRole, string> = {
   super_admin: "bg-purple-500/15 text-purple-600 border-purple-500/20",
   it_admin:    "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  hr_admin:    "bg-pink-500/15 text-pink-600 border-pink-500/20",
   it_agent:    "bg-cyan-500/15 text-cyan-600 border-cyan-500/20",
   end_user:    "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
 };
@@ -98,7 +102,7 @@ function makeEmptyUserColFilters(): Record<UserColKey, Set<string>> {
 const addSchema = z.object({
   full_name:         z.string().min(2, "Full name is required"),
   email:             z.string().email("Invalid email address"),
-  role:              z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
+  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"]),
   ecode:             z.string().optional(),
   department:        z.string().min(1, "Department is required"),
   location:          z.string().min(1, "Location is required"),
@@ -109,7 +113,7 @@ type AddFormValues = z.infer<typeof addSchema>;
 
 const editSchema = z.object({
   full_name:         z.string().min(2, "Required"),
-  role:              z.enum(["super_admin", "it_admin", "it_agent", "end_user"]),
+  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"]),
   ecode:             z.string().optional(),
   department:        z.string().min(1, "Required"),
   location:          z.string().min(1, "Required"),
@@ -141,7 +145,7 @@ function exportUsers(users: Profile[]) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
-  const { users, loading, error, refresh, updateUser, deleteUser } = useUsers();
+  const { users, loading, error, refresh, updateUser, deleteUser, changeReportingManager, fetchManagerHistory } = useUsers();
   const { assets, refresh: refreshAssets } = useAssets();
   const { tickets } = useTickets();
   const { currentUser } = useAuth();
@@ -197,6 +201,19 @@ export default function Users() {
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen]   = useState(false);
 
+  // Reporting manager transfer
+  const [transferOpen,        setTransferOpen]        = useState(false);
+  const [transferAffected,    setTransferAffected]    = useState<Profile[]>([]);
+  const [transferFromManager, setTransferFromManager] = useState<Profile | null>(null);
+  const [transferTitle,       setTransferTitle]       = useState<string | undefined>(undefined);
+
+  // Manager-change history (loaded when the View dialog opens)
+  const [managerHistory,     setManagerHistory]     = useState<ManagerHistoryEntry[]>([]);
+  const [historyLoading,     setHistoryLoading]     = useState(false);
+
+  // Deactivate-with-reportees warning
+  const [deactivateReports,  setDeactivateReports]  = useState<Profile[]>([]);
+
   // Import
   const [importOpen,    setImportOpen]    = useState(false);
   const [importLoading, setImportLoading] = useState(false);
@@ -213,7 +230,7 @@ export default function Users() {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
-  const isAdmin      = isSuperAdmin || currentUser?.role === "it_admin";
+  const isAdmin      = isSuperAdmin || currentUser?.role === "it_admin" || currentUser?.role === "hr_admin";
 
   // ── Bulk select helpers (uses toggleSelect/toggleSelectAll defined after filtered) ──
   const toggleSelect = (id: string) => {
@@ -619,6 +636,7 @@ export default function Users() {
   const roleCounts = {
     superAdmins: filtered.filter(u => u.role === "super_admin").length,
     itAdmins:    filtered.filter(u => u.role === "it_admin").length,
+    hrAdmins:    filtered.filter(u => u.role === "hr_admin").length,
     itAgents:    filtered.filter(u => u.role === "it_agent").length,
     endUsers:    filtered.filter(u => u.role === "end_user").length,
     active:      filtered.filter(u => u.status === "active").length,
@@ -652,7 +670,35 @@ export default function Users() {
   };
 
   // ── View user ──────────────────────────────────────────────────────────────
-  const openView = (user: Profile) => { setViewUserTab("hardware"); setViewingUser(user); };
+  const openView = (user: Profile) => {
+    setViewUserTab("hardware");
+    setViewingUser(user);
+    setManagerHistory([]);
+    setHistoryLoading(true);
+    fetchManagerHistory(user.id)
+      .then(setManagerHistory)
+      .catch(() => setManagerHistory([]))
+      .finally(() => setHistoryLoading(false));
+  };
+
+  // ── Reporting manager transfer ───────────────────────────────────────────────
+  // Open the transfer modal for a manager's direct reports.
+  const openTransferForManager = (manager: Profile) => {
+    const reports = getDirectReports(manager, users);
+    setTransferFromManager(manager);
+    setTransferAffected(reports);
+    setTransferTitle(`Transfer ${manager.full_name}'s Reportees`);
+    setTransferOpen(true);
+  };
+
+  // Open the transfer modal for an explicit set of selected employees.
+  const openTransferForSelection = () => {
+    const affected = users.filter(u => selectedUserIds.has(u.id));
+    setTransferFromManager(null);
+    setTransferAffected(affected);
+    setTransferTitle("Change Reporting Manager");
+    setTransferOpen(true);
+  };
 
   // ── Edit user ──────────────────────────────────────────────────────────────
   const openEdit = (user: Profile) => {
@@ -757,6 +803,26 @@ export default function Users() {
     if (!deactivateTarget) return;
     setActionSaving(deactivateTarget.id);
     try {
+      // 0. If this user manages anyone, unassign their direct reports first so the
+      //    reportees are not left pointing at a deactivated manager. The admin was
+      //    warned and chose "Continue Anyway"; "Transfer Now" routes elsewhere.
+      const reports = getDirectReports(deactivateTarget, users);
+      if (reports.length > 0) {
+        try {
+          await changeReportingManager(
+            reports.map(r => r.id),
+            null,
+            `Auto-unassigned: manager ${deactivateTarget.full_name} deactivated`,
+          );
+        } catch (unErr) {
+          toast({
+            title: "User deactivated, but reportees were not unassigned",
+            description: unErr instanceof Error ? unErr.message : "Please reassign them manually.",
+            variant: "destructive",
+          });
+        }
+      }
+
       // 1. Mark user inactive (blocks login).
       await updateUser(deactivateTarget.id, { ...deactivateTarget, status: "inactive" });
 
@@ -901,6 +967,7 @@ export default function Users() {
         {[
           { label: "Super Admin", val: roleCounts.superAdmins, color: "bg-purple-50 text-purple-700 border-purple-200" },
           { label: "IT Admin",    val: roleCounts.itAdmins,    color: "bg-blue-50 text-blue-700 border-blue-200" },
+          { label: "HR Admin",    val: roleCounts.hrAdmins,    color: "bg-pink-50 text-pink-700 border-pink-200" },
           { label: "IT Agent",    val: roleCounts.itAgents,    color: "bg-cyan-50 text-cyan-700 border-cyan-200" },
           { label: "End User",    val: roleCounts.endUsers,    color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
           { label: "Active",      val: roleCounts.active,      color: "bg-slate-100 text-slate-700 border-slate-200" },
@@ -939,6 +1006,7 @@ export default function Users() {
                 <SelectItem value="all">All Roles</SelectItem>
                 <SelectItem value="super_admin">Super Admin</SelectItem>
                 <SelectItem value="it_admin">IT Admin</SelectItem>
+                <SelectItem value="hr_admin">HR Admin</SelectItem>
                 <SelectItem value="it_agent">IT Agent</SelectItem>
                 <SelectItem value="end_user">End User</SelectItem>
               </SelectContent>
@@ -975,6 +1043,11 @@ export default function Users() {
             <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={clearSelection}>
               <X className="h-3.5 w-3.5" /> Clear
             </Button>
+            {isAdmin && (
+              <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={openTransferForSelection}>
+                <ArrowRightLeft className="h-3.5 w-3.5" /> Change Reporting Manager
+              </Button>
+            )}
             {isSuperAdmin && (
               <Button size="sm" variant="destructive" className="gap-1.5 h-7 text-xs" onClick={() => setBulkDeleteOpen(true)}>
                 <Trash2 className="h-3.5 w-3.5" /> Delete Selected
@@ -992,7 +1065,7 @@ export default function Users() {
               <thead>
                 <tr className="border-b border-border bg-muted/30">
                   <th className="px-4 py-3 w-10">
-                    {isSuperAdmin && (
+                    {isAdmin && (
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-border cursor-pointer accent-primary"
@@ -1062,7 +1135,7 @@ export default function Users() {
                       data-testid={`row-user-${user.id}`}
                     >
                       <td className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
-                        {isSuperAdmin && !isSelf && (
+                        {isAdmin && !isSelf && (
                           <input
                             type="checkbox"
                             className="h-4 w-4 rounded border-border cursor-pointer accent-primary"
@@ -1206,6 +1279,7 @@ export default function Users() {
               }
               return rm;
             })();
+            const directReports = getDirectReports(vu, users);
             const addedDate = vu.created_at
               ? new Date(vu.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
               : null;
@@ -1313,6 +1387,98 @@ export default function Users() {
                           <span>Added {addedDate}</span>
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Left — Team & Reporting */}
+                  <Card className="self-start lg:col-start-1">
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-base font-semibold text-foreground">Team &amp; Reporting</h3>
+                        {isAdmin && directReports.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 h-7 text-xs"
+                            onClick={() => { setViewingUser(null); openTransferForManager(vu); }}
+                            data-testid="button-view-user-transfer-reportees"
+                          >
+                            <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
+                          </Button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-3">
+                        <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <UsersIcon className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-foreground leading-none">{directReports.length}</p>
+                          <p className="text-[11px] text-muted-foreground mt-1">Total Direct Reports</p>
+                        </div>
+                      </div>
+                      {directReports.length > 0 && (
+                        <div className="mt-3 max-h-44 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                          {directReports.map(r => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => openView(r)}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+                            >
+                              <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                <UserCircle className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-foreground truncate">{r.full_name}</p>
+                                <p className="text-xs text-muted-foreground truncate">{r.department || r.email}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Manager-change history */}
+                      <div className="mt-5 pt-4 border-t border-border/70">
+                        <div className="flex items-center gap-1.5 mb-3">
+                          <History className="h-3.5 w-3.5 text-muted-foreground" />
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Manager History</h4>
+                        </div>
+                        {historyLoading ? (
+                          <p className="text-xs text-muted-foreground">Loading history…</p>
+                        ) : managerHistory.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No manager changes recorded.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {managerHistory.map(h => (
+                              <div key={h.id} className="flex gap-2.5">
+                                <div className="flex flex-col items-center pt-1">
+                                  <div className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
+                                  <div className="w-px flex-1 bg-border mt-1" />
+                                </div>
+                                <div className="min-w-0 flex-1 pb-1">
+                                  <p className="text-xs text-foreground">
+                                    {h.event_type === "unassigned" ? (
+                                      <>Manager <span className="font-medium">unassigned</span></>
+                                    ) : (
+                                      <>
+                                        Moved to <span className="font-medium">{h.new_manager_name || h.new_manager_email || "—"}</span>
+                                      </>
+                                    )}
+                                    {h.old_manager_name && (
+                                      <span className="text-muted-foreground"> (from {h.old_manager_name})</span>
+                                    )}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    {new Date(h.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                                    {h.event_by_name ? ` · by ${h.event_by_name}` : ""}
+                                  </p>
+                                  {h.notes && <p className="text-[10px] text-muted-foreground italic mt-0.5">"{h.notes}"</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -1590,6 +1756,7 @@ export default function Users() {
                       <SelectContent>
                         <SelectItem value="super_admin">Super Admin</SelectItem>
                         <SelectItem value="it_admin">IT Admin</SelectItem>
+                        <SelectItem value="hr_admin">HR Admin</SelectItem>
                         <SelectItem value="it_agent">IT Agent</SelectItem>
                         <SelectItem value="end_user">End User</SelectItem>
                       </SelectContent>
@@ -1772,6 +1939,7 @@ export default function Users() {
                                   <SelectContent>
                                     <SelectItem value="super_admin">Super Admin</SelectItem>
                                     <SelectItem value="it_admin">IT Admin</SelectItem>
+                                    <SelectItem value="hr_admin">HR Admin</SelectItem>
                                     <SelectItem value="it_agent">IT Agent</SelectItem>
                                     <SelectItem value="end_user">End User</SelectItem>
                                   </SelectContent>
@@ -1861,6 +2029,10 @@ export default function Users() {
       </Dialog>
 
       {/* ── Deactivate Confirm ─────────────────────────────────────────────────── */}
+      {(() => {
+        const deactReports = deactivateTarget ? getDirectReports(deactivateTarget, users) : [];
+        const hasReports = deactReports.length > 0;
+        return (
       <AlertDialog open={!!deactivateTarget} onOpenChange={v => !v && setDeactivateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1870,14 +2042,49 @@ export default function Users() {
               You can reactivate them at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {hasReports && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-amber-800">
+                  <p className="font-semibold">This user manages {deactReports.length} direct report{deactReports.length === 1 ? "" : "s"}.</p>
+                  <p className="mt-1 text-amber-700">
+                    Transfer their reportees to another manager first. If you continue anyway,
+                    those {deactReports.length} employee{deactReports.length === 1 ? "" : "s"} will be left <strong>unassigned</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {hasReports && deactivateTarget && (
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => { const t = deactivateTarget; setDeactivateTarget(null); openTransferForManager(t); }}
+              >
+                <ArrowRightLeft className="h-4 w-4" /> Transfer Now
+              </Button>
+            )}
             <AlertDialogAction className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleDeactivate}>
-              Deactivate
+              {hasReports ? "Continue Anyway" : "Deactivate"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        );
+      })()}
+
+      {/* ── Transfer Reportees ────────────────────────────────────────────────── */}
+      <TransferReporteesModal
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        affectedUsers={transferAffected}
+        fromManager={transferFromManager}
+        title={transferTitle}
+        onDone={() => { clearSelection(); refresh(); }}
+      />
 
       {/* ── Bulk Delete Confirm ───────────────────────────────────────────────── */}
       <AlertDialog open={bulkDeleteOpen} onOpenChange={v => !v && setBulkDeleteOpen(false)}>

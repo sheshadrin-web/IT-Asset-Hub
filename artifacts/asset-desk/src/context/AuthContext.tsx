@@ -33,7 +33,7 @@ function normaliseProfile(raw: Record<string, unknown>): Profile {
   raw.status = statusRaw === "inactive" ? "inactive" : "active";
 
   // Normalise role: already stored as snake_case in DB, validate it
-  const validRoles: UserRole[] = ["super_admin", "it_admin", "it_agent", "end_user"];
+  const validRoles: UserRole[] = ["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"];
   if (!validRoles.includes(raw.role as UserRole)) {
     console.warn("[AuthContext] Unknown role in profile:", raw.role);
   }
@@ -210,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log("[AuthContext] profile found:", { role: p.role, status: p.status });
 
     // Validate role
-    const validRoles: UserRole[] = ["super_admin", "it_admin", "it_agent", "end_user"];
+    const validRoles: UserRole[] = ["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"];
     if (!validRoles.includes(p.role)) {
       console.error("[AuthContext] Invalid role in profile:", p.role);
       await supabase.auth.signOut();

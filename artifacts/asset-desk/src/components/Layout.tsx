@@ -36,14 +36,15 @@ const navItems: NavItem[] = [
   { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
-  { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin"] },
-  { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent"] },
+  { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin", "hr_admin"] },
+  { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
   { label: "Settings",     icon: Settings,        href: "/settings",    roles: ["super_admin"] },
 ];
 
 const roleIconMap: Record<UserRole, React.ElementType> = {
   super_admin: Shield,
   it_admin:    Shield,
+  hr_admin:    Shield,
   it_agent:    UserCheck,
   end_user:    User,
 };

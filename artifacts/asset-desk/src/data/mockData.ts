@@ -1,10 +1,11 @@
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export type UserRole = "super_admin" | "it_admin" | "it_agent" | "end_user";
+export type UserRole = "super_admin" | "it_admin" | "hr_admin" | "it_agent" | "end_user";
 export type UserStatus = "active" | "inactive";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
   it_admin:    "IT Admin",
+  hr_admin:    "HR Admin",
   it_agent:    "IT Agent",
   end_user:    "End User",
 };

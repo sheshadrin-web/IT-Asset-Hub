@@ -262,12 +262,12 @@ function Router() {
 
       {/* Users — super_admin + it_admin */}
       <Route path="/users">
-        <ProtectedRoute component={Users} allowedRoles={["super_admin", "it_admin"]} />
+        <ProtectedRoute component={Users} allowedRoles={["super_admin", "it_admin", "hr_admin"]} />
       </Route>
 
       {/* Reports — admins and agents */}
       <Route path="/reports">
-        <ProtectedRoute component={Reports} allowedRoles={["super_admin", "it_admin", "it_agent"]} />
+        <ProtectedRoute component={Reports} allowedRoles={["super_admin", "it_admin", "it_agent", "hr_admin"]} />
       </Route>
 
       {/* Settings — super_admin only */}
