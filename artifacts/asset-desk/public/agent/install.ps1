@@ -144,7 +144,7 @@ if (-not (New-Venv)) {
     Stop-Install ("Could not download or install Python automatically — " + $_.Exception.Message + ". Install Python 3 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH'), then run this installer again.")
   }
   $fallbackPy = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
-  if (Test-Path $fallbackPy) { Remove-Venv; & $fallbackPy -m venv $VenvDir 2>$null | Out-Null }
+  if (Test-Path $fallbackPy) { Remove-Venv; Invoke-Native $fallbackPy @('-m','venv',$VenvDir) | Out-Null }
   if (-not (Test-VenvReady)) { New-Venv | Out-Null }
 }
 if (-not (Test-VenvReady)) {
