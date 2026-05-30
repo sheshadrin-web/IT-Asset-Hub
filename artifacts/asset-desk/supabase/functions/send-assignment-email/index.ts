@@ -38,7 +38,7 @@ function getIntro(firstName: string, reason: Reason, assetType: string, isRemind
 <p>An additional ${assetType.toLowerCase()} has been assigned to you. Kindly review the details below:</p>`;
   }
   return `<p>Hi ${firstName},</p>
-<p>As per the information received from HR, the following company assets have been assigned to you. Kindly review the details below:</p>`;
+<p>The following company assets have been assigned to you by the IT team. Kindly review the details below:</p>`;
 }
 
 function buildHtml(p: Record<string, string | undefined>, senderName: string, gmailUser: string): string {
@@ -65,6 +65,13 @@ function buildHtml(p: Record<string, string | undefined>, senderName: string, gm
       row("OS", p.operatingSystem), row("RAM", p.ram),
       row("Storage", p.storage), row("Asset Tag", p.assetId),
       row("Official Mobile No", p.phoneNumber),
+    ].join("");
+  } else if (assetType === "Sim Card") {
+    // Sim Card: show ONLY Official Mobile Number — never the ICCID/SIM Number.
+    details = [
+      row("Provider", p.simProvider),
+      row("Official Mobile No", p.phoneNumber),
+      row("Asset Tag", p.assetId),
     ].join("");
   } else if (assetType === "Desktop") {
     const monitor = p.monitorBrand && p.monitorModel

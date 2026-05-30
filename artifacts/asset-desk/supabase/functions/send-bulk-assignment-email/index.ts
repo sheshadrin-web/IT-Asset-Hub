@@ -30,6 +30,7 @@ interface BulkAsset {
   monitorBrand?:   string;
   monitorModel?:   string;
   monitorSize?:    string;
+  simProvider?:    string;
   accessories?:    string;
   ackToken:        string;
 }
@@ -56,7 +57,7 @@ function getIntro(firstName: string, reason: Reason, count: number): string {
 <p>The following additional IT ${plural} been assigned to you. Kindly review the details below:</p>`;
   }
   return `<p>Hi ${firstName},</p>
-<p>The following IT ${plural} been assigned to you as per information received from HR. Kindly review the details below:</p>`;
+<p>The following IT ${plural} been assigned to you by the IT team. Kindly review the details below:</p>`;
 }
 
 function row(label: string, value?: string): string {
@@ -71,6 +72,13 @@ function buildAssetSection(a: BulkAsset): string {
     details = [row("Asset Tag", a.assetId), row("Serial No", a.serialNumber), row("OS", a.operatingSystem), row("Processor", a.processor), row("RAM", a.ram), row("Storage", a.storage)].join("");
   } else if (a.assetType === "Mobile") {
     details = [row("Asset Tag", a.assetId), row("IMEI 1", a.imei1), row("IMEI 2", a.imei2), row("OS", a.operatingSystem), row("RAM", a.ram), row("Storage", a.storage), row("Official Mobile No", a.phoneNumber)].join("");
+  } else if (a.assetType === "Sim Card") {
+    // Sim Card: show ONLY Official Mobile Number — never the ICCID/SIM Number.
+    details = [
+      row("Asset Tag", a.assetId),
+      row("Provider", a.simProvider),
+      row("Official Mobile No", a.phoneNumber),
+    ].join("");
   } else if (a.assetType === "Desktop") {
     const monitor = a.monitorBrand && a.monitorModel ? `${a.monitorBrand} ${a.monitorModel}${a.monitorSize ? ` (${a.monitorSize})` : ""}` : undefined;
     details = [row("Asset Tag", a.assetId), row("Serial No", a.serialNumber), row("OS", a.operatingSystem), row("Processor", a.processor), row("RAM", a.ram), row("Storage", a.storage), row("Monitor", monitor), row("Keyboard", a.keyboard), row("Mouse", a.mouse)].join("");

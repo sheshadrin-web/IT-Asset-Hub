@@ -96,7 +96,7 @@ function buildAssignEmailHtml(params: {
   <h2 style="font-size: 18px; margin-bottom: 20px;">Company Asset Details</h2>
 
   <p>Hi ${firstName},</p>
-  <p>As per the information received from HR, the following company assets have been assigned to you. Kindly review the details below:</p>
+  <p>The following company assets have been assigned to you by the IT team. Kindly review the details below:</p>
 
   <p><strong>Assigned Assets:</strong></p>
 
