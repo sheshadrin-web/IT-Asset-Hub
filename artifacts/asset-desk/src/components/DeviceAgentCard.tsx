@@ -862,7 +862,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   )}
 
                   {/* Lock / Unlock toggle */}
-                  {device && !agentRemoved && (
+                  {device?.is_managed && (
                     device.is_locked ? (
                       <Button size="sm" variant="outline" className="gap-2 justify-start text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={unlockDevice} disabled={busy || removalPending} data-testid="button-unlock-device">
                         <Unlock className="h-4 w-4" /> Unlock
@@ -875,14 +875,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   )}
 
                   {/* Restart (force, with grace period) */}
-                  {device && !agentRemoved && (
+                  {device?.is_managed && (
                     <Button size="sm" variant="outline" className="gap-2 justify-start text-red-600 border-red-300 hover:bg-red-50" onClick={() => setShowForceRestart(true)} disabled={busy || removalPending} data-testid="button-force-restart">
                       <Power className="h-4 w-4" /> Restart
                     </Button>
                   )}
 
                   {/* Schedule restart */}
-                  {device && !agentRemoved && (
+                  {device?.is_managed && (
                     <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void requestRestart("schedule_restart")} disabled={busy || removalPending} data-testid="button-schedule-restart">
                       <RefreshCw className="h-4 w-4" /> Schedule Restart
                     </Button>
@@ -893,14 +893,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                       duplicate buttons. */}
 
                   {/* Notify restart */}
-                  {device && !agentRemoved && (
+                  {device?.is_managed && (
                     <Button size="sm" variant="outline" className="gap-2 justify-start" onClick={() => void requestRestart("notify_restart")} disabled={busy || removalPending} data-testid="button-notify-restart">
                       <Zap className="h-4 w-4" /> Notify Restart
                     </Button>
                   )}
 
                   {/* Remove agent (graceful) */}
-                  {device && !agentRemoved && (
+                  {device?.is_managed && (
                     <Button size="sm" variant="outline" className="gap-2 justify-start text-red-600 border-red-300 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowRemoveAgent(true); }} disabled={busy || removalPending} data-testid="button-remove-agent">
                       <Trash2 className="h-4 w-4" /> Remove Agent
                     </Button>
@@ -924,7 +924,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     More controls
                   </summary>
                   <div className="flex flex-wrap gap-2 px-3 pb-3">
-                    {device && !agentRemoved && (
+                    {device?.is_managed && (
                       <Button size="sm" variant="outline" className="gap-2 text-red-700 border-red-400 hover:bg-red-50" onClick={() => { setRemoveReason(""); setShowForceRemove(true); }} disabled={busy} data-testid="button-force-remove-agent">
                         <Ban className="h-4 w-4" /> Force Remove Agent from Portal
                       </Button>
