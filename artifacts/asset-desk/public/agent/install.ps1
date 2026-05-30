@@ -85,6 +85,27 @@ function New-Venv {
   return $false
 }
 
+# Run a native command (python/pip) capturing combined stdout+stderr WITHOUT
+# letting a stderr line become a terminating error. In Windows PowerShell 5.1,
+# `nativecmd 2>&1` under $ErrorActionPreference='Stop' turns ANY stderr output
+# (e.g. pip's harmless "Cache entry deserialization failed" warning) into a fatal
+# NativeCommandError that aborts the script. We localise EAP to 'Continue' here
+# and rely on $LASTEXITCODE (preserved after the call) to judge success/failure.
+function Invoke-Native {
+  param([Parameter(Mandatory)][string]$Exe, [string[]]$CmdArgs = @())
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $out = (& $Exe @CmdArgs 2>&1 | Out-String) }
+  finally { $ErrorActionPreference = $prev }
+  return $out
+}
+
+# Write each non-empty line of captured native output to the log.
+function Write-NativeOutput {
+  param([string]$Text)
+  foreach ($ln in ($Text -split "`r?`n")) { if ($ln.Trim()) { Write-Log $ln.TrimEnd() } }
+}
+
 # ── Pre-flight ──────────────────────────────────────────────────────────────
 if ([string]::IsNullOrWhiteSpace($Token)) {
   Write-Host 'ERROR: MILES_AGENT_TOKEN is not set. Copy the full command from the portal.' -ForegroundColor Red
@@ -134,15 +155,17 @@ Write-Log 'Python environment ready.' 'OK'
 # ── 3. Dependencies ─────────────────────────────────────────────────────────
 Write-Log 'Installing agent dependencies...'
 # Make sure pip exists inside the venv (some minimal Pythons ship without it),
-# then install with a few retries. We log pip's real output so a genuine failure
-# (network, proxy, SSL) is visible in install.log instead of a generic message.
-& $VenvPy -m ensurepip --upgrade 2>&1 | ForEach-Object { Write-Log $_ } 
-& $VenvPy -m pip install --disable-pip-version-check --upgrade pip 2>&1 | ForEach-Object { Write-Log $_ }
+# then install with a few retries. pip/python write progress AND warnings to
+# stderr, so every call goes through Invoke-Native to avoid a stderr warning
+# aborting the script; we log the real output for diagnosability.
+Write-NativeOutput (Invoke-Native $VenvPy @('-m','ensurepip','--upgrade'))
 $pipOk = $false
 foreach ($attempt in 1..3) {
-  $pipOut = (& $VenvPy -m pip install --disable-pip-version-check requests 2>&1 | Out-String)
-  if ($LASTEXITCODE -eq 0) { $pipOk = $true; break }
-  Write-Log ("pip attempt $attempt failed (exit $LASTEXITCODE): " + $pipOut.Trim()) 'WARN'
+  $pipOut = Invoke-Native $VenvPy @('-m','pip','install','--disable-pip-version-check','requests')
+  $pipCode = $LASTEXITCODE
+  Write-NativeOutput $pipOut
+  if ($pipCode -eq 0) { $pipOk = $true; break }
+  Write-Log ("pip attempt $attempt failed (exit $pipCode); retrying...") 'WARN'
   Start-Sleep -Seconds 3
 }
 if (-not $pipOk) {
@@ -161,7 +184,7 @@ Write-Log 'Agent key saved.' 'OK'
 
 # ── 5. Register (the agent prints JSON; we confirm success in the output) ────
 Write-Log 'Registering this device with the portal...'
-$regOut = (& $VenvPy $AgentScript register 2>&1 | Out-String)
+$regOut = Invoke-Native $VenvPy @($AgentScript, 'register')
 if ($regOut -notmatch '"success"\s*:\s*true') {
   Stop-Install ("Device registration failed: " + ($regOut.Trim()))
 }
@@ -169,7 +192,7 @@ Write-Log 'Device registered.' 'OK'
 
 # ── 6. First sync (non-fatal — the service retries) ─────────────────────────
 Write-Log 'Sending the first system sync...'
-$syncOut = (& $VenvPy $AgentScript sync 2>&1 | Out-String)
+$syncOut = Invoke-Native $VenvPy @($AgentScript, 'sync')
 if ($syncOut -match '"success"\s*:\s*true') {
   Write-Log 'Device synced.' 'OK'
 } else {
@@ -178,8 +201,10 @@ if ($syncOut -match '"success"\s*:\s*true') {
 
 # ── 7. Background service (auto-start at logon) ─────────────────────────────
 Write-Log 'Installing the background service (auto-start at logon)...'
-& $VenvPy $AgentScript install-service
-if ($LASTEXITCODE -ne 0) {
+$svcOut  = Invoke-Native $VenvPy @($AgentScript, 'install-service')
+$svcCode = $LASTEXITCODE
+Write-NativeOutput $svcOut
+if ($svcCode -ne 0) {
   Stop-Install 'The background service could not be installed.'
 }
 Write-Log 'Background service installed.' 'OK'
