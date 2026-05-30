@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
+import { useTickets } from "@/context/TicketContext";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -22,13 +23,9 @@ interface NavItem {
   roles: UserRole[];
 }
 
-interface Notif {
-  id:       string;
-  title:    string;
-  body:     string;
-  time:     Date;
-  read:     boolean;
-}
+// Notification read-state is only tracked for recent tickets — this caps how
+// many ticket IDs we ever persist to localStorage so it can't grow unbounded.
+const RECENT_LIMIT = 200;
 
 const navItems: NavItem[] = [
   { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "it_admin", "it_agent", "end_user"] },
@@ -69,22 +66,47 @@ function playBellSound() {
   } catch { /* AudioContext blocked in some environments */ }
 }
 
-function timeAgo(d: Date): string {
-  const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60)  return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
+function dayLabel(d: string): string {
+  if (!d) return "";
+  const today     = new Date().toISOString().split("T")[0];
+  const yesterday = new Date(Date.now() - 864e5).toISOString().split("T")[0];
+  if (d === today)     return "Today";
+  if (d === yesterday) return "Yesterday";
+  const parsed = new Date(`${d}T00:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? d
+    : parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen,          setSidebarOpen]          = useState(false);
   const [notifOpen,            setNotifOpen]            = useState(false);
   const [profileSettingsOpen,  setProfileSettingsOpen]  = useState(false);
-  const [notifs,               setNotifs]               = useState<Notif[]>([]);
+  const [readIds,              setReadIds]              = useState<Set<string>>(new Set());
   const [location]                                      = useLocation();
   const { currentUser, signOut }                        = useAuth();
+  const { tickets, loading: ticketsLoading, refresh: refreshTickets } = useTickets();
   const { toast }                                       = useToast();
   const notifRef                                        = useRef<HTMLDivElement>(null);
+  const seededRef                                       = useRef(false);
+
+  // Staff who triage tickets get new-ticket notifications.
+  const canSeeNotifs =
+    currentUser?.role === "super_admin" ||
+    currentUser?.role === "it_admin" ||
+    currentUser?.role === "it_agent";
+  const notifStorageKey = currentUser ? `miles-notif-read:${currentUser.userId}` : "";
+
+  // Load this user's persisted "read" ticket IDs so notifications survive reloads.
+  useEffect(() => {
+    seededRef.current = false;
+    if (!notifStorageKey) { setReadIds(new Set()); return; }
+    try {
+      const raw = localStorage.getItem(notifStorageKey);
+      if (raw) { setReadIds(new Set(JSON.parse(raw) as string[])); seededRef.current = true; }
+      else setReadIds(new Set());
+    } catch { setReadIds(new Set()); }
+  }, [notifStorageKey]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -94,34 +116,47 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const isAdmin = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+  // First load with no saved history: treat existing tickets as already seen so
+  // the admin isn't flooded with a badge for historical tickets. Only tickets
+  // that arrive afterwards count as unread. Wait for the initial fetch to settle.
+  useEffect(() => {
+    if (!notifStorageKey || seededRef.current || !canSeeNotifs || ticketsLoading) return;
+    const ids = tickets.slice(0, RECENT_LIMIT).map(t => t.ticketId);
+    try { localStorage.setItem(notifStorageKey, JSON.stringify(ids)); } catch { /* ignore */ }
+    setReadIds(new Set(ids));
+    seededRef.current = true;
+  }, [notifStorageKey, canSeeNotifs, ticketsLoading, tickets]);
 
   const handleNewTicket = useCallback((payload: Record<string, unknown>) => {
     const row = payload.new as Record<string, string> | undefined;
     playBellSound();
-    const n: Notif = {
-      id:    crypto.randomUUID(),
-      title: "New ticket raised",
-      body:  `${row?.ticket_id ?? "A ticket"} — ${row?.category ?? ""}`,
-      time:  new Date(),
-      read:  false,
-    };
-    setNotifs(prev => [n, ...prev].slice(0, 20));
-    toast({ title: n.title, description: n.body });
-  }, [toast]);
+    toast({ title: "New ticket raised", description: `${row?.ticket_id ?? "A ticket"} — ${row?.category ?? ""}` });
+    refreshTickets();
+  }, [toast, refreshTickets]);
 
   useEffect(() => {
-    if (!isAdmin || !supabaseConfigured) return;
+    if (!canSeeNotifs || !supabaseConfigured) return;
     const channel = supabase
       .channel("layout-new-tickets")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "tickets" }, handleNewTicket)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [isAdmin, handleNewTicket]);
+  }, [canSeeNotifs, handleNewTicket]);
 
   if (!currentUser) return null;
 
-  const unread       = notifs.filter(n => !n.read).length;
+  const notifItems = canSeeNotifs
+    ? tickets.slice(0, 20).map(t => ({
+        key:      t.id ?? t.ticketId,
+        ticketId: t.ticketId,
+        category: t.category,
+        raisedBy: t.raisedBy,
+        status:   t.status,
+        date:     t.createdDate,
+        read:     readIds.has(t.ticketId),
+      }))
+    : [];
+  const unread       = notifItems.filter(n => !n.read).length;
   const visibleItems = navItems.filter(item => item.roles.includes(currentUser.role));
   const initials     = currentUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
   const roleLabel    = ROLE_LABELS[currentUser.role];
@@ -131,7 +166,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return location.startsWith(item.href) && item.href !== "/";
   })?.label ?? "Page";
 
-  const markAllRead = () => setNotifs(prev => prev.map(n => ({ ...n, read: true })));
+  const recentTicketIds = new Set(tickets.slice(0, RECENT_LIMIT).map(t => t.ticketId));
+  const persistRead = (ids: Set<string>) => {
+    // Drop IDs for tickets that have aged out of (or never were in) the recent
+    // window so the persisted set stays bounded.
+    const bounded = new Set([...ids].filter(id => recentTicketIds.has(id)));
+    setReadIds(bounded);
+    if (notifStorageKey) {
+      try { localStorage.setItem(notifStorageKey, JSON.stringify([...bounded])); } catch { /* ignore */ }
+    }
+  };
+  const markAllRead = () => {
+    const ids = new Set(readIds);
+    notifItems.forEach(n => ids.add(n.ticketId));
+    persistRead(ids);
+  };
+  const markRead = (ticketId: string) => {
+    if (readIds.has(ticketId)) return;
+    const ids = new Set(readIds);
+    ids.add(ticketId);
+    persistRead(ids);
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -249,7 +304,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Notification bell — admins only */}
+            {/* Notification bell — staff who triage tickets */}
+            {canSeeNotifs && (
             <div className="relative" ref={notifRef}>
               <Button
                 variant="ghost" size="icon"
@@ -276,13 +332,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <span className="rounded-full bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5">{unread}</span>
                       )}
                     </div>
-                    {notifs.length > 0 && (
+                    {unread > 0 && (
                       <button onClick={markAllRead} className="text-xs text-primary hover:underline font-medium">Mark all read</button>
                     )}
                   </div>
 
                   <div className="max-h-72 overflow-y-auto">
-                    {notifs.length === 0 ? (
+                    {notifItems.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-10 gap-2">
                         <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
                           <Bell className="h-5 w-5 text-muted-foreground/40" />
@@ -291,29 +347,31 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <p className="text-xs text-muted-foreground/60 text-center px-6">New ticket alerts will appear here in real time</p>
                       </div>
                     ) : (
-                      notifs.map(n => (
-                        <div
-                          key={n.id}
+                      notifItems.map(n => (
+                        <Link
+                          key={n.key}
+                          href={`/tickets/${n.ticketId}`}
+                          onClick={() => { markRead(n.ticketId); setNotifOpen(false); }}
                           className={cn(
-                            "flex items-start gap-3 px-4 py-3 border-b border-border/60 last:border-0 transition-colors",
-                            !n.read ? "bg-blue-50/50" : "hover:bg-accent/40"
+                            "flex items-start gap-3 px-4 py-3 border-b border-border/60 last:border-0 transition-colors cursor-pointer",
+                            !n.read ? "bg-blue-50/50 hover:bg-blue-50" : "hover:bg-accent/40"
                           )}
                         >
                           <div className={cn("mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0", !n.read ? "bg-blue-100" : "bg-muted")}>
                             <Zap className={cn("h-3.5 w-3.5", !n.read ? "text-blue-600" : "text-muted-foreground")} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={cn("text-xs font-semibold truncate", !n.read ? "text-foreground" : "text-muted-foreground")}>{n.title}</p>
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">{n.body}</p>
-                            <p className="text-[10px] text-muted-foreground/60 mt-1">{timeAgo(n.time)}</p>
+                            <p className={cn("text-xs font-semibold truncate", !n.read ? "text-foreground" : "text-muted-foreground")}>{n.ticketId} — {n.category}</p>
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">Raised by {n.raisedBy} · {n.status}</p>
+                            <p className="text-[10px] text-muted-foreground/60 mt-1">{dayLabel(n.date)}</p>
                           </div>
                           {!n.read && <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
-                        </div>
+                        </Link>
                       ))
                     )}
                   </div>
 
-                  {notifs.length > 0 && (
+                  {notifItems.length > 0 && (
                     <div className="border-t border-border px-4 py-2.5 bg-muted/20">
                       <Link href="/tickets" onClick={() => setNotifOpen(false)} className="text-xs text-primary hover:underline font-medium">
                         View all tickets →
@@ -323,6 +381,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </div>
               )}
             </div>
+            )}
 
           </div>
         </header>
