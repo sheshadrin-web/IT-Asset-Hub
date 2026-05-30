@@ -248,6 +248,7 @@ export default function Users() {
 
   // ── Bulk status / role / export actions ──────────────────────────────────────
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDeactivateOpen, setBulkDeactivateOpen] = useState(false);
 
   const bulkSetStatus = async (status: UserStatus) => {
     const targets = users.filter(u => selectedUserIds.has(u.id) && u.status !== status);
@@ -861,95 +862,122 @@ export default function Users() {
   };
 
   // ── Deactivate ─────────────────────────────────────────────────────────────
+  // Core offboarding routine shared by the single- and bulk-deactivate paths so
+  // both enforce the identical manager-exit rules. Unassigns the user's direct
+  // reports (audit/history written atomically by the RPC), marks the user
+  // inactive, flags their assigned assets for Recovery Stage, and locks any
+  // managed laptops. Throws if unassigning reportees or the status update fails,
+  // so a manager is never left active-looking with reportees half-detached.
+  const runDeactivation = async (
+    target: Profile,
+  ): Promise<{ recoveryCount: number; lockedCount: number }> => {
+    // 0. Unassign direct reports so they are not left pointing at an inactive
+    //    manager. "Transfer Now" reassigns them first; "Continue Anyway" lands
+    //    here and detaches them.
+    const reports = getDirectReports(target, users);
+    if (reports.length > 0) {
+      await changeReportingManager(
+        reports.map(r => r.id),
+        null,
+        `Auto-unassigned: manager ${target.full_name} deactivated`,
+      );
+    }
+
+    // 1. Mark user inactive (blocks login).
+    await updateUser(target.id, { ...target, status: "inactive" });
+
+    // 2. Move currently-Assigned assets to "Recovery Stage" so IT can chase the
+    //    recovery without losing assignment history (non-fatal).
+    let recoveryCount = 0;
+    try {
+      const { data: updatedRows, error: recErr } = await supabase
+        .from("assets")
+        .update({ status: "Recovery Stage" })
+        .eq("assigned_to", target.id)
+        .eq("status", "Assigned")
+        .select("asset_id");
+      if (recErr) throw recErr;
+      recoveryCount = updatedRows?.length ?? 0;
+      if (recoveryCount > 0) await refreshAssets();
+    } catch {
+      /* non-fatal: user is already inactive */
+    }
+
+    // 3. Auto-lock any managed laptop(s) assigned to this user (best-effort).
+    let lockedCount = 0;
+    try {
+      const { data: userAssets } = await supabase
+        .from("assets")
+        .select("id")
+        .eq("assigned_to", target.id);
+      for (const a of (userAssets ?? []) as { id: string }[]) {
+        const { data: lr } = await supabase.rpc("lock_device", {
+          p_asset_id: a.id,
+          p_reason: "Employee offboarded",
+        });
+        if (lr?.success) lockedCount++;
+      }
+    } catch {
+      /* swallow — locking is best-effort and must not block deactivation */
+    }
+
+    return { recoveryCount, lockedCount };
+  };
+
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;
-    setActionSaving(deactivateTarget.id);
+    const target = deactivateTarget;
+    setActionSaving(target.id);
     try {
-      // 0. If this user manages anyone, unassign their direct reports first so the
-      //    reportees are not left pointing at a deactivated manager. The admin was
-      //    warned and chose "Continue Anyway"; "Transfer Now" routes elsewhere.
-      const reports = getDirectReports(deactivateTarget, users);
-      if (reports.length > 0) {
-        try {
-          await changeReportingManager(
-            reports.map(r => r.id),
-            null,
-            `Auto-unassigned: manager ${deactivateTarget.full_name} deactivated`,
-          );
-        } catch (unErr) {
-          toast({
-            title: "User deactivated, but reportees were not unassigned",
-            description: unErr instanceof Error ? unErr.message : "Please reassign them manually.",
-            variant: "destructive",
-          });
-        }
-      }
-
-      // 1. Mark user inactive (blocks login).
-      await updateUser(deactivateTarget.id, { ...deactivateTarget, status: "inactive" });
-
-      // 2. Auto-move all of this user's currently-Assigned assets to "Recovery Stage"
-      //    so IT can chase the recovery without losing the assignment history.
-      //    We keep assigned_to / assigned_email / assigned_to_name intact — only the
-      //    status changes. Returning the asset via the normal flow clears the user.
-      let recoveryCount = 0;
-      try {
-        const { data: updatedRows, error: recErr } = await supabase
-          .from("assets")
-          .update({ status: "Recovery Stage" })
-          .eq("assigned_to", deactivateTarget.id)
-          .eq("status", "Assigned")
-          .select("asset_id");
-        if (recErr) throw recErr;
-        recoveryCount = updatedRows?.length ?? 0;
-        if (recoveryCount > 0) {
-          await refreshAssets();
-        }
-      } catch (recErr) {
-        // Non-fatal: user is already deactivated; surface a warning toast.
-        toast({
-          title: "User deactivated, but asset recovery flag failed",
-          description: recErr instanceof Error ? recErr.message : "Please flag their assets manually.",
-          variant: "destructive",
-        });
-      }
-
-      // 3. Auto-lock any managed laptop(s) assigned to this user so the
-      //    offboarded employee can no longer use the device. Data is preserved;
-      //    IT unlocks from the asset page to re-grant access. Non-fatal: the user
-      //    is already deactivated, and lock_device no-ops for assets without an
-      //    installed agent (the RPC returns an error we simply skip).
-      let lockedCount = 0;
-      try {
-        const { data: userAssets } = await supabase
-          .from("assets")
-          .select("id")
-          .eq("assigned_to", deactivateTarget.id);
-        for (const a of (userAssets ?? []) as { id: string }[]) {
-          const { data: lr } = await supabase.rpc("lock_device", {
-            p_asset_id: a.id,
-            p_reason: "Employee offboarded",
-          });
-          if (lr?.success) lockedCount++;
-        }
-      } catch {
-        // Swallow — locking is best-effort and must not block deactivation.
-      }
-
+      const { recoveryCount, lockedCount } = await runDeactivation(target);
       const lockNote = lockedCount > 0
         ? ` ${lockedCount} managed laptop${lockedCount === 1 ? "" : "s"} locked.`
         : "";
       toast({
         title: "User deactivated",
         description: (recoveryCount > 0
-          ? `${deactivateTarget.full_name} can no longer log in. ${recoveryCount} asset${recoveryCount === 1 ? "" : "s"} flagged as Recovery Stage.`
-          : `${deactivateTarget.full_name} can no longer log in.`) + lockNote,
+          ? `${target.full_name} can no longer log in. ${recoveryCount} asset${recoveryCount === 1 ? "" : "s"} flagged as Recovery Stage.`
+          : `${target.full_name} can no longer log in.`) + lockNote,
       });
     } catch (err) {
       toast({ title: "Failed to deactivate", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setActionSaving(null);
       setDeactivateTarget(null);
+    }
+  };
+
+  // Bulk deactivate routes through the same exit workflow: it opens a warning
+  // dialog when any selected user manages reportees, then runs runDeactivation
+  // per user (which unassigns reportees with history logging).
+  const openBulkDeactivate = () => {
+    const targets = users.filter(u => selectedUserIds.has(u.id) && u.status !== "inactive");
+    if (targets.length === 0) {
+      toast({ title: "Nothing to update", description: "All selected users are already inactive." });
+      return;
+    }
+    setBulkDeactivateOpen(true);
+  };
+
+  const performBulkDeactivate = async () => {
+    const targets = users.filter(u => selectedUserIds.has(u.id) && u.status !== "inactive");
+    setBulkBusy(true);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const u of targets) {
+      try { await runDeactivation(u); ok++; } catch { failed.push(u.full_name); }
+    }
+    setBulkBusy(false);
+    setBulkDeactivateOpen(false);
+    if (failed.length === 0) {
+      clearSelection();
+      toast({ title: "Users deactivated", description: `${ok} user${ok !== 1 ? "s" : ""} deactivated; any reportees were unassigned.` });
+    } else {
+      toast({
+        title: "Partial update",
+        description: `${ok} deactivated, ${failed.length} failed${failed.length <= 3 ? ` (${failed.join(", ")})` : ""}. Selection kept so you can retry.`,
+        variant: "destructive",
+      });
     }
   };
 
@@ -1110,7 +1138,7 @@ export default function Users() {
                 <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => bulkSetStatus("active")} disabled={bulkBusy}>
                   <UserCheck className="h-3.5 w-3.5" /> Activate
                 </Button>
-                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => bulkSetStatus("inactive")} disabled={bulkBusy}>
+                <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={openBulkDeactivate} disabled={bulkBusy}>
                   <UserX className="h-3.5 w-3.5" /> Deactivate
                 </Button>
                 <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={exportSelected} disabled={bulkBusy}>
@@ -2207,6 +2235,71 @@ export default function Users() {
             )}
             <AlertDialogAction className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleDeactivate}>
               {hasReports ? "Continue Anyway" : "Deactivate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+        );
+      })()}
+
+      {/* ── Bulk Deactivate Confirm ────────────────────────────────────────────── */}
+      {(() => {
+        const targets = users.filter(u => selectedUserIds.has(u.id) && u.status !== "inactive");
+        const managersWithReports = targets.filter(u => getDirectReports(u, users).length > 0);
+        const totalReports = managersWithReports.reduce((n, u) => n + getDirectReports(u, users).length, 0);
+        const hasReports = managersWithReports.length > 0;
+        return (
+      <AlertDialog open={bulkDeactivateOpen} onOpenChange={v => !v && !bulkBusy && setBulkDeactivateOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {targets.length} User{targets.length === 1 ? "" : "s"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              The selected user{targets.length === 1 ? "" : "s"} will be set to Inactive and will no longer be able to log in.
+              You can reactivate them at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {hasReports && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-amber-800">
+                  <p className="font-semibold">
+                    {managersWithReports.length} selected user{managersWithReports.length === 1 ? "" : "s"} manage{managersWithReports.length === 1 ? "s" : ""} {totalReports} direct report{totalReports === 1 ? "" : "s"}.
+                  </p>
+                  <p className="mt-1 text-amber-700">
+                    Transfer their reportees to another manager first. If you continue anyway,
+                    those {totalReports} employee{totalReports === 1 ? "" : "s"} will be left <strong>unassigned</strong> (recorded in their history).
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
+            {hasReports && (
+              <Button
+                variant="outline"
+                className="gap-1.5"
+                disabled={bulkBusy}
+                onClick={() => {
+                  const reportees = managersWithReports.flatMap(m => getDirectReports(m, users));
+                  const uniq = Array.from(new Map(reportees.map(r => [r.id, r])).values());
+                  setBulkDeactivateOpen(false);
+                  setTransferFromManager(null);
+                  setTransferAffected(uniq);
+                  setTransferTitle("Transfer Reportees Before Deactivation");
+                  setTransferOpen(true);
+                }}
+              >
+                <ArrowRightLeft className="h-4 w-4" /> Transfer Now
+              </Button>
+            )}
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              disabled={bulkBusy}
+              onClick={e => { e.preventDefault(); performBulkDeactivate(); }}
+            >
+              {bulkBusy ? "Deactivating…" : hasReports ? "Continue Anyway" : "Deactivate"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
