@@ -1008,18 +1008,18 @@ export default function Users() {
             <Download className="h-4 w-4" /> Export
           </Button>
           {isSuperAdmin && (
-            <>
-              <Button
-                variant="outline" size="sm" className="gap-2"
-                onClick={() => { setImportRows([]); setImportOpen(true); }}
-                data-testid="button-import-users"
-              >
-                <Upload className="h-4 w-4" /> Import Users
-              </Button>
-              <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
-                <Plus className="h-4 w-4" /> Add User
-              </Button>
-            </>
+            <Button
+              variant="outline" size="sm" className="gap-2"
+              onClick={() => { setImportRows([]); setImportOpen(true); }}
+              data-testid="button-import-users"
+            >
+              <Upload className="h-4 w-4" /> Import Users
+            </Button>
+          )}
+          {isAdmin && (
+            <Button size="sm" className="gap-2" onClick={openAdd} data-testid="button-add-user">
+              <Plus className="h-4 w-4" /> Add User
+            </Button>
           )}
         </div>
       </div>

@@ -64,7 +64,7 @@ export function UsersProvider({ children }: { children: ReactNode }) {
   const [users,   setUsers]   = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
-  const { isAuthenticated, currentUser } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const fetchUsers = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -113,56 +113,23 @@ export function UsersProvider({ children }: { children: ReactNode }) {
     if (ids.length === 0) return { count: 0, batchId: "" };
 
     const newEmail = (newManagerEmail ?? "").trim();
-    const isUnassign = newEmail === "";
-    const newManager = isUnassign
-      ? undefined
-      : users.find(u => u.email.trim().toLowerCase() === newEmail.toLowerCase());
-    const newManagerName = newManager?.full_name ?? (isUnassign ? null : newEmail);
 
-    // 1. Bulk update the profiles.
-    const { error: updErr } = await supabase
-      .from("profiles")
-      .update({ reporting_manager: newEmail, updated_at: new Date().toISOString() })
-      .in("id", ids);
-    if (updErr) throw new Error(updErr.message);
-
-    // 2. Build one audit-trail row per affected user, capturing the old manager.
-    const batchId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
-    const affected = users.filter(u => ids.includes(u.id));
-    const rows = affected.map(u => {
-      const oldEmail = (u.reporting_manager ?? "").trim();
-      const oldManager = oldEmail
-        ? users.find(m => m.email.trim().toLowerCase() === oldEmail.toLowerCase())
-        : undefined;
-      return {
-        batch_id:          batchId,
-        user_id:           u.id,
-        user_name:         u.full_name,
-        user_email:        u.email,
-        event_type:        isUnassign ? "unassigned" : "reassigned",
-        old_manager_email: oldEmail || null,
-        old_manager_name:  oldManager?.full_name ?? (oldEmail || null),
-        new_manager_email: isUnassign ? null : newEmail,
-        new_manager_name:  newManagerName,
-        affected_count:    ids.length,
-        event_by:          currentUser?.userId ?? null,
-        event_by_name:     currentUser?.name ?? null,
-        notes:             notes ?? null,
-      };
+    // Reassignment + audit/history write happen atomically inside a single
+    // Postgres transaction (the change_reporting_manager RPC). The transfer can
+    // never succeed without its audit trail — if either step fails, both roll
+    // back and the error surfaces here.
+    const { data, error } = await supabase.rpc("change_reporting_manager", {
+      p_user_ids:          ids,
+      p_new_manager_email: newEmail,
+      p_notes:             notes ?? null,
     });
+    if (error) throw new Error(error.message);
 
-    // 3. Record the audit trail. Non-fatal: the reassignment already succeeded,
-    //    so surface a warning rather than rolling back if history write fails.
-    const { error: histErr } = await supabase.from("reporting_manager_history").insert(rows);
-    if (histErr) {
-      toast({
-        title: "Manager updated, but history was not recorded",
-        description: histErr.message,
-        variant: "destructive",
-      });
-    }
+    const result = (data ?? {}) as { count?: number; batch_id?: string | null };
+    const count = result.count ?? ids.length;
+    const batchId = result.batch_id ?? "";
 
-    // 4. Update local state.
+    // Reflect the change in local state.
     setUsers(prev =>
       prev.map(u =>
         ids.includes(u.id)
@@ -171,7 +138,7 @@ export function UsersProvider({ children }: { children: ReactNode }) {
       ),
     );
 
-    return { count: ids.length, batchId };
+    return { count, batchId };
   };
 
   const fetchManagerHistory = async (userId: string): Promise<ManagerHistoryEntry[]> => {

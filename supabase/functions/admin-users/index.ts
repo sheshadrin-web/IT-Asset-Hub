@@ -68,7 +68,7 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ── Verify the caller is super_admin ──────────────────────────────────────
+    // ── Verify the caller is a privileged admin ───────────────────────────────
     // Use adminClient (service role) so RLS never blocks this check.
     const { data: callerProfile, error: profileErr } = await adminClient
       .from("profiles")
@@ -90,13 +90,20 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Forbidden — caller profile not found" }, 403);
     }
 
-    if (callerProfile.role !== "super_admin") {
-      return json({ error: "Forbidden — only super_admin can perform this action" }, 403);
+    // Super Admin, IT Admin, and HR Admin may manage users.
+    const ADMIN_ROLES = ["super_admin", "it_admin", "hr_admin"];
+    if (!ADMIN_ROLES.includes(callerProfile.role)) {
+      return json({ error: "Forbidden — you do not have permission to manage users" }, 403);
     }
 
     // ── Parse request body ────────────────────────────────────────────────────
     const body = await req.json();
     const { action, payload: p } = body as { action: string; payload: Record<string, unknown> };
+
+    // Permanent deletion stays restricted to Super Admin (matches the UI gate).
+    if (action === "deleteUser" && callerProfile.role !== "super_admin") {
+      return json({ error: "Forbidden — only super_admin can permanently delete users" }, 403);
+    }
 
     switch (action) {
 
