@@ -1173,7 +1173,7 @@ export default function Users() {
 
       {/* ── View User Dialog (TechOps-style two-column profile page) ────────── */}
       <Dialog open={!!viewingUser} onOpenChange={v => !v && setViewingUser(null)}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0 gap-0">
+        <DialogContent showCloseButton={false} className="max-w-5xl max-h-[92vh] overflow-y-auto p-0 gap-0">
           {viewingUser && (() => {
             const vu = viewingUser;
             const initials = vu.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
