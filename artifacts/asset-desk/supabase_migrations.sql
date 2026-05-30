@@ -359,3 +359,10 @@ CREATE POLICY "rmh_select" ON public.reporting_manager_history
 CREATE POLICY "rmh_insert" ON public.reporting_manager_history
   FOR INSERT TO authenticated
   WITH CHECK (current_user_role() IN ('super_admin', 'it_admin', 'hr_admin'));
+
+-- Allow the hr_admin role on profiles (Task #1 follow-up fix).
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+
+ALTER TABLE public.profiles
+  ADD CONSTRAINT profiles_role_check
+  CHECK (role = ANY (ARRAY['super_admin'::text, 'it_admin'::text, 'hr_admin'::text, 'it_agent'::text, 'end_user'::text]));
