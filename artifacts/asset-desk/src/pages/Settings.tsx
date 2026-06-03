@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 import { LoadErrorBanner } from "@/components/LoadErrorBanner";
-import { Bell, Shield, Monitor, Loader2 } from "lucide-react";
+import { Bell, Shield, Monitor, Loader2, Plug, ChevronRight } from "lucide-react";
 
 interface OrgSettings {
   org_name:            string;
@@ -124,6 +125,21 @@ export default function Settings() {
           You can view these settings, but only a Super Admin can change them.
         </div>
       )}
+
+      <Link href="/settings/integrations" data-testid="link-integrations">
+        <Card className="cursor-pointer transition-colors hover:bg-accent/40">
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <Plug className="h-5 w-5 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Integrations</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Connect HR portals (Zoho People, Keka) to automate onboarding, offboarding &amp; asset recovery</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          </CardContent>
+        </Card>
+      </Link>
 
       <Card>
         <CardHeader>

@@ -33,6 +33,7 @@ const TicketDetail = lazy(() => import("@/pages/TicketDetail"));
 const Users = lazy(() => import("@/pages/Users"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const Integrations = lazy(() => import("@/pages/Integrations"));
 const MyAssets = lazy(() => import("@/pages/MyAssets"));
 const ReturnAsset = lazy(() => import("@/pages/ReturnAsset"));
 const BulkImport = lazy(() => import("@/pages/BulkImport"));
@@ -271,6 +272,9 @@ function Router() {
       </Route>
 
       {/* Settings — super_admin only */}
+      <Route path="/settings/integrations">
+        <ProtectedRoute component={Integrations} allowedRoles={["super_admin"]} />
+      </Route>
       <Route path="/settings">
         <ProtectedRoute component={Settings} allowedRoles={["super_admin"]} />
       </Route>
