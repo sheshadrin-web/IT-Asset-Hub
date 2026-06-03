@@ -2,7 +2,6 @@ import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
   TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight,
-  Users as UsersIcon, UserMinus, Network, Award, RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
-import { buildReportingStructure } from "@/lib/reportingManager";
 import { cn } from "@/lib/utils";
 import { useManagedDevices } from "@/hooks/useManagedDevices";
 import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
@@ -235,21 +233,6 @@ export default function Dashboard() {
     return <EndUserDashboard userName={currentUser.name} />;
   }
 
-  // Manager hierarchy overview metrics
-  const reportingGroups = buildReportingStructure(users);
-  const totalManagers = reportingGroups.length;
-  const managersWithReports = reportingGroups.filter(g => g.manager.status === "active").length;
-  const employeesWithoutManager = users.filter(
-    u => u.status === "active" && !(u.reporting_manager ?? "").trim(),
-  ).length;
-  const largestTeamSize = reportingGroups.reduce((m, g) => Math.max(m, g.reports.length), 0);
-  const hierarchyStats = [
-    { label: "Total Managers", value: totalManagers, icon: UsersIcon, color: "text-blue-600", bg: "bg-blue-500/10" },
-    { label: "Employees Without Manager", value: employeesWithoutManager, icon: UserMinus, color: "text-amber-600", bg: "bg-amber-500/10" },
-    { label: "Managers With Direct Reports", value: managersWithReports, icon: Network, color: "text-violet-600", bg: "bg-violet-500/10" },
-    { label: "Largest Team Size", value: largestTeamSize, icon: Award, color: "text-emerald-600", bg: "bg-emerald-500/10" },
-  ];
-
   const assetStatusData = [
     { name: "In Procurement", value: assets.filter((a) => a.status === "In Procurement").length, color: "#f97316" },
     { name: "Available",      value: assets.filter((a) => a.status === "Available").length,      color: "#22c55e" },
@@ -303,50 +286,6 @@ export default function Dashboard() {
           <StatCard key={card.label} {...card} />
         ))}
       </div>
-
-      {/* Devices Pending Restart — summary card */}
-      <a href="#devices-pending-restart" className="block group">
-        <Card className="cursor-pointer hover:shadow-md transition-all duration-200 overflow-hidden border-amber-200">
-          <div className="h-0.5 bg-amber-500 w-full" />
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="inline-flex rounded-xl p-2.5 bg-amber-50">
-              <RotateCcw className="h-5 w-5 text-amber-600" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-2xl font-bold text-foreground leading-none">{restartPending.length}</div>
-              <div className="text-xs text-muted-foreground mt-1 leading-tight font-medium">
-                Devices Pending Restart · up over {restartThresholdDays} days
-              </div>
-            </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors ml-auto" />
-          </CardContent>
-        </Card>
-      </a>
-
-      {/* Manager Hierarchy Overview */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Network className="h-4 w-4 text-muted-foreground" />
-            Manager Hierarchy Overview
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {hierarchyStats.map((s) => (
-              <div key={s.label} className="flex items-center gap-3 rounded-xl border border-card-border/70 glass-surface premium-lift px-4 py-3">
-                <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0", s.bg)}>
-                  <s.icon className={cn("h-5 w-5", s.color)} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-2xl font-bold text-foreground leading-none">{s.value}</p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-tight">{s.label}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* HR & Asset Recovery overview */}
       <HrOverview />
