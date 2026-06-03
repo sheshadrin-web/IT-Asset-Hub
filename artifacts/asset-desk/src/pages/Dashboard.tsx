@@ -18,6 +18,7 @@ import { useManagedDevices } from "@/hooks/useManagedDevices";
 import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
 import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
 import HrOverview from "@/components/dashboard/HrOverview";
+import ManagerHierarchy from "@/components/dashboard/ManagerHierarchy";
 import { useState } from "react";
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -286,6 +287,9 @@ export default function Dashboard() {
           <StatCard key={card.label} {...card} />
         ))}
       </div>
+
+      {/* Manager hierarchy overview */}
+      <ManagerHierarchy />
 
       {/* HR & Asset Recovery overview */}
       <HrOverview />

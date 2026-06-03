@@ -125,6 +125,13 @@ export interface HrDashboardSummary {
   recovery_overdue: number;
 }
 
+export interface ManagerHierarchyOverview {
+  total_managers: number;
+  employees_without_manager: number;
+  managers_with_direct_reports: number;
+  largest_team_size: number;
+}
+
 export const RECOVERY_STATUS_META: Record<
   RecoveryStatus,
   { label: string; badge: "secondary" | "default" | "destructive" | "outline"; dot: string }
