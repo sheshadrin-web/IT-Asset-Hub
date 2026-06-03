@@ -43,12 +43,13 @@ export default function Integrations() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3" data-testid="banner-integrations-preview">
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3" data-testid="banner-integrations-info">
         <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
         <p className="text-sm text-blue-800">
-          This is the configuration interface. Live employee sync with Zoho People / Keka — and the resulting
-          onboarding, offboarding, and asset-recovery automation — is enabled in a later phase once the backend
-          and your HR portal API credentials are connected.
+          Connect a portal, then run a sync to pull employees. New joiners appear in the Onboarding Queue and
+          departures move their assigned assets into Recovery Mode automatically. The current build ships with a
+          demo employee feed so you can see the full flow; live Zoho People / Keka API calls activate once real
+          API credentials are validated.
         </p>
       </div>
 

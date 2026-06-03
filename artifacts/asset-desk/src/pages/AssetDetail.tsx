@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import DeviceAgentCard from "@/components/DeviceAgentCard";
+import RecoveryCard from "@/components/asset/RecoveryCard";
 import AssetKpiCards from "@/components/asset/AssetKpiCards";
 import AssetActivityTimeline, {
   type TimelineCommand,
@@ -924,6 +925,9 @@ export default function AssetDetail() {
 
           {/* ── Device Agent (Laptops only) ───────────────── */}
           {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
+
+          {/* ── Asset Recovery (only when a recovery is in progress) ─────── */}
+          {asset.id && <RecoveryCard assetId={asset.id} />}
         </div>
       </div>
 

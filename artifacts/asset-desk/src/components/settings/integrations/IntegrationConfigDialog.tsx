@@ -9,11 +9,11 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
 import {
   type ProviderDef, type SyncFrequency, SYNC_FREQUENCY_OPTIONS,
 } from "@/lib/hrIntegrations";
-import { PlugZap, FlaskConical } from "lucide-react";
+import type { IntegrationRow } from "@/lib/hrSyncTypes";
+import { PlugZap, ShieldCheck } from "lucide-react";
 
 export interface IntegrationConfig {
   values: Record<string, string>;
@@ -23,45 +23,52 @@ export interface IntegrationConfig {
 
 interface Props {
   provider: ProviderDef | null;
+  /** The saved integration for this provider, if it already exists. */
+  existing?: IntegrationRow | null;
   open: boolean;
-  initial?: IntegrationConfig | null;
+  saving?: boolean;
   onClose: () => void;
   onConnect: (cfg: IntegrationConfig) => void;
 }
 
-const EMPTY: IntegrationConfig = { values: {}, autoSync: true, frequency: "daily" };
-
-export default function IntegrationConfigDialog({ provider, open, initial, onClose, onConnect }: Props) {
-  const { toast } = useToast();
+export default function IntegrationConfigDialog({ provider, existing, open, saving, onClose, onConnect }: Props) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [autoSync, setAutoSync] = useState(true);
   const [frequency, setFrequency] = useState<SyncFrequency>("daily");
 
-  // Reset the form whenever a different provider's dialog is opened.
+  // Reset the form whenever a different provider's dialog is opened. Secret
+  // values are never returned from the backend, so secret fields always start
+  // blank; non-secret fields (API base URL) are prefilled from the saved row.
   useEffect(() => {
-    if (!open) return;
-    const base = initial ?? EMPTY;
-    setValues({ ...base.values });
-    setAutoSync(base.autoSync);
-    setFrequency(base.frequency);
-  }, [open, provider, initial]);
+    if (!open || !provider) return;
+    const seed: Record<string, string> = {};
+    if (existing?.api_base_url) {
+      const urlField = provider.fields.find(f => f.type === "url");
+      if (urlField) seed[urlField.key] = existing.api_base_url;
+    }
+    setValues(seed);
+    setAutoSync(existing?.auto_sync_enabled ?? true);
+    setFrequency((existing?.sync_frequency as SyncFrequency) ?? "daily");
+  }, [open, provider, existing]);
 
   if (!provider) return null;
 
+  const credsAlreadySet = !!existing?.credentials_set;
+
+  // For an existing integration whose secrets are already stored, secret fields
+  // may be left blank to keep the saved value. Non-secret required fields must
+  // always be present.
   const missingRequired = provider.fields
     .filter(f => f.required)
-    .some(f => !values[f.key]?.trim());
-
-  const handleTest = () => {
-    toast({
-      title: "Test connection",
-      description:
-        "This is a configuration preview — live connection testing will run once the HR sync backend is enabled.",
+    .some(f => {
+      const empty = !values[f.key]?.trim();
+      if (!empty) return false;
+      if (credsAlreadySet && f.secret) return false; // keep existing secret
+      return true;
     });
-  };
 
   const handleConnect = () => {
-    if (missingRequired) return;
+    if (missingRequired || saving) return;
     onConnect({ values, autoSync, frequency });
   };
 
@@ -73,22 +80,32 @@ export default function IntegrationConfigDialog({ provider, open, initial, onClo
             <PlugZap className="h-4 w-4 text-primary" /> Configure {provider.name}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Enter your {provider.name} credentials. In this preview they're held only in your browser and aren't sent
-            anywhere — encrypted backend storage and live sync arrive in a later phase.
+            Enter your {provider.name} credentials. They're stored on the backend and used to
+            authenticate the HR sync. Secret values are never displayed again after saving.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
+          {credsAlreadySet && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 flex items-start gap-2" data-testid="banner-creds-set">
+              <ShieldCheck className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-emerald-800">
+                Credentials are already saved. Leave secret fields blank to keep them, or enter new
+                values to replace them.
+              </p>
+            </div>
+          )}
+
           {provider.fields.map(field => (
             <div key={field.key} className="space-y-1.5">
               <Label htmlFor={`cfg-${field.key}`} className="text-sm">
                 {field.label}
-                {field.required && <span className="text-destructive ml-0.5">*</span>}
+                {field.required && !(credsAlreadySet && field.secret) && <span className="text-destructive ml-0.5">*</span>}
               </Label>
               <Input
                 id={`cfg-${field.key}`}
                 type={field.secret ? "password" : field.type === "url" ? "url" : "text"}
-                placeholder={field.placeholder}
+                placeholder={credsAlreadySet && field.secret ? "•••••••• (unchanged)" : field.placeholder}
                 autoComplete="off"
                 value={values[field.key] ?? ""}
                 onChange={e => setValues(v => ({ ...v, [field.key]: e.target.value }))}
@@ -119,16 +136,10 @@ export default function IntegrationConfigDialog({ provider, open, initial, onClo
           </div>
         </div>
 
-        <p className="text-[11px] text-muted-foreground">
-          Preview only — these values aren't persisted and will reset on refresh.
-        </p>
-
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" onClick={handleTest} data-testid="button-cfg-test">
-            <FlaskConical className="h-4 w-4 mr-2" /> Test Connection
-          </Button>
-          <Button onClick={handleConnect} disabled={missingRequired} data-testid="button-cfg-connect">
-            Save &amp; Connect
+          <Button variant="outline" onClick={onClose} data-testid="button-cfg-cancel">Cancel</Button>
+          <Button onClick={handleConnect} disabled={missingRequired || saving} data-testid="button-cfg-connect">
+            {saving ? "Saving…" : "Save & Connect"}
           </Button>
         </DialogFooter>
       </DialogContent>

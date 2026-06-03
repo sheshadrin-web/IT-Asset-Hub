@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useManagedDevices } from "@/hooks/useManagedDevices";
 import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
 import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
+import HrOverview from "@/components/dashboard/HrOverview";
 import { useState } from "react";
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -346,6 +347,9 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* HR & Asset Recovery overview */}
+      <HrOverview />
 
       {/* Pending acknowledgement alert */}
       {pendingAck > 0 && (

@@ -34,6 +34,7 @@ const Users = lazy(() => import("@/pages/Users"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const Integrations = lazy(() => import("@/pages/Integrations"));
+const HrQueues = lazy(() => import("@/pages/HrQueues"));
 const MyAssets = lazy(() => import("@/pages/MyAssets"));
 const ReturnAsset = lazy(() => import("@/pages/ReturnAsset"));
 const BulkImport = lazy(() => import("@/pages/BulkImport"));
@@ -272,6 +273,10 @@ function Router() {
       </Route>
 
       {/* Settings — super_admin only */}
+      <Route path="/hr-queues">
+        <ProtectedRoute component={HrQueues} allowedRoles={["super_admin", "it_admin", "it_agent", "hr_admin"]} />
+      </Route>
+
       <Route path="/settings/integrations">
         <ProtectedRoute component={Integrations} allowedRoles={["super_admin"]} />
       </Route>

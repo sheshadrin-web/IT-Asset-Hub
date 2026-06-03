@@ -1,26 +1,19 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
+import { supabaseConfigured } from "@/lib/supabaseClient";
 import {
-  PROVIDERS, STATUS_META, formatLastSync,
-  type ProviderId, type ProviderDef, type IntegrationStatus,
+  PROVIDERS, STATUS_META, formatLastSync, type ProviderDef,
 } from "@/lib/hrIntegrations";
+import type { IntegrationRow } from "@/lib/hrSyncTypes";
+import {
+  getIntegrations, saveIntegration, disconnectIntegration, testIntegration, runSync,
+} from "@/lib/integrationService";
 import IntegrationConfigDialog, { type IntegrationConfig } from "./IntegrationConfigDialog";
-import { Plug, RefreshCw, Settings2, FileClock, Unplug, Plug2 } from "lucide-react";
-
-interface IntegrationState {
-  status: IntegrationStatus;
-  lastSync: string | null;
-  config: IntegrationConfig | null;
-}
-
-const INITIAL: Record<ProviderId, IntegrationState> = {
-  zoho: { status: "not_connected", lastSync: null, config: null },
-  keka: { status: "not_connected", lastSync: null, config: null },
-  custom: { status: "not_connected", lastSync: null, config: null },
-};
+import { Plug, RefreshCw, Settings2, FileClock, Unplug, Plug2, FlaskConical, AlertCircle } from "lucide-react";
 
 interface Props {
   onViewLogs: () => void;
@@ -28,38 +21,121 @@ interface Props {
 
 export default function HrPortals({ onViewLogs }: Props) {
   const { toast } = useToast();
-  const [state, setState] = useState<Record<ProviderId, IntegrationState>>(INITIAL);
+  const { session, loading: authLoading } = useAuth();
+  const [rows, setRows] = useState<IntegrationRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dialogProvider, setDialogProvider] = useState<ProviderDef | null>(null);
-  const [busy, setBusy] = useState<ProviderId | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const noneConnected = Object.values(state).every(s => s.status !== "connected");
+  const load = useCallback(async () => {
+    if (!supabaseConfigured) { setLoading(false); return; }
+    if (authLoading) return;
+    if (!session) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      setRows(await getIntegrations());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load integrations");
+    } finally {
+      setLoading(false);
+    }
+  }, [session, authLoading]);
 
-  const handleConnect = (id: ProviderId, cfg: IntegrationConfig) => {
-    setState(s => ({ ...s, [id]: { status: "connected", lastSync: new Date().toISOString(), config: cfg } }));
-    setDialogProvider(null);
-    toast({ title: "Connection configured (preview)", description: "Saved in this browser for preview only. Encrypted storage and live employee sync are enabled in a later phase." });
+  useEffect(() => { void load(); }, [load]);
+
+  const byProvider = (id: string) => rows.find(r => r.provider_type === id);
+  const noneConnected = !rows.some(r => r.status === "connected");
+
+  const handleSave = async (provider: ProviderDef, cfg: IntegrationConfig) => {
+    setSaving(true);
+    try {
+      const urlField = provider.fields.find(f => f.type === "url");
+      const apiBaseUrl = (urlField ? cfg.values[urlField.key] : "") || null;
+      // Only send fields the admin actually typed; empty => keep existing secret.
+      const credentials: Record<string, string> = {};
+      for (const [k, v] of Object.entries(cfg.values)) {
+        if (v && v.trim()) credentials[k] = v.trim();
+      }
+      await saveIntegration({
+        provider_type: provider.id,
+        provider_name: provider.name,
+        api_base_url: apiBaseUrl,
+        credentials,
+        auto_sync: cfg.autoSync,
+        frequency: cfg.frequency,
+      });
+      setDialogProvider(null);
+      toast({ title: `${provider.name} connected`, description: "Credentials saved. Run a sync to pull employees." });
+      await load();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Could not save integration", description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleSyncNow = (id: ProviderId) => {
+  const handleSync = async (row: IntegrationRow) => {
     if (busy) return;
-    setBusy(id);
-    // Phase 1: there is no backend sync yet, so this only refreshes the
-    // "last sync" timestamp locally and tells the admin what will happen.
-    window.setTimeout(() => {
-      setState(s => ({ ...s, [id]: { ...s[id], lastSync: new Date().toISOString() } }));
+    setBusy(row.id);
+    try {
+      const res = await runSync(row.id);
+      toast({
+        title: "Sync complete",
+        description: `${res.employees_fetched} employees fetched · ${res.users_created} new · ${res.users_updated} updated · ${res.offboarding_detected} offboarding.`,
+      });
+      await load();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Sync failed", description: e instanceof Error ? e.message : String(e) });
+    } finally {
       setBusy(null);
-      toast({ title: "Sync queued", description: "Manual sync will pull employees once the HR sync backend is connected." });
-    }, 600);
+    }
   };
 
-  const handleDisconnect = (id: ProviderId) => {
-    setState(s => ({ ...s, [id]: { status: "not_connected", lastSync: null, config: null } }));
-    toast({ title: "Integration disconnected" });
+  const handleTest = async (row: IntegrationRow) => {
+    if (busy) return;
+    setBusy(row.id);
+    try {
+      const res = await testIntegration(row.id);
+      toast({ variant: res.ok ? "default" : "destructive", title: res.ok ? "Connection OK" : "Connection problem", description: res.message });
+      await load();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Test failed", description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
   };
+
+  const handleDisconnect = async (row: IntegrationRow) => {
+    if (busy) return;
+    setBusy(row.id);
+    try {
+      await disconnectIntegration(row.id);
+      toast({ title: `${row.provider_name} disconnected`, description: "Stored credentials were cleared." });
+      await load();
+    } catch (e) {
+      toast({ variant: "destructive", title: "Could not disconnect", description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) {
+    return <div className="py-10 text-center text-sm text-muted-foreground" data-testid="loading-integrations">Loading integrations…</div>;
+  }
 
   return (
     <div className="space-y-4">
-      {noneConnected && (
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-integrations">
+          <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-red-800">{error}</p>
+        </div>
+      )}
+
+      {noneConnected && !error && (
         <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 flex items-start gap-3" data-testid="empty-integrations">
           <Plug className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
           <p className="text-sm text-muted-foreground">
@@ -70,9 +146,11 @@ export default function HrPortals({ onViewLogs }: Props) {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {PROVIDERS.map(provider => {
-          const s = state[provider.id];
-          const meta = STATUS_META[s.status];
-          const connected = s.status === "connected";
+          const row = byProvider(provider.id);
+          const status = row?.status ?? "not_connected";
+          const meta = STATUS_META[status];
+          const connected = status === "connected";
+          const rowBusy = row ? busy === row.id : false;
           return (
             <Card key={provider.id} className="overflow-hidden" data-testid={`card-integration-${provider.id}`}>
               <CardContent className="p-4 space-y-4">
@@ -89,16 +167,22 @@ export default function HrPortals({ onViewLogs }: Props) {
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">{provider.tagline}</p>
                     <p className="text-[11px] text-muted-foreground/70 mt-1">
-                      Last sync: <span className="font-medium text-muted-foreground">{formatLastSync(s.lastSync)}</span>
+                      Last sync: <span className="font-medium text-muted-foreground">{formatLastSync(row?.last_sync_at ?? null)}</span>
                     </p>
+                    {row?.last_error && (
+                      <p className="text-[11px] text-red-600 mt-1">{row.last_error}</p>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {connected ? (
+                  {connected && row ? (
                     <>
-                      <Button size="sm" variant="outline" onClick={() => handleSyncNow(provider.id)} disabled={busy === provider.id} data-testid={`button-sync-${provider.id}`}>
-                        <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${busy === provider.id ? "animate-spin" : ""}`} /> Sync Now
+                      <Button size="sm" variant="outline" onClick={() => handleSync(row)} disabled={rowBusy} data-testid={`button-sync-${provider.id}`}>
+                        <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${rowBusy ? "animate-spin" : ""}`} /> Sync Now
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleTest(row)} disabled={rowBusy} data-testid={`button-test-${provider.id}`}>
+                        <FlaskConical className="h-3.5 w-3.5 mr-1.5" /> Test
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => setDialogProvider(provider)} data-testid={`button-configure-${provider.id}`}>
                         <Settings2 className="h-3.5 w-3.5 mr-1.5" /> Configure
@@ -106,7 +190,7 @@ export default function HrPortals({ onViewLogs }: Props) {
                       <Button size="sm" variant="ghost" onClick={onViewLogs} data-testid={`button-logs-${provider.id}`}>
                         <FileClock className="h-3.5 w-3.5 mr-1.5" /> Logs
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleDisconnect(provider.id)} data-testid={`button-disconnect-${provider.id}`}>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleDisconnect(row)} disabled={rowBusy} data-testid={`button-disconnect-${provider.id}`}>
                         <Unplug className="h-3.5 w-3.5 mr-1.5" /> Disconnect
                       </Button>
                     </>
@@ -124,10 +208,11 @@ export default function HrPortals({ onViewLogs }: Props) {
 
       <IntegrationConfigDialog
         provider={dialogProvider}
+        existing={dialogProvider ? byProvider(dialogProvider.id) ?? null : null}
         open={dialogProvider !== null}
-        initial={dialogProvider ? state[dialogProvider.id].config : null}
+        saving={saving}
         onClose={() => setDialogProvider(null)}
-        onConnect={cfg => dialogProvider && handleConnect(dialogProvider.id, cfg)}
+        onConnect={cfg => dialogProvider && handleSave(dialogProvider, cfg)}
       />
     </div>
   );
