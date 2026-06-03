@@ -17,7 +17,7 @@ import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import { cn } from "@/lib/utils";
 import {
   Bell, Shield, Monitor, Loader2, Plug, ChevronRight, Users, Workflow,
-  ScrollText, CreditCard, ShieldCheck, ArrowRight,
+  ScrollText, ShieldCheck, ArrowRight,
 } from "lucide-react";
 
 interface OrgSettings {
@@ -68,7 +68,7 @@ const ADMIN_ROLES = ["super_admin", "it_admin", "hr_admin"];
 
 type TabId =
   | "general" | "notifications" | "security" | "integrations"
-  | "users" | "automation" | "audit" | "billing";
+  | "users" | "automation" | "audit";
 
 const TABS: { id: TabId; label: string; icon: typeof Monitor }[] = [
   { id: "general",       label: "General",       icon: Monitor },
@@ -78,7 +78,6 @@ const TABS: { id: TabId; label: string; icon: typeof Monitor }[] = [
   { id: "users",         label: "Users & Roles", icon: Users },
   { id: "automation",    label: "Automation",    icon: Workflow },
   { id: "audit",         label: "Audit Logs",    icon: ScrollText },
-  { id: "billing",       label: "Billing",       icon: CreditCard },
 ];
 
 export default function Settings() {
@@ -217,14 +216,6 @@ export default function Settings() {
         <p className="text-xs text-muted-foreground">Stored preference (5–480 min). Active enforcement not yet wired.</p>
       </div>
     </div>
-  );
-
-  const placeholderCard = (icon: typeof Monitor, title: string, description: string, body: string) => (
-    <SettingsCard icon={icon} title={title} description={description}>
-      <div className="rounded-xl border border-dashed border-card-border/70 bg-muted/30 px-4 py-6 text-center">
-        <p className="text-sm text-muted-foreground">{body}</p>
-      </div>
-    </SettingsCard>
   );
 
   return (
@@ -415,11 +406,6 @@ export default function Settings() {
           {activeTab === "automation" && <AutomationRules />}
 
           {activeTab === "audit" && <AuditLogs />}
-
-          {activeTab === "billing" && placeholderCard(
-            CreditCard, "Billing", "Subscription and usage",
-            "Billing is managed centrally by Miles Education and is not configured in this portal.",
-          )}
         </div>
       </div>
     </div>
