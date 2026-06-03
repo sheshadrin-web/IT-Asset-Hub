@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
   TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight,
-  UserX, Users as UsersIcon, UserMinus, Network, Award,
+  Users as UsersIcon, UserMinus, Network, Award, RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,12 @@ import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
-import { getUsersWithUnassignedManager, managerDisplayName, buildReportingStructure } from "@/lib/reportingManager";
+import { buildReportingStructure } from "@/lib/reportingManager";
 import { cn } from "@/lib/utils";
+import { useManagedDevices } from "@/hooks/useManagedDevices";
+import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
+import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
+import { useState } from "react";
 
 const PRIORITY_COLORS: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-500 border-red-500/20",
@@ -216,13 +220,19 @@ export default function Dashboard() {
   const { tickets }      = useTickets();
   const { users }        = useUsers();
 
+  const isAdminView = currentUser?.role !== "end_user";
+  const [restartThresholdDays, setRestartThresholdDays] = useState(RESTART_PENDING_DEFAULT_DAYS);
+  const {
+    devices: managedDevices,
+    loading: devicesLoading,
+    error: devicesError,
+    refresh: refreshDevices,
+  } = useManagedDevices(isAdminView);
+  const restartPending = computeRestartPending(managedDevices, assets, users, restartThresholdDays);
+
   if (currentUser?.role === "end_user") {
     return <EndUserDashboard userName={currentUser.name} />;
   }
-
-  const unassignedReportees = getUsersWithUnassignedManager(
-    users.filter(u => u.status === "active"),
-  );
 
   // Manager hierarchy overview metrics
   const reportingGroups = buildReportingStructure(users);
@@ -293,6 +303,25 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Devices Pending Restart — summary card */}
+      <a href="#devices-pending-restart" className="block group">
+        <Card className="cursor-pointer hover:shadow-md transition-all duration-200 overflow-hidden border-amber-200">
+          <div className="h-0.5 bg-amber-500 w-full" />
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="inline-flex rounded-xl p-2.5 bg-amber-50">
+              <RotateCcw className="h-5 w-5 text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-2xl font-bold text-foreground leading-none">{restartPending.length}</div>
+              <div className="text-xs text-muted-foreground mt-1 leading-tight font-medium">
+                Devices Pending Restart · up over {restartThresholdDays} days
+              </div>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors ml-auto" />
+          </CardContent>
+        </Card>
+      </a>
+
       {/* Manager Hierarchy Overview */}
       <Card>
         <CardHeader className="pb-3">
@@ -329,52 +358,15 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Unassigned reporting managers */}
-      {unassignedReportees.length > 0 && (
-        <Card className="border-amber-200">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-amber-700">
-              <UserX className="h-4 w-4" />
-              Employees Without an Active Manager
-              <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5">
-                {unassignedReportees.length}
-              </span>
-            </CardTitle>
-            <Link href="/users" className="text-xs text-primary hover:underline font-medium">Manage →</Link>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {["Employee", "Department", "Current Manager"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {unassignedReportees.slice(0, 6).map((u) => (
-                    <tr key={u.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
-                      <td className="px-4 py-3 text-foreground font-medium">{u.full_name}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{u.department || "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                          {managerDisplayName(u.reporting_manager, users)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {unassignedReportees.length > 6 && (
-              <div className="px-4 py-2.5 border-t border-border text-xs text-muted-foreground text-center">
-                + {unassignedReportees.length - 6} more — <Link href="/users" className="text-primary hover:underline font-medium">view all in Users</Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Devices Pending Restart */}
+      <DevicesPendingRestart
+        devices={restartPending}
+        loading={devicesLoading}
+        error={devicesError}
+        refresh={refreshDevices}
+        thresholdDays={restartThresholdDays}
+        onThresholdChange={setRestartThresholdDays}
+      />
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
