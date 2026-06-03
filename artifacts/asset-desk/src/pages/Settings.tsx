@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import AutomationRules from "@/components/settings/integrations/AutomationRules";
+import AuditLogs from "@/components/settings/AuditLogs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
@@ -413,10 +414,7 @@ export default function Settings() {
 
           {activeTab === "automation" && <AutomationRules />}
 
-          {activeTab === "audit" && placeholderCard(
-            ScrollText, "Audit Logs", "Track changes across the IT Asset Hub",
-            "Audit log viewing is not yet enabled. Asset and recovery history is currently available on each asset's detail page.",
-          )}
+          {activeTab === "audit" && <AuditLogs />}
 
           {activeTab === "billing" && placeholderCard(
             CreditCard, "Billing", "Subscription and usage",
