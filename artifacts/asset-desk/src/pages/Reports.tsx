@@ -641,9 +641,9 @@ export default function Reports() {
         {summaryCards.map((card) => {
           const Icon = card.icon;
           return (
-            <Card key={card.label} data-testid={`card-report-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
+            <Card key={card.label} className="premium-lift" data-testid={`card-report-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
               <CardContent className="p-4">
-                <div className={`inline-flex rounded-lg p-2 ${card.bg} mb-3`}>
+                <div className={`inline-flex rounded-xl p-2.5 ${card.bg} mb-3`}>
                   <Icon className={`h-4 w-4 ${card.color}`} />
                 </div>
                 <div className="text-2xl font-bold text-foreground">{card.value}</div>

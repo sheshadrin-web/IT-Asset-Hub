@@ -334,7 +334,7 @@ export default function Dashboard() {
         <CardContent>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {hierarchyStats.map((s) => (
-              <div key={s.label} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <div key={s.label} className="flex items-center gap-3 rounded-xl border border-card-border/70 glass-surface premium-lift px-4 py-3">
                 <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0", s.bg)}>
                   <s.icon className={cn("h-5 w-5", s.color)} />
                 </div>

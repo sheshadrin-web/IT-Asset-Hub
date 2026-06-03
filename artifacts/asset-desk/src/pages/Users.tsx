@@ -1537,7 +1537,7 @@ export default function Users() {
                           onClick={() => setViewUserTab(tab)}
                           data-testid={`stat-user-${tab}`}
                           className={cn(
-                            "rounded-xl border bg-card px-3 py-3 text-left transition-all hover:border-primary/40 hover:shadow-sm",
+                            "rounded-xl border border-card-border/70 glass-surface px-3 py-3 text-left transition-all hover:border-primary/40 hover:shadow-sm hover:-translate-y-0.5",
                             activeTab === tab ? "border-primary/50 ring-1 ring-primary/20" : "border-border"
                           )}
                         >

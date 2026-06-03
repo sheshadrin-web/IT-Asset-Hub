@@ -421,7 +421,7 @@ export default function Tickets() {
       </Card>
 
       {isAdmin && selectedCount > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-border bg-popover shadow-xl px-5 py-3">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-2xl border border-card-border/60 bg-popover/90 backdrop-blur-xl shadow-[0_24px_56px_-20px_rgba(30,58,138,0.4)] px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
             <Checkbox checked className="pointer-events-none" />
             <span>{selectedCount} ticket{selectedCount !== 1 ? "s" : ""} selected</span>
