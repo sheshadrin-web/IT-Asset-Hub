@@ -6,7 +6,7 @@ import HrPortals from "@/components/settings/integrations/HrPortals";
 import FieldMapping from "@/components/settings/integrations/FieldMapping";
 import SyncLogs from "@/components/settings/integrations/SyncLogs";
 import AutomationRules from "@/components/settings/integrations/AutomationRules";
-import { ChevronLeft, Plug, Info } from "lucide-react";
+import { ChevronLeft, Plug } from "lucide-react";
 
 type TabKey = "portals" | "mapping" | "automation" | "logs";
 
@@ -56,17 +56,6 @@ export default function Integrations() {
             </p>
           </div>
         </div>
-      </div>
-
-      {/* Info banner */}
-      <div className="rounded-xl border border-blue-200/70 bg-blue-50/70 backdrop-blur-sm px-4 py-3.5 flex items-start gap-3" data-testid="banner-integrations-info">
-        <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-        <p className="text-sm text-blue-900/80 leading-relaxed">
-          Connect a portal, then run a sync to pull employees. New and updated employees are written straight to your
-          Users directory, and employees marked as exited are deactivated with their assigned assets moved into Recovery
-          Mode automatically. The current build ships with a demo employee feed so you can see the full flow; live
-          Zoho People / Keka API calls activate once real API credentials are validated.
-        </p>
       </div>
 
       <Tabs value={tab} onValueChange={v => setTab(v as TabKey)}>
