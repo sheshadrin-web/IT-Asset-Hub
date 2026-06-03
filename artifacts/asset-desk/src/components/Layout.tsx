@@ -84,6 +84,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [notifOpen,            setNotifOpen]            = useState(false);
   const [profileSettingsOpen,  setProfileSettingsOpen]  = useState(false);
   const [readIds,              setReadIds]              = useState<Set<string>>(new Set());
+  const [clearedIds,           setClearedIds]           = useState<Set<string>>(new Set());
   const [location]                                      = useLocation();
   const { currentUser, signOut }                        = useAuth();
   const { tickets, loading: ticketsLoading, refresh: refreshTickets } = useTickets();
@@ -97,6 +98,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     currentUser?.role === "it_admin" ||
     currentUser?.role === "it_agent";
   const notifStorageKey = currentUser ? `miles-notif-read:${currentUser.userId}` : "";
+  const clearedStorageKey = currentUser ? `miles-notif-cleared:${currentUser.userId}` : "";
 
   // Load this user's persisted "read" ticket IDs so notifications survive reloads.
   useEffect(() => {
@@ -108,6 +110,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       else setReadIds(new Set());
     } catch { setReadIds(new Set()); }
   }, [notifStorageKey]);
+
+  // Load this user's persisted "cleared" (dismissed) ticket IDs.
+  useEffect(() => {
+    if (!clearedStorageKey) { setClearedIds(new Set()); return; }
+    try {
+      const raw = localStorage.getItem(clearedStorageKey);
+      setClearedIds(raw ? new Set(JSON.parse(raw) as string[]) : new Set());
+    } catch { setClearedIds(new Set()); }
+  }, [clearedStorageKey]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -147,7 +158,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   if (!currentUser) return null;
 
   const notifItems = canSeeNotifs
-    ? tickets.slice(0, 20).map(t => ({
+    ? tickets.filter(t => !clearedIds.has(t.ticketId)).slice(0, 20).map(t => ({
         key:      t.id ?? t.ticketId,
         ticketId: t.ticketId,
         category: t.category,
@@ -187,6 +198,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const ids = new Set(readIds);
     ids.add(ticketId);
     persistRead(ids);
+  };
+  // Clearing a notification is client-only (localStorage) — it hides the alert
+  // from this dropdown without ever touching the underlying ticket. Bounded to
+  // recent IDs so the persisted set can't grow unbounded.
+  const persistCleared = (ids: Set<string>) => {
+    const bounded = new Set([...ids].filter(id => recentTicketIds.has(id)));
+    setClearedIds(bounded);
+    if (clearedStorageKey) {
+      try { localStorage.setItem(clearedStorageKey, JSON.stringify([...bounded])); } catch { /* ignore */ }
+    }
+  };
+  const clearAll = () => {
+    const ids = new Set(clearedIds);
+    notifItems.forEach(n => ids.add(n.ticketId));
+    persistCleared(ids);
+    setNotifOpen(false);
+  };
+  const dismissOne = (ticketId: string) => {
+    const ids = new Set(clearedIds);
+    ids.add(ticketId);
+    persistCleared(ids);
   };
 
   return (
@@ -333,9 +365,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <span className="rounded-full bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5">{unread}</span>
                       )}
                     </div>
-                    {unread > 0 && (
-                      <button onClick={markAllRead} className="text-xs text-primary hover:underline font-medium">Mark all read</button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {unread > 0 && (
+                        <button onClick={markAllRead} className="text-xs text-primary hover:underline font-medium" data-testid="button-mark-all-read">Mark all read</button>
+                      )}
+                      {notifItems.length > 0 && (
+                        <button onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground hover:underline font-medium" data-testid="button-clear-notifications">Clear all</button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="max-h-72 overflow-y-auto">
@@ -349,25 +386,38 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       </div>
                     ) : (
                       notifItems.map(n => (
-                        <Link
+                        <div
                           key={n.key}
-                          href={`/tickets/${n.ticketId}`}
-                          onClick={() => { markRead(n.ticketId); setNotifOpen(false); }}
                           className={cn(
-                            "flex items-start gap-3 px-4 py-3 border-b border-border/60 last:border-0 transition-colors cursor-pointer",
+                            "group relative flex items-stretch border-b border-border/60 last:border-0 transition-colors",
                             !n.read ? "bg-blue-50/50 hover:bg-blue-50" : "hover:bg-accent/40"
                           )}
                         >
-                          <div className={cn("mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0", !n.read ? "bg-blue-100" : "bg-muted")}>
-                            <Zap className={cn("h-3.5 w-3.5", !n.read ? "text-blue-600" : "text-muted-foreground")} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={cn("text-xs font-semibold truncate", !n.read ? "text-foreground" : "text-muted-foreground")}>{n.ticketId} — {n.category}</p>
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">Raised by {n.raisedBy} · {n.status}</p>
-                            <p className="text-[10px] text-muted-foreground/60 mt-1">{dayLabel(n.date)}</p>
-                          </div>
-                          {!n.read && <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
-                        </Link>
+                          <Link
+                            href={`/tickets/${n.ticketId}`}
+                            onClick={() => { markRead(n.ticketId); setNotifOpen(false); }}
+                            className="flex flex-1 min-w-0 items-start gap-3 px-4 py-3 cursor-pointer"
+                          >
+                            <div className={cn("mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0", !n.read ? "bg-blue-100" : "bg-muted")}>
+                              <Zap className={cn("h-3.5 w-3.5", !n.read ? "text-blue-600" : "text-muted-foreground")} />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-5">
+                              <p className={cn("text-xs font-semibold truncate", !n.read ? "text-foreground" : "text-muted-foreground")}>{n.ticketId} — {n.category}</p>
+                              <p className="text-xs text-muted-foreground truncate mt-0.5">Raised by {n.raisedBy} · {n.status}</p>
+                              <p className="text-[10px] text-muted-foreground/60 mt-1">{dayLabel(n.date)}</p>
+                            </div>
+                            {!n.read && <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => dismissOne(n.ticketId)}
+                            aria-label={`Dismiss notification ${n.ticketId}`}
+                            data-testid={`button-dismiss-notification-${n.ticketId}`}
+                            className="absolute right-2 top-2 h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-all"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       ))
                     )}
                   </div>
