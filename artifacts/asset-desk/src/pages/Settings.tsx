@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useToast } from "@/hooks/use-toast";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useAuth } from "@/context/AuthContext";
 import { LoadErrorBanner } from "@/components/LoadErrorBanner";
-import { Bell, Shield, Monitor, Loader2, Plug, ChevronRight } from "lucide-react";
+import { Bell, Shield, Monitor, Loader2, Plug, ChevronRight, Lightbulb } from "lucide-react";
 
 interface OrgSettings {
   org_name:            string;
@@ -112,101 +112,109 @@ export default function Settings() {
   const disabled = !isSuperAdmin || loading || saving;
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Configure application preferences</p>
+    <div className="space-y-6 max-w-6xl">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground leading-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground mt-1">Configure and manage your IT Asset Hub</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Button variant="outline" onClick={() => void load()} disabled={disabled} data-testid="button-cancel-settings">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={disabled} data-testid="button-save-settings">
+            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…</> : "Save Changes"}
+          </Button>
+        </div>
       </div>
 
       {error && !loading && <LoadErrorBanner message={error} onRetry={load} busy={loading} />}
 
       {!isSuperAdmin && !loading && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-testid="banner-readonly">
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-testid="banner-readonly">
           You can view these settings, but only a Super Admin can change them.
         </div>
       )}
 
+      {/* Integrations entry point */}
       <Link href="/settings/integrations" data-testid="link-integrations">
-        <Card className="cursor-pointer transition-colors hover:bg-accent/40">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <Plug className="h-5 w-5 text-primary" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Integrations</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Connect HR portals (Zoho People, Keka) to automate onboarding, offboarding &amp; asset recovery</p>
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          </CardContent>
-        </Card>
+        <div className="group rounded-2xl border border-card-border/70 bg-card/85 backdrop-blur-md shadow-[0_2px_8px_-2px_rgba(30,58,138,0.10),0_14px_36px_-18px_rgba(30,58,138,0.20)] transition-shadow hover:shadow-[0_6px_18px_-4px_rgba(30,58,138,0.18),0_18px_44px_-18px_rgba(30,58,138,0.28)] cursor-pointer px-5 py-4 sm:px-6 flex items-center gap-4">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <Plug className="h-5 w-5 text-primary" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-foreground">Integrations</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Connect HR portals (Zoho People, Keka) to sync your user directory &amp; automate asset recovery
+            </p>
+          </div>
+          <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 transition-transform group-hover:translate-x-0.5" />
+        </div>
       </Link>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold flex items-center gap-2"><Monitor className="h-4 w-4" /> General</CardTitle>
-          <CardDescription className="text-xs">Basic application settings</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="org-name">Organization Name</Label>
-            <Input id="org-name" value={orgName} onChange={e => setOrgName(e.target.value)} disabled={disabled} data-testid="input-org-name" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="support-email">IT Support Email</Label>
-            <Input id="support-email" type="email" value={supportEmail} onChange={e => setSupportEmail(e.target.value)} disabled={disabled} data-testid="input-support-email" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold flex items-center gap-2"><Bell className="h-4 w-4" /> Notifications</CardTitle>
-          <CardDescription className="text-xs">Control what alerts and emails you receive</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {[
-            { id: "email-notifications", label: "Email Notifications",       description: "Receive email alerts for important events",             value: emailNotifications, onChange: setEmailNotifications },
-            { id: "ticket-assignment",   label: "Ticket Assignment Alerts",  description: "Notify agents when a ticket is assigned to them",       value: ticketAssignment,   onChange: setTicketAssignment },
-            { id: "status-updates",      label: "Ticket Status Updates",     description: "Notify users when their ticket status changes",         value: statusUpdates,      onChange: setStatusUpdates },
-            { id: "warranty-alerts",     label: "Warranty Expiry Alerts",    description: "Alert 30 days before asset warranty expires",           value: warrantyAlerts,     onChange: setWarrantyAlerts },
-          ].map(setting => (
-            <div key={setting.id} className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor={setting.id} className="text-sm font-medium cursor-pointer">{setting.label}</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">{setting.description}</p>
+      {/* Two-column premium grid */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="space-y-5">
+          <SettingsCard icon={Monitor} title="General" description="Basic application settings">
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="org-name">Organization Name</Label>
+                <Input id="org-name" value={orgName} onChange={e => setOrgName(e.target.value)} disabled={disabled} data-testid="input-org-name" />
               </div>
-              <Switch id={setting.id} checked={setting.value} onCheckedChange={setting.onChange} disabled={disabled} data-testid={`switch-${setting.id}`} />
+              <div className="space-y-1.5">
+                <Label htmlFor="support-email">IT Support Email</Label>
+                <Input id="support-email" type="email" value={supportEmail} onChange={e => setSupportEmail(e.target.value)} disabled={disabled} data-testid="input-support-email" />
+              </div>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+          </SettingsCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold flex items-center gap-2"><Shield className="h-4 w-4" /> Security</CardTitle>
-          <CardDescription className="text-xs">Authentication and access control</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label htmlFor="two-factor" className="text-sm font-medium cursor-pointer">Two-Factor Authentication</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">Require 2FA for all admin accounts <span className="italic">(preference stored; enforcement not yet enabled)</span></p>
+          <SettingsCard icon={Shield} title="Security" description="Authentication and access control">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label htmlFor="two-factor" className="text-sm font-medium cursor-pointer">Two-Factor Authentication</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Require 2FA for all admin accounts <span className="italic">(preference stored; enforcement not yet enabled)</span></p>
+                </div>
+                <Switch id="two-factor" checked={twoFactor} onCheckedChange={setTwoFactor} disabled={disabled} data-testid="switch-two-factor" />
+              </div>
+              <Separator />
+              <div className="space-y-1.5">
+                <Label htmlFor="session-timeout">Session Timeout (minutes)</Label>
+                <Input id="session-timeout" type="number" value={sessionTimeout} onChange={e => setSessionTimeout(e.target.value)} disabled={disabled} className="w-32" min="5" max="480" data-testid="input-session-timeout" />
+                <p className="text-xs text-muted-foreground">Stored preference (5–480 min). Active enforcement not yet wired.</p>
+              </div>
             </div>
-            <Switch id="two-factor" checked={twoFactor} onCheckedChange={setTwoFactor} disabled={disabled} data-testid="switch-two-factor" />
-          </div>
-          <Separator />
-          <div className="space-y-1.5">
-            <Label htmlFor="session-timeout">Session Timeout (minutes)</Label>
-            <Input id="session-timeout" type="number" value={sessionTimeout} onChange={e => setSessionTimeout(e.target.value)} disabled={disabled} className="w-32" min="5" max="480" data-testid="input-session-timeout" />
-            <p className="text-xs text-muted-foreground">Stored preference (5–480 min). Active enforcement not yet wired.</p>
-          </div>
-        </CardContent>
-      </Card>
+          </SettingsCard>
+        </div>
 
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={disabled} data-testid="button-save-settings">
-          {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…</> : "Save Settings"}
-        </Button>
+        <div className="space-y-5">
+          <SettingsCard icon={Bell} title="Notifications" description="Control what alerts and emails you receive">
+            <div className="space-y-4">
+              {[
+                { id: "email-notifications", label: "Email Notifications",       description: "Receive email alerts for important events",             value: emailNotifications, onChange: setEmailNotifications },
+                { id: "ticket-assignment",   label: "Ticket Assignment Alerts",  description: "Notify agents when a ticket is assigned to them",       value: ticketAssignment,   onChange: setTicketAssignment },
+                { id: "status-updates",      label: "Ticket Status Updates",     description: "Notify users when their ticket status changes",         value: statusUpdates,      onChange: setStatusUpdates },
+                { id: "warranty-alerts",     label: "Warranty Expiry Alerts",    description: "Alert 30 days before asset warranty expires",           value: warrantyAlerts,     onChange: setWarrantyAlerts },
+              ].map(setting => (
+                <div key={setting.id} className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor={setting.id} className="text-sm font-medium cursor-pointer">{setting.label}</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">{setting.description}</p>
+                  </div>
+                  <Switch id={setting.id} checked={setting.value} onCheckedChange={setting.onChange} disabled={disabled} data-testid={`switch-${setting.id}`} />
+                </div>
+              ))}
+            </div>
+          </SettingsCard>
+
+          <SettingsCard icon={Lightbulb} title="Helpful Tip" iconClassName="bg-amber-500/10 [&>svg]:text-amber-500">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              These settings apply across the entire organization and help personalize your IT Asset Hub experience.
+              Connect an HR portal under Integrations to keep your user directory and asset recovery fully automated.
+            </p>
+          </SettingsCard>
+        </div>
       </div>
     </div>
   );
