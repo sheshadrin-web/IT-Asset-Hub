@@ -289,7 +289,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden">
 
         {/* Top header */}
-        <header className="sticky top-0 z-10 flex h-14 items-center border-b border-border/70 bg-card/70 backdrop-blur-md supports-[backdrop-filter]:bg-card/60 px-4 gap-3">
+        <header className="sticky top-0 z-10 flex h-14 items-center border-b border-border/60 bg-card/75 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60 shadow-[0_1px_0_0_rgba(255,255,255,0.6),0_8px_24px_-18px_rgba(30,58,138,0.25)] px-4 gap-3">
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)} data-testid="button-menu">
             <Menu className="h-4 w-4" />
           </Button>
@@ -324,7 +324,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
               {/* Notification dropdown */}
               {notifOpen && (
-                <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-border bg-card shadow-xl z-50 overflow-hidden">
+                <div className="absolute right-0 top-full mt-2 w-80 rounded-2xl border border-card-border/70 bg-card/90 backdrop-blur-xl shadow-[0_24px_56px_-20px_rgba(30,58,138,0.35)] z-50 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                     <div className="flex items-center gap-2">
                       <Bell className="h-3.5 w-3.5 text-blue-500" />
@@ -387,7 +387,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 pt-6 pb-0">{children}</main>
+        <main className="flex-1 overflow-y-auto px-6 pt-6 pb-10">{children}</main>
       </div>
 
       <ProfileSettingsModal open={profileSettingsOpen} onClose={() => setProfileSettingsOpen(false)} />

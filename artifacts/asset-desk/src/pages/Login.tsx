@@ -41,14 +41,15 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-blue-200/40 blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-indigo-200/40 blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-blue-300/40 blur-3xl" />
+        <div className="absolute -bottom-44 -left-40 w-96 h-96 rounded-full bg-indigo-300/40 blur-3xl" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[28rem] h-[28rem] rounded-full bg-sky-200/30 blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
+        <div className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-[0_32px_80px_-30px_rgba(30,58,138,0.45)] border border-white/70 ring-1 ring-blue-500/5 overflow-hidden">
 
           {/* Header stripe */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-8 py-7">
@@ -150,7 +151,7 @@ export default function Login() {
 
               <Button
                 type="submit"
-                className="w-full h-10 bg-blue-700 hover:bg-blue-800 text-white font-semibold shadow-sm"
+                className="w-full h-10 bg-gradient-to-b from-blue-600 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white font-semibold shadow-[0_8px_20px_-8px_rgba(30,58,138,0.6)]"
                 disabled={loading || configError}
                 data-testid="button-login-submit"
               >

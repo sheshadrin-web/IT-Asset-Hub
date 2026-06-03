@@ -113,15 +113,15 @@
   --app-font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
-  --radius: .625rem;
-  --shadow-2xs: 0px 1px 2px 0px rgba(15, 23, 42, 0.04);
-  --shadow-xs: 0px 1px 3px 0px rgba(15, 23, 42, 0.05);
-  --shadow-sm: 0px 1px 2px 0px rgba(15, 23, 42, 0.04), 0px 1px 3px 0px rgba(15, 23, 42, 0.05);
-  --shadow: 0px 1px 3px 0px rgba(15, 23, 42, 0.06), 0px 1px 2px -1px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0px 4px 8px -2px rgba(15, 23, 42, 0.06), 0px 2px 4px -2px rgba(15, 23, 42, 0.04);
-  --shadow-lg: 0px 12px 24px -6px rgba(15, 23, 42, 0.10), 0px 4px 8px -4px rgba(15, 23, 42, 0.05);
-  --shadow-xl: 0px 24px 32px -8px rgba(15, 23, 42, 0.12), 0px 8px 16px -8px rgba(15, 23, 42, 0.06);
-  --shadow-2xl: 0px 32px 64px -16px rgba(15, 23, 42, 0.18);
+  --radius: .75rem;
+  --shadow-2xs: 0px 1px 2px 0px rgba(30, 58, 138, 0.05);
+  --shadow-xs: 0px 1px 3px 0px rgba(30, 58, 138, 0.06);
+  --shadow-sm: 0px 1px 2px 0px rgba(30, 58, 138, 0.06), 0px 1px 3px 0px rgba(30, 58, 138, 0.05);
+  --shadow: 0px 2px 6px -1px rgba(30, 58, 138, 0.08), 0px 1px 2px -1px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0px 6px 16px -4px rgba(30, 58, 138, 0.10), 0px 2px 6px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0px 16px 32px -10px rgba(30, 58, 138, 0.16), 0px 6px 12px -6px rgba(15, 23, 42, 0.06);
+  --shadow-xl: 0px 28px 48px -12px rgba(30, 58, 138, 0.20), 0px 10px 20px -10px rgba(15, 23, 42, 0.08);
+  --shadow-2xl: 0px 40px 72px -20px rgba(30, 58, 138, 0.28);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -213,8 +213,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background-image:
-      radial-gradient(1200px 600px at 100% -10%, hsl(221 83% 53% / 0.05), transparent 60%),
-      radial-gradient(900px 500px at -10% 0%, hsl(217 91% 60% / 0.04), transparent 55%);
+      radial-gradient(1100px 620px at 100% -8%, hsl(221 83% 56% / 0.07), transparent 60%),
+      radial-gradient(900px 540px at -8% 4%, hsl(217 91% 62% / 0.06), transparent 55%),
+      radial-gradient(760px 760px at 50% 118%, hsl(243 75% 64% / 0.05), transparent 60%);
     background-attachment: fixed;
   }
 
@@ -276,6 +277,41 @@
 @layer utilities {
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;
+  }
+
+  /* ── Premium glassmorphism surfaces ──────────────────────────────────────── */
+  /* Frosted translucent card surface — sits over the ambient gradient body. */
+  .glass-surface {
+    background-color: hsl(var(--card) / 0.78);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  /* A more pronounced frosted panel for hero / elevated surfaces. */
+  .glass-panel {
+    background-color: hsl(0 0% 100% / 0.7);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    border: 1px solid hsl(0 0% 100% / 0.65);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.6),
+      0px 28px 56px -20px rgba(30, 58, 138, 0.28);
+  }
+
+  /* Subtle top "glass" highlight for elevated cards. */
+  .glass-highlight {
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.55);
+  }
+
+  /* Soft ambient blue lift used on interactive cards. */
+  .premium-lift {
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .premium-lift:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0px 22px 44px -16px rgba(30, 58, 138, 0.26),
+      0px 6px 14px -8px rgba(15, 23, 42, 0.08);
   }
 
   [contenteditable][data-placeholder]:empty::before {
