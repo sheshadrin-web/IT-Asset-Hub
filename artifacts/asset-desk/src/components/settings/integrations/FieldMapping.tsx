@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseConfigured } from "@/lib/supabaseClient";
-import { ArrowRight, Save, AlertCircle } from "lucide-react";
+import { ArrowRight, Save, AlertCircle, ArrowLeftRight } from "lucide-react";
 import { DEFAULT_FIELD_MAPPING, MILES_FIELDS, type FieldMappingRow } from "@/lib/hrIntegrations";
 import type { IntegrationRow } from "@/lib/hrSyncTypes";
 import { getIntegrations, getFieldMapping, saveFieldMapping } from "@/lib/integrationService";
@@ -67,16 +67,14 @@ export default function FieldMapping() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-semibold">Field Mapping</CardTitle>
-        <CardDescription className="text-xs">
-          Map fields from your HR portal to Miles IT Hub user fields. These mappings are used when employees are imported.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SettingsCard
+      icon={ArrowLeftRight}
+      title="Field Mapping"
+      description="Map fields from your HR portal to Miles IT Hub user fields. These mappings are used when employees are imported."
+    >
+      <div className="space-y-4">
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-field-mapping">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-field-mapping">
             <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
             <p className="text-sm text-red-800">{error}</p>
           </div>
@@ -85,7 +83,7 @@ export default function FieldMapping() {
         {loading ? (
           <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
         ) : !integration ? (
-          <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground" data-testid="empty-field-mapping">
+          <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground" data-testid="empty-field-mapping">
             Connect an HR portal first — field mapping is saved per integration.
           </div>
         ) : (
@@ -93,10 +91,10 @@ export default function FieldMapping() {
             <p className="text-xs text-muted-foreground">
               Editing mapping for <span className="font-medium text-foreground">{integration.provider_name}</span>.
             </p>
-            <div className="rounded-lg border border-border overflow-hidden">
+            <div className="rounded-xl border border-card-border/70 overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead>HR Portal Field</TableHead>
                     <TableHead className="w-8" />
                     <TableHead>Miles IT Hub Field</TableHead>
@@ -135,7 +133,7 @@ export default function FieldMapping() {
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsCard>
   );
 }

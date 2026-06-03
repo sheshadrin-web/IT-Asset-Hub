@@ -129,14 +129,14 @@ export default function HrPortals({ onViewLogs }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-integrations">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-integrations">
           <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
 
       {noneConnected && !error && (
-        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 flex items-start gap-3" data-testid="empty-integrations">
+        <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 flex items-start gap-3" data-testid="empty-integrations">
           <Plug className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
           <p className="text-sm text-muted-foreground">
             Connect your HR portal to keep your user directory in sync and recover assets when employees leave.
@@ -152,8 +152,8 @@ export default function HrPortals({ onViewLogs }: Props) {
           const connected = status === "connected";
           const rowBusy = row ? busy === row.id : false;
           return (
-            <Card key={provider.id} className="overflow-hidden" data-testid={`card-integration-${provider.id}`}>
-              <CardContent className="p-4 space-y-4">
+            <Card key={provider.id} className="overflow-hidden premium-lift" data-testid={`card-integration-${provider.id}`}>
+              <CardContent className="p-5 space-y-4">
                 <div className="flex items-start gap-3">
                   <div className={`h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold ring-1 ${provider.accent}`}>
                     {provider.monogram}
@@ -175,7 +175,7 @@ export default function HrPortals({ onViewLogs }: Props) {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 pt-4 border-t border-card-border/70">
                   {connected && row ? (
                     <>
                       <Button size="sm" variant="outline" onClick={() => handleSync(row)} disabled={rowBusy} data-testid={`button-sync-${provider.id}`}>
