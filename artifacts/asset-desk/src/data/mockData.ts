@@ -24,6 +24,13 @@ export interface Profile {
   created_at:         string;
   updated_at:         string;
   profile_photo_url?: string;
+  hr_employee_id?:    string | null;
+  designation?:       string | null;
+  phone?:             string | null;
+  joining_date?:      string | null;
+  employment_status?: string | null;
+  hr_source?:         string | null;
+  last_hr_sync_at?:   string | null;
 }
 
 export interface CurrentUser {

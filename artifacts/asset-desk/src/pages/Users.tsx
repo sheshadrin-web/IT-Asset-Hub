@@ -70,25 +70,45 @@ const statusLabel: Record<UserStatus, string> = {
 };
 
 // ─── Column filter helpers ─────────────────────────────────────────────────────
-type UserColKey = "ecode" | "name" | "role" | "department" | "location" | "status";
+type UserColKey =
+  | "ecode" | "name" | "role" | "department" | "manager" | "location"
+  | "status" | "hr_status" | "hr_source" | "employee_id" | "last_synced";
 
 const USER_COL_DEFS: { label: string; key: UserColKey }[] = [
-  { label: "E-Code",     key: "ecode"      },
-  { label: "Employee",   key: "name"       },
-  { label: "Role",       key: "role"       },
-  { label: "Department", key: "department" },
-  { label: "Location",   key: "location"   },
-  { label: "Status",     key: "status"     },
+  { label: "E-Code",      key: "ecode"       },
+  { label: "Employee",    key: "name"        },
+  { label: "Role",        key: "role"        },
+  { label: "Department",  key: "department"  },
+  { label: "Manager",     key: "manager"     },
+  { label: "Location",    key: "location"    },
+  { label: "App Status",  key: "status"      },
+  { label: "HR Status",   key: "hr_status"   },
+  { label: "HR Source",   key: "hr_source"   },
+  { label: "Employee ID", key: "employee_id" },
+  { label: "Last Synced", key: "last_synced" },
 ];
+
+function fmtSynced(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
 
 function getUserColValue(u: import("@/data/mockData").Profile, col: UserColKey): string {
   switch (col) {
-    case "ecode":      return u.ecode ?? "";
-    case "name":       return u.full_name;
-    case "role":       return ROLE_LABELS[u.role] ?? u.role;
-    case "department": return u.department;
-    case "location":   return u.location;
-    case "status":     return statusLabel[u.status] ?? u.status;
+    case "ecode":       return u.ecode ?? "";
+    case "name":        return u.full_name;
+    case "role":        return ROLE_LABELS[u.role] ?? u.role;
+    case "department":  return u.department;
+    case "manager":     return u.reporting_manager ?? "";
+    case "location":    return u.location;
+    case "status":      return statusLabel[u.status] ?? u.status;
+    case "hr_status":   return u.employment_status ?? "";
+    case "hr_source":   return u.hr_source ?? "";
+    case "employee_id": return u.hr_employee_id ?? "";
+    case "last_synced": return fmtSynced(u.last_hr_sync_at);
   }
 }
 
@@ -137,8 +157,8 @@ function downloadCsv(content: string, filename: string) {
 }
 
 function exportUsers(users: Profile[]) {
-  const header = ["User ID", "E-Code", "Name", "Email", "Role", "Department", "Location", "Reporting Manager", "Status"];
-  const rows   = users.map(u => [u.id, u.ecode ?? "", u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, u.reporting_manager ?? "", statusLabel[u.status]]);
+  const header = ["User ID", "E-Code", "Name", "Email", "Role", "Department", "Location", "Reporting Manager", "Status", "HR Employee ID", "HR Status", "HR Source", "Last Synced"];
+  const rows   = users.map(u => [u.id, u.ecode ?? "", u.full_name, u.email, ROLE_LABELS[u.role], u.department, u.location, u.reporting_manager ?? "", statusLabel[u.status], u.hr_employee_id ?? "", u.employment_status ?? "", u.hr_source ?? "", fmtSynced(u.last_hr_sync_at)]);
   const csv    = [header, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
   downloadCsv(csv, `users_export_${new Date().toISOString().split("T")[0]}.csv`);
 }
@@ -1243,10 +1263,10 @@ export default function Users() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
+                  <tr><td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">Loading users…</td></tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                       {users.length === 0 ? "No users found. Add your first user above." : "No users match the current filters."}
                     </td>
                   </tr>
@@ -1305,12 +1325,25 @@ export default function Users() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{user.department || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{user.reporting_manager || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{user.location || "—"}</td>
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", statusColors[user.status])}>
                           {statusLabel[user.status]}
                         </span>
                       </td>
+                      <td className="px-4 py-3">
+                        {user.employment_status
+                          ? <span className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium capitalize text-muted-foreground">{user.employment_status}</span>
+                          : <span className="text-muted-foreground text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{user.hr_source || "—"}</td>
+                      <td className="px-4 py-3">
+                        {user.hr_employee_id
+                          ? <span className="font-mono text-xs text-foreground">{user.hr_employee_id}</span>
+                          : <span className="text-muted-foreground text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">{fmtSynced(user.last_hr_sync_at) || "—"}</td>
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         {isAdmin ? (
                           <DropdownMenu>

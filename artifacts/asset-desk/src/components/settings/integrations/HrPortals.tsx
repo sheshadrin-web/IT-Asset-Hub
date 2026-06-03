@@ -84,7 +84,7 @@ export default function HrPortals({ onViewLogs }: Props) {
       const res = await runSync(row.id);
       toast({
         title: "Sync complete",
-        description: `${res.employees_fetched} employees fetched · ${res.users_created} new · ${res.users_updated} updated · ${res.offboarding_detected} offboarding.`,
+        description: `${res.employees_fetched} employees fetched · ${res.users_created} new · ${res.users_updated} updated · ${res.users_deactivated} deactivated · ${res.assets_recovered} assets to recovery.`,
       });
       await load();
     } catch (e) {
@@ -139,7 +139,7 @@ export default function HrPortals({ onViewLogs }: Props) {
         <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 flex items-start gap-3" data-testid="empty-integrations">
           <Plug className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
           <p className="text-sm text-muted-foreground">
-            Connect your HR portal to automate onboarding, offboarding, and asset recovery.
+            Connect your HR portal to keep your user directory in sync and recover assets when employees leave.
           </p>
         </div>
       )}

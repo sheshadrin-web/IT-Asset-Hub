@@ -33,6 +33,8 @@ export interface SyncLogRow {
   employees_fetched: number;
   users_created: number;
   users_updated: number;
+  users_deactivated: number;
+  assets_recovered: number;
   offboarding_detected: number;
   errors_count: number;
   error_message: string | null;
@@ -45,6 +47,8 @@ export interface SyncResult {
   employees_fetched: number;
   users_created: number;
   users_updated: number;
+  users_deactivated: number;
+  assets_recovered: number;
   offboarding_detected: number;
   errors: number;
 }
@@ -111,9 +115,12 @@ export interface HrProfileRow {
 
 export interface HrDashboardSummary {
   integrations_connected: number;
-  onboarding_pending: number;
-  offboarding_started: number;
+  active_users: number;
+  deactivated_users: number;
+  hr_synced_users: number;
   assets_in_recovery: number;
+  last_hr_sync: string | null;
+  sync_errors: number;
   devices_not_seen_recently: number;
   recovery_overdue: number;
 }

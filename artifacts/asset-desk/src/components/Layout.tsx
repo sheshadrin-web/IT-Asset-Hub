@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
   LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Package,
-  Edit, Zap, UserCog,
+  Edit, Zap, ShieldAlert,
 } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
   { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin", "hr_admin"] },
-  { label: "Onboarding",   icon: UserCog,         href: "/hr-queues",   roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
+  { label: "Asset Recovery", icon: ShieldAlert,   href: "/asset-recovery", roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
   { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
   { label: "Settings",     icon: Settings,        href: "/settings",    roles: ["super_admin"] },
 ];

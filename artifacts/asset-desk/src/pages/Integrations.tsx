@@ -5,10 +5,9 @@ import { useAuth } from "@/context/AuthContext";
 import HrPortals from "@/components/settings/integrations/HrPortals";
 import FieldMapping from "@/components/settings/integrations/FieldMapping";
 import SyncLogs from "@/components/settings/integrations/SyncLogs";
-import AutomationRules from "@/components/settings/integrations/AutomationRules";
 import { ChevronLeft, Plug, Info } from "lucide-react";
 
-type TabKey = "portals" | "mapping" | "logs" | "automation";
+type TabKey = "portals" | "mapping" | "logs";
 
 export default function Integrations() {
   const { currentUser } = useAuth();
@@ -39,17 +38,17 @@ export default function Integrations() {
           <h1 className="text-xl font-bold text-foreground">Integrations</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Connect HR portals to automate employee onboarding, offboarding, and asset recovery.
+          Connect HR portals to keep your user directory in sync and recover assets automatically when employees leave.
         </p>
       </div>
 
       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3" data-testid="banner-integrations-info">
         <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
         <p className="text-sm text-blue-800">
-          Connect a portal, then run a sync to pull employees. New joiners appear in the Onboarding Queue and
-          departures move their assigned assets into Recovery Mode automatically. The current build ships with a
-          demo employee feed so you can see the full flow; live Zoho People / Keka API calls activate once real
-          API credentials are validated.
+          Connect a portal, then run a sync to pull employees. New and updated employees are written straight to your
+          Users directory, and employees marked as exited are deactivated with their assigned assets moved into Recovery
+          Mode automatically. The current build ships with a demo employee feed so you can see the full flow; live
+          Zoho People / Keka API calls activate once real API credentials are validated.
         </p>
       </div>
 
@@ -58,7 +57,6 @@ export default function Integrations() {
           <TabsTrigger value="portals" data-testid="tab-portals">HR Portals</TabsTrigger>
           <TabsTrigger value="mapping" data-testid="tab-mapping">Field Mapping</TabsTrigger>
           <TabsTrigger value="logs" data-testid="tab-logs">Sync Logs</TabsTrigger>
-          <TabsTrigger value="automation" data-testid="tab-automation">Automation Rules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="portals" className="mt-4">
@@ -69,9 +67,6 @@ export default function Integrations() {
         </TabsContent>
         <TabsContent value="logs" className="mt-4">
           <SyncLogs />
-        </TabsContent>
-        <TabsContent value="automation" className="mt-4">
-          <AutomationRules />
         </TabsContent>
       </Tabs>
     </div>

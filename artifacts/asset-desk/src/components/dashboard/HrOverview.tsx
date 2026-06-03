@@ -8,8 +8,16 @@ import { getRecoveryAssets } from "@/lib/recoveryService";
 import type { HrDashboardSummary, RecoveryRow } from "@/lib/hrSyncTypes";
 import RecoveryTable from "@/components/recovery/RecoveryTable";
 import {
-  Plug, UserPlus, UserMinus, ShieldAlert, WifiOff, Clock, ArrowRight, AlertCircle,
+  Plug, RefreshCw, Users as UsersIcon, UserMinus, ShieldAlert, Clock, ArrowRight, AlertCircle,
 } from "lucide-react";
+
+function fmtSync(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "Never"
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 // Mirrors _hr_can_read() in the migration — only these roles may read HR data.
 const HR_READ_ROLES = ["super_admin", "it_admin", "it_agent", "hr_admin"];
@@ -52,21 +60,29 @@ export default function HrOverview() {
 
   const cards = [
     { label: "HR Integrations", value: summary?.integrations_connected ?? 0, icon: Plug, color: "text-violet-600", bg: "bg-violet-500/10", href: "/settings/integrations" },
-    { label: "Onboarding Pending", value: summary?.onboarding_pending ?? 0, icon: UserPlus, color: "text-blue-600", bg: "bg-blue-500/10", href: "/hr-queues" },
-    { label: "Offboarding Started", value: summary?.offboarding_started ?? 0, icon: UserMinus, color: "text-amber-600", bg: "bg-amber-500/10", href: "/hr-queues" },
-    { label: "Assets in Recovery", value: summary?.assets_in_recovery ?? 0, icon: ShieldAlert, color: "text-orange-600", bg: "bg-orange-500/10", href: "/hr-queues" },
-    { label: "Devices Not Seen 7d+", value: summary?.devices_not_seen_recently ?? 0, icon: WifiOff, color: "text-red-600", bg: "bg-red-500/10", href: "/hr-queues" },
-    { label: "Recovery Overdue", value: summary?.recovery_overdue ?? 0, icon: Clock, color: "text-red-600", bg: "bg-red-500/10", href: "/hr-queues" },
+    { label: "HR-Synced Users", value: summary?.hr_synced_users ?? 0, icon: RefreshCw, color: "text-blue-600", bg: "bg-blue-500/10", href: "/users" },
+    { label: "Active Users", value: summary?.active_users ?? 0, icon: UsersIcon, color: "text-emerald-600", bg: "bg-emerald-500/10", href: "/users" },
+    { label: "Deactivated Users", value: summary?.deactivated_users ?? 0, icon: UserMinus, color: "text-amber-600", bg: "bg-amber-500/10", href: "/users" },
+    { label: "Assets in Recovery", value: summary?.assets_in_recovery ?? 0, icon: ShieldAlert, color: "text-orange-600", bg: "bg-orange-500/10", href: "/asset-recovery" },
+    { label: "Recovery Overdue", value: summary?.recovery_overdue ?? 0, icon: Clock, color: "text-red-600", bg: "bg-red-500/10", href: "/asset-recovery" },
   ];
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Plug className="h-4 w-4 text-muted-foreground" />
-            HR &amp; Asset Recovery Overview
-          </CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Plug className="h-4 w-4 text-muted-foreground" />
+              HR &amp; Asset Recovery Overview
+            </CardTitle>
+            <span className="text-[11px] text-muted-foreground">
+              Last HR sync: {loading ? "—" : fmtSync(summary?.last_hr_sync)}
+              {!loading && (summary?.sync_errors ?? 0) > 0 && (
+                <span className="ml-2 text-red-600 font-medium">{summary?.sync_errors} sync error(s)</span>
+              )}
+            </span>
+          </div>
         </CardHeader>
         <CardContent>
           {error ? (
@@ -98,9 +114,9 @@ export default function HrOverview() {
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-muted-foreground" />Assets in Recovery
+            <ShieldAlert className="h-4 w-4 text-muted-foreground" />Assets in Recovery Mode
           </CardTitle>
-          <Link href="/hr-queues" className="text-xs text-primary hover:underline font-medium">Manage all →</Link>
+          <Link href="/asset-recovery" className="text-xs text-primary hover:underline font-medium">Manage all →</Link>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (

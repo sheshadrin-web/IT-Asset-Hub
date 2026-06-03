@@ -51,7 +51,7 @@ export default function SyncLogs() {
         <div>
           <CardTitle className="text-sm font-semibold">Sync Logs</CardTitle>
           <CardDescription className="text-xs">
-            A record of every HR sync — start/finish time, status, and how many employees were fetched, created, updated, or detected as offboarding.
+            A record of every HR sync — start/finish time, status, and how many employees were fetched, created, updated, deactivated, and how many assets moved into recovery.
           </CardDescription>
         </div>
         <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading} data-testid="button-refresh-logs">
@@ -89,7 +89,8 @@ export default function SyncLogs() {
                   <TableHead className="text-right">Fetched</TableHead>
                   <TableHead className="text-right">New</TableHead>
                   <TableHead className="text-right">Updated</TableHead>
-                  <TableHead className="text-right">Offboarding</TableHead>
+                  <TableHead className="text-right">Deactivated</TableHead>
+                  <TableHead className="text-right">Recovered</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -103,7 +104,8 @@ export default function SyncLogs() {
                       <TableCell className="text-right tabular-nums">{l.employees_fetched}</TableCell>
                       <TableCell className="text-right tabular-nums">{l.users_created}</TableCell>
                       <TableCell className="text-right tabular-nums">{l.users_updated}</TableCell>
-                      <TableCell className="text-right tabular-nums">{l.offboarding_detected}</TableCell>
+                      <TableCell className="text-right tabular-nums">{l.users_deactivated}</TableCell>
+                      <TableCell className="text-right tabular-nums">{l.assets_recovered}</TableCell>
                     </TableRow>
                   );
                 })}
