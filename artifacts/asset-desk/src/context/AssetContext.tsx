@@ -141,6 +141,7 @@ interface AssetContextType {
   deleteAssets:             (ids: string[]) => Promise<void>;
   resetAcknowledgement:     (assetId: string) => Promise<void>;
   markAcknowledged:         (assetId: string) => Promise<void>;
+  bulkMarkAcknowledged:     (assetIds: string[]) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -486,6 +487,26 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const bulkMarkAcknowledged = async (assetIds: string[]): Promise<void> => {
+    if (assetIds.length === 0) return;
+    const ackAt = new Date().toISOString();
+    // Only flip assets that are genuinely Assigned + still pending, so stale
+    // selections or races can never acknowledge an ineligible asset.
+    const { error } = await supabase
+      .from("assets")
+      .update({ acknowledged: true, acknowledged_at: ackAt })
+      .in("asset_id", assetIds)
+      .eq("status", "Assigned")
+      .eq("acknowledged", false);
+    if (error) throw new Error(error.message);
+    const idSet = new Set(assetIds);
+    setAssets(prev => prev.map(a =>
+      idSet.has(a.assetId) && a.status === "Assigned" && !a.acknowledged
+        ? { ...a, acknowledged: true, acknowledgedAt: ackAt }
+        : a
+    ));
+  };
+
   const bulkAssignAssets = async (
     assetIds: string[], userId: string, userName: string, userEmail: string,
     department: string, handoverNote?: string, reason?: string
@@ -596,6 +617,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
       assets, loading, error, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
       updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, markAcknowledged,
+      bulkMarkAcknowledged,
     }}>
       {children}
     </AssetContext.Provider>

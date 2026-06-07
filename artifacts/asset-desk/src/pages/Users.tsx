@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getSiteUrl } from "@/lib/supabaseClient";
 import {
   Plus, Search, MoreHorizontal, Edit, Trash2, Download,
   X, UserX, RefreshCw, AlertTriangle, Eye, EyeOff,
@@ -830,7 +830,7 @@ export default function Users() {
     setResetSending(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(editingUser.email, {
-        redirectTo: window.location.origin,
+        redirectTo: getSiteUrl(),
       });
       if (error) throw error;
       toast({ title: "Reset link sent", description: `A password reset email has been sent to ${editingUser.email}.` });
@@ -868,7 +868,7 @@ export default function Users() {
     setResetPassSaving(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(resetPassTarget.email, {
-        redirectTo: window.location.origin,
+        redirectTo: getSiteUrl(),
       });
       if (error) throw error;
       toast({ title: "Reset link sent", description: `A password reset email has been sent to ${resetPassTarget.email}.` });
@@ -2560,12 +2560,12 @@ export default function Users() {
               Cancel
             </Button>
             <Button
-              onClick={handleImportSubmit}
-              disabled={
-                importRows.length === 0 ||
-                importLoading ||
-                importRows.every(r => r._status === "ok" || r._status === "skipped")
+              onClick={
+                (importSummary || (importRows.length > 0 && importRows.every(r => r._status === "ok" || r._status === "skipped")))
+                  ? () => { setImportOpen(false); setImportSummary(null); setImportRows([]); }
+                  : handleImportSubmit
               }
+              disabled={importRows.length === 0 || importLoading}
             >
               {importLoading
                 ? `Importing… ${importRows.filter(r => r._status === "ok").length} / ${importRows.filter(r => r._status !== "skipped").length}`

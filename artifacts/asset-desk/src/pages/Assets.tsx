@@ -188,7 +188,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, loading, error, refresh, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
+  const { assets, loading, error, refresh, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset, bulkMarkAcknowledged } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -203,6 +203,8 @@ export default function Assets() {
   const [deviceMap, setDeviceMap]       = useState<Map<string, DeviceLike>>(new Map());
   const [deviceMapLoaded, setDeviceMapLoaded] = useState(false);
   const [sendingReminders, setSendingReminders] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
+  const [ackConfirmOpen, setAckConfirmOpen] = useState(false);
   const [colFilters, setColFilters]     = useState<Record<ColKey, Set<string>>>(makeEmptyColFilters);
   const [sortCol, setSortCol]           = useState<ColKey>("assetId");
   const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
@@ -433,6 +435,36 @@ export default function Assets() {
       !!a.assignedEmail &&
       !!a.ackToken,
     );
+
+  // Selected assets that are Assigned + still pending acknowledgement. Unlike
+  // reminders, marking acknowledged manually does not require an email/ack token.
+  const selectedPendingAckAll = filtered.filter(a =>
+    selected.has(a.assetId) &&
+    a.status === "Assigned" &&
+    !a.acknowledged,
+  );
+
+  const handleBulkAcknowledge = async () => {
+    const ids = selectedPendingAckAll.map(a => a.assetId);
+    if (ids.length === 0) return;
+    setAcknowledging(true);
+    try {
+      await bulkMarkAcknowledged(ids);
+      toast({
+        title: `${ids.length} asset${ids.length !== 1 ? "s" : ""} marked as acknowledged`,
+      });
+      setSelected(new Set());
+      setAckConfirmOpen(false);
+    } catch (err) {
+      toast({
+        title: "Failed to mark as acknowledged",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAcknowledging(false);
+    }
+  };
 
   const handleSendReminders = async () => {
     if (selectedPendingAck.length === 0) return;
@@ -1076,6 +1108,24 @@ export default function Assets() {
                   (selectedPendingAck.length ? ` (${selectedPendingAck.length})` : "")}
             </Button>
           )}
+          {ackFilter === "pending" && (
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => setAckConfirmOpen(true)}
+              disabled={acknowledging || selectedPendingAckAll.length === 0}
+              data-testid="button-mark-acknowledged"
+            >
+              {acknowledging
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {acknowledging
+                ? "Marking…"
+                : "Mark as Acknowledged" +
+                  (selectedPendingAckAll.length ? ` (${selectedPendingAckAll.length})` : "")}
+            </Button>
+          )}
           <Button size="sm" variant="destructive" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
             <Trash2 className="h-3.5 w-3.5" /> Delete {selectedCount}
           </Button>
@@ -1222,6 +1272,22 @@ export default function Assets() {
             <AlertDialogCancel disabled={assigning}>Back</AlertDialogCancel>
             <AlertDialogAction onClick={handleAssignConfirm} disabled={assigning}>
               {assigning ? "Assigning…" : "Confirm Assignment"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk mark-acknowledged confirm */}
+      <AlertDialog open={ackConfirmOpen} onOpenChange={setAckConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark {selectedPendingAckAll.length} Asset{selectedPendingAckAll.length !== 1 ? "s" : ""} as Acknowledged?</AlertDialogTitle>
+            <AlertDialogDescription>This marks the selected assigned assets as acknowledged on behalf of their assignees. Only assets still pending acknowledgement are affected.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={acknowledging}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={(e) => { e.preventDefault(); handleBulkAcknowledge(); }} disabled={acknowledging}>
+              {acknowledging ? "Marking…" : "Mark as Acknowledged"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -20,6 +20,29 @@ const supabaseAnon = sanitiseEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY as 
 // This client uses the anon key only — the service role key must NEVER be placed here.
 export const supabaseConfigured = !!supabaseUrl && !!supabaseAnon;
 
+// Production URL of the deployed portal. Password-reset / recovery emails must
+// always point users here — NEVER at an admin's local dev origin.
+const PRODUCTION_SITE_URL = "https://it-asset-hub-a7rf.onrender.com";
+
+// Resolve the public site URL used for auth redirect links (e.g. password
+// reset). Admins frequently trigger resets from a local dev build, where
+// `window.location.origin` is `http://localhost:3000` — sending that link to an
+// end user produces an unreachable "localhost refused to connect" page. We
+// therefore prefer an explicit override, then the live origin, and fall back to
+// the known production URL whenever we're on localhost/127.0.0.1.
+export function getSiteUrl(): string {
+  const override = sanitiseEnvValue(import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined);
+  if (override) return override.replace(/\/+$/, "");
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    const origin = window.location.origin;
+    if (!/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|$)/i.test(origin)) {
+      return origin.replace(/\/+$/, "");
+    }
+  }
+  return PRODUCTION_SITE_URL;
+}
+
 export const supabase = createClient(
   supabaseUrl  ?? 'https://placeholder.supabase.co',
   supabaseAnon ?? 'placeholder-anon-key',
