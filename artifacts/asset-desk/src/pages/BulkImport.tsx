@@ -597,7 +597,7 @@ export default function BulkImport() {
           if (!simProvider) warnings.push("Provider missing (Airtel / Jio / Vodafone)");
         }
         else if (!serialNumber && !get(row, "model")) warnings.push("Serial number missing");
-        if (!purchaseDate) warnings.push("Could not parse purchase date");
+        if (!purchaseDate && !isSimCard) warnings.push("Could not parse purchase date");
         if (status === "Assigned" && !matchedUser && (empCode || empName))
           warnings.push(`Employee "${empCode || empName}" not found in system — will store name only`);
         if (statusWarn) warnings.push(statusWarn);
@@ -623,8 +623,8 @@ export default function BulkImport() {
           processor:       get(row, "processor"),
           ram:             normSize(get(row, "ram")),
           storage:         normSize(get(row, "storage")),
-          purchaseDate:    purchaseDate || new Date().toISOString().split("T")[0],
-          warrantyEndDate,
+          purchaseDate:    purchaseDate || (isSimCard ? "" : new Date().toISOString().split("T")[0]),
+          warrantyEndDate: isSimCard && !rawWarranty ? "" : warrantyEndDate,
           location:        get(row, "location") || "N/A",
           status,
           assignedEmail:   matchedUser?.email ?? (empName || empCode || ""),
@@ -713,8 +713,8 @@ export default function BulkImport() {
         mouse:             "",
         cpu:               "",
         others:            "",
-        purchase_date:     r.purchaseDate,
-        warranty_end_date: r.warrantyEndDate,
+        purchase_date:     r.purchaseDate    || null,
+        warranty_end_date: r.warrantyEndDate || null,
         status:            r.status,
         assigned_to:       r.assignedToId     || null,
         assigned_email:    r.assignedToId ? (r.assignedEmail || null) : null,
