@@ -45,7 +45,7 @@ import { getDirectReports } from "@/lib/reportingManager";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
 import { useAuth } from "@/context/AuthContext";
-import { Profile, UserRole, UserStatus, ROLE_LABELS, Ticket, Asset } from "@/data/mockData";
+import { Profile, UserRole, UserStatus, ROLE_LABELS, Ticket } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { adminUsersApi } from "@/lib/adminUsersApi";
 import { cn } from "@/lib/utils";
@@ -166,7 +166,7 @@ function exportUsers(users: Profile[]) {
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Users() {
   const { users, loading, error, refresh, updateUser, deleteUser, changeReportingManager, fetchManagerHistory } = useUsers();
-  const { assets, refresh: refreshAssets, markAcknowledged } = useAssets();
+  const { assets, refresh: refreshAssets } = useAssets();
   const { tickets } = useTickets();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -207,66 +207,107 @@ export default function Users() {
   const [actionSaving,   setActionSaving]   = useState<string | null>(null);
   const [resetSending,   setResetSending]   = useState(false);
 
-  // Acknowledgement actions on a user's assigned-hardware cards (admin only).
-  const [ackBusyId,  setAckBusyId]  = useState<string | null>(null);
-  const [resendById, setResendById] = useState<Record<string, "idle" | "sending" | "sent" | "error">>({});
+  // Consolidated acknowledgement email for a user's pending assets (admin only).
+  // `label` is shown in the dropdown; `reason` must match the values the
+  // send-bulk-assignment-email edge function recognises ("New Joiner",
+  // "Replacement", "Additional Asset") to pick the right subject/intro template.
+  const ACK_CATEGORIES = [
+    { label: "New Joiner",        reason: "New Joiner" },
+    { label: "Replacement",       reason: "Replacement" },
+    { label: "Additional Assets", reason: "Additional Asset" },
+  ] as const;
+  const [ackEmailSending, setAckEmailSending] = useState(false);
 
-  const handleMarkAck = async (a: Asset) => {
-    if (ackBusyId) return;
-    setAckBusyId(a.assetId);
-    try {
-      await markAcknowledged(a.assetId);
-      toast({ title: "Marked as acknowledged", description: `${a.assetId} acknowledged on behalf of ${a.assignedTo ?? "user"}.` });
-    } catch (err) {
-      toast({ title: "Failed to mark acknowledged", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
-    } finally {
-      setAckBusyId(null);
+  const sendAckEmail = async (vu: Profile, category: { label: string; reason: string }) => {
+    if (ackEmailSending) return;
+    if (!vu.email) {
+      toast({ title: "Missing email", description: "This user has no email address on file.", variant: "destructive" });
+      return;
     }
-  };
-
-  const handleResendAck = async (a: Asset) => {
-    if (!a.assignedEmail || !a.ackToken) return;
-    const cur = resendById[a.assetId];
-    if (cur === "sending" || cur === "sent") return;
-    setResendById(prev => ({ ...prev, [a.assetId]: "sending" }));
+    const pending = assets.filter(a => a.assignedEmail === vu.email && a.status === "Assigned" && !a.acknowledged);
+    if (pending.length === 0) {
+      toast({ title: "Nothing to send", description: "This user has no pending-acknowledgement assets." });
+      return;
+    }
+    setAckEmailSending(true);
     try {
-      const { data, error } = await supabase.functions.invoke("send-assignment-email", {
+      // Ensure every pending asset has an ack token so the email's acknowledgement
+      // links resolve. Assets imported/assigned without one get a token now.
+      const tokens: Record<string, string> = {};
+      for (const a of pending) {
+        if (a.ackToken) { tokens[a.assetId] = a.ackToken; continue; }
+        const newToken = crypto.randomUUID();
+        const { error: tokErr } = await supabase
+          .from("assets")
+          .update({ ack_token: newToken })
+          .eq("asset_id", a.assetId);
+        if (tokErr) throw new Error(tokErr.message);
+        tokens[a.assetId] = newToken;
+      }
+
+      // Best-effort manager email resolution (mirrors the assign flow).
+      let managerEmail: string | undefined;
+      try {
+        const { data: userProfile } = await supabase
+          .from("profiles")
+          .select("reporting_manager")
+          .eq("id", vu.id)
+          .single();
+        const rmValue = (userProfile as { reporting_manager?: string } | null)?.reporting_manager?.trim();
+        if (rmValue) {
+          if (rmValue.includes("@")) {
+            managerEmail = rmValue;
+          } else {
+            const { data: managerProfile } = await supabase
+              .from("profiles")
+              .select("email")
+              .ilike("full_name", rmValue)
+              .maybeSingle();
+            managerEmail = (managerProfile as { email?: string } | null)?.email ?? undefined;
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      const { data, error } = await supabase.functions.invoke("send-bulk-assignment-email", {
         body: {
-          toEmail:         a.assignedEmail,
-          toName:          a.assignedTo ?? a.assignedEmail,
-          brand:           a.brand,
-          model:           a.model,
-          assetType:       a.assetType,
-          assetId:         a.assetId,
-          serialNumber:    a.serialNumber,
-          processor:       a.processor,
-          ram:             a.ram,
-          storage:         a.storage,
-          operatingSystem: a.operatingSystem,
-          imei1:           a.imeiNumber,
-          imei2:           a.imei2,
-          phoneNumber:     a.phoneNumber,
-          monitorBrand:    a.monitorBrand,
-          monitorModel:    a.monitorModel,
-          monitorSize:     a.monitorSize,
-          keyboard:        a.keyboard,
-          mouse:           a.mouse,
-          accessories:     a.accessories,
-          reason:          "",
-          ackToken:        a.ackToken,
-          isReminder:      "true",
+          toEmail: vu.email,
+          toName:  vu.full_name ?? vu.email,
+          assets:  pending.map(a => ({
+            assetId:         a.assetId,
+            assetType:       a.assetType,
+            brand:           a.brand,
+            model:           a.model,
+            serialNumber:    a.serialNumber,
+            processor:       a.processor,
+            ram:             a.ram,
+            storage:         a.storage,
+            operatingSystem: a.operatingSystem,
+            imei1:           a.imeiNumber,
+            imei2:           a.imei2,
+            phoneNumber:     a.phoneNumber,
+            simProvider:     a.simProvider,
+            keyboard:        a.keyboard,
+            mouse:           a.mouse,
+            monitorBrand:    a.monitorBrand,
+            monitorModel:    a.monitorModel,
+            monitorSize:     a.monitorSize,
+            accessories:     a.accessories,
+            ackToken:        tokens[a.assetId],
+          })),
+          managerEmail,
+          reason:       category.reason,
+          handoverNote: "",
         },
       });
       if (error) throw new Error(error.message);
-      const d = data as { success?: boolean; error?: string };
+      const d = (data ?? {}) as { success?: boolean; error?: string };
       if (d.error) throw new Error(d.error);
-      setResendById(prev => ({ ...prev, [a.assetId]: "sent" }));
-      toast({ title: "Email re-sent", description: `Acknowledgement email sent to ${a.assignedEmail}` });
-      setTimeout(() => setResendById(prev => ({ ...prev, [a.assetId]: "idle" })), 5000);
+      await refreshAssets();
+      toast({ title: "Acknowledgement email sent", description: `${category.label} acknowledgement for ${pending.length} asset${pending.length > 1 ? "s" : ""} sent to ${vu.email}.` });
     } catch (err) {
-      setResendById(prev => ({ ...prev, [a.assetId]: "error" }));
-      toast({ title: "Failed to send", description: err instanceof Error ? err.message : "Failed to send email", variant: "destructive" });
-      setTimeout(() => setResendById(prev => ({ ...prev, [a.assetId]: "idle" })), 4000);
+      toast({ title: "Failed to send", description: err instanceof Error ? err.message : "Could not send acknowledgement email.", variant: "destructive" });
+    } finally {
+      setAckEmailSending(false);
     }
   };
 
@@ -1705,7 +1746,36 @@ export default function Users() {
 
                     {/* Hardware tab */}
                     {activeTab === "hardware" && (
-                      userAssets.length === 0 ? (
+                      <div className="space-y-3">
+                      {canAcknowledge && userAssets.some(a => a.status === "Assigned" && !a.acknowledged) && (
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                          <span className="text-xs text-muted-foreground">
+                            Send one acknowledgement email covering this user's pending assets.
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="sm" className="gap-1.5 self-start sm:self-auto" disabled={ackEmailSending} data-testid="button-send-ack-email">
+                                <Mail className="h-4 w-4" />
+                                {ackEmailSending ? "Sending…" : "Send Acknowledgement Email"}
+                                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {ACK_CATEGORIES.map(cat => (
+                                <DropdownMenuItem
+                                  key={cat.label}
+                                  onClick={() => sendAckEmail(vu, cat)}
+                                  className="cursor-pointer"
+                                  data-testid={`menuitem-ack-${cat.label.replace(/\s+/g, "-").toLowerCase()}`}
+                                >
+                                  {cat.label}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
+                      {userAssets.length === 0 ? (
                         <div className="rounded-lg border border-dashed border-border bg-muted/20 py-12 flex flex-col items-center justify-center gap-2 text-center">
                           <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
                             <Monitor className="h-5 w-5 text-muted-foreground/60" />
@@ -1750,9 +1820,9 @@ export default function Users() {
                                     )}
                                   </div>
 
-                                  {/* Acknowledgement status + admin actions */}
+                                  {/* Acknowledgement status indicator */}
                                   {a.status === "Assigned" && (
-                                    <div className="mt-3 pt-3 border-t border-border/60 space-y-2">
+                                    <div className="mt-3 pt-3 border-t border-border/60">
                                       {a.acknowledged ? (
                                         <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
                                           <UserCheck className="h-3.5 w-3.5" />
@@ -1764,48 +1834,10 @@ export default function Users() {
                                           )}
                                         </span>
                                       ) : (
-                                        <>
-                                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-600">
-                                            <AlertTriangle className="h-3.5 w-3.5" />
-                                            Pending Acknowledgement
-                                          </span>
-                                          {canAcknowledge && (
-                                            <div className="flex flex-wrap gap-2">
-                                              <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="outline"
-                                                className="h-7 gap-1.5 text-[11px]"
-                                                disabled={ackBusyId === a.assetId}
-                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleMarkAck(a); }}
-                                                data-testid={`button-mark-ack-${a.assetId}`}
-                                              >
-                                                <UserCheck className="h-3 w-3" />
-                                                {ackBusyId === a.assetId ? "Saving…" : "Mark as Acknowledged"}
-                                              </Button>
-                                              {a.assignedEmail && a.ackToken && (
-                                                <Button
-                                                  type="button"
-                                                  size="sm"
-                                                  variant="outline"
-                                                  className="h-7 gap-1.5 text-[11px]"
-                                                  disabled={resendById[a.assetId] === "sending" || resendById[a.assetId] === "sent"}
-                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleResendAck(a); }}
-                                                  data-testid={`button-resend-ack-${a.assetId}`}
-                                                >
-                                                  <RefreshCw className={cn("h-3 w-3", resendById[a.assetId] === "sending" && "animate-spin")} />
-                                                  {resendById[a.assetId] === "sending"
-                                                    ? "Sending…"
-                                                    : resendById[a.assetId] === "sent"
-                                                      ? "Sent ✓"
-                                                      : resendById[a.assetId] === "error"
-                                                        ? "Retry send"
-                                                        : "Re-send Acknowledgement Email"}
-                                                </Button>
-                                              )}
-                                            </div>
-                                          )}
-                                        </>
+                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-600">
+                                          <AlertTriangle className="h-3.5 w-3.5" />
+                                          Pending Acknowledgement
+                                        </span>
                                       )}
                                     </div>
                                   )}
@@ -1814,7 +1846,8 @@ export default function Users() {
                             </Link>
                           ))}
                         </div>
-                      )
+                      )}
+                      </div>
                     )}
 
                     {/* Tickets tab */}
