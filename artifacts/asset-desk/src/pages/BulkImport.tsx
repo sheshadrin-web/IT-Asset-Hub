@@ -348,11 +348,11 @@ const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; 
   },
   "Sim Card": {
     filename: "sim_card_import_template.csv",
-    headers: ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"],
+    headers: ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Asset Status","Employee Code","Employee Name","Employee Department"],
     rows: [
-      "SIM-001,Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,2025,Under Warranty,Assigned,John Doe,MPE1234,Sales",
-      "SIM-002,Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,2025,Under Warranty,Available,,,",
-      "SIM-003,Vodafone,9876500002,8991200123456789012,Jane Smith,Support,Miles Education Pvt Ltd,Postpaid 399,399,Hyderabad,2024,Under Warranty,Assigned,Jane Smith,MPE5678,Support",
+      "SIM-001,Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,Assigned,MPE1234,John Doe,Sales",
+      "SIM-002,Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,Available,,,",
+      "SIM-003,Vodafone,9876500002,8991200123456789012,Jane Smith,Support,Miles Education Pvt Ltd,Postpaid 399,399,Hyderabad,Assigned,MPE5678,Jane Smith,Support",
     ],
   },
   Tab: {
@@ -365,6 +365,47 @@ const TEMPLATES: Partial<Record<AssetType, { headers: string[]; rows: string[]; 
     ],
   },
 };
+// Human-friendly hint shown next to each column in the "Supported Columns" guide.
+const COLUMN_DESCRIPTIONS: Record<string, string> = {
+  "Asset Tag":           "Asset ID *",
+  "Type":                "Laptop / Desktop / Mobile *",
+  "Brand":               "Brand name *",
+  "Provider":            "Airtel / Jio / Vodafone",
+  "Model":               "Model name",
+  "Connection":          "Official mobile number",
+  "SIM Number":          "ICCID",
+  "User Name":           "SIM user",
+  "Use Case":            "e.g. Sales Field / Spare",
+  "Billable Name":       "Billed entity",
+  "Plan Name":           "e.g. Postpaid 499",
+  "Plan Amount":         "e.g. 499",
+  "Serial Number":       "Serial number",
+  "Location":            "Office / city",
+  "OS":                  "Operating system",
+  "Config":              "Processor",
+  "RAM":                 "e.g. 32 → 32 GB",
+  "ROM":                 "e.g. 512 → 512 GB",
+  "ROM / Storage":       "e.g. 512 → 512 GB",
+  "IMEI":                "Device IMEI",
+  "IMEI 1":              "Primary IMEI",
+  "IMEI 2":              "Secondary IMEI",
+  "Screen Size":         'e.g. 24"',
+  "Resolution":          "e.g. 1920x1080",
+  "IP Address":          "Device IP",
+  "Firmware":            "Firmware version",
+  "Purchase Year":       "e.g. 2025 or date",
+  "Warranty":            "Under Warranty / Expired",
+  "Asset Status":        "Assigned / Available / etc.",
+  "Asset Condition":     "Good / Fair / Damaged",
+  "Ownership":           "Miles / Miles-GCC / Mojo / Rented / Employee Owned / Company Owned",
+  "Vendor":              "Supplier name",
+  "Employee Name":       "For assigned assets",
+  "Employee Code":       "Matches app user ecode",
+  "Employee Department": "Employee department",
+  "Department":          "Employee department",
+  "Remarks":             "Notes",
+};
+
 // Build a generic template for any AssetType that doesn't have a hard-coded one
 function buildGenericTemplate(type: AssetType): { headers: string[]; rows: string[]; filename: string } {
   const prefix = TAG_PREFIX[type] ?? "AST";
@@ -392,10 +433,10 @@ function buildGenericTemplate(type: AssetType): { headers: string[]; rows: strin
     ]};
   }
   if (set === "sim") {
-    const headers = ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Purchase Year","Warranty","Asset Status","Employee Name","Employee Code","Employee Department"];
+    const headers = ["Asset Tag","Provider","Connection","SIM Number","User Name","Use Case","Billable Name","Plan Name","Plan Amount","Location","Asset Status","Employee Code","Employee Name","Employee Department"];
     return { filename: `sim_card_import_template.csv`, headers, rows: [
-      `${tag(1)},Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,2025,Under Warranty,Assigned,John Doe,MPE1234,Sales`,
-      `${tag(2)},Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,2025,Under Warranty,Available,,,`,
+      `${tag(1)},Airtel,9876543210,8991000123456789012,John Doe,Sales Field,Miles Education Pvt Ltd,Postpaid 499,499,Mumbai,Assigned,MPE1234,John Doe,Sales`,
+      `${tag(2)},Jio,9876500001,8991100123456789012,,Spare,Miles Education Pvt Ltd,Corporate CUG,299,Bangalore,Available,,,`,
     ]};
   }
   if (set === "tab") {
@@ -983,30 +1024,13 @@ export default function BulkImport() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1">
-              {[
-                ["Asset Tag",       "Asset ID *"],
-                ["Type",            "Laptop / Desktop / Mobile *"],
-                ["Brand",           "Brand name *"],
-                ["Model",           "Model name"],
-                ["Serial Number",   "Serial number"],
-                ["Location",        "Office / city"],
-                ["OS",              "Operating system"],
-                ["Config",          "Processor"],
-                ["RAM",             "e.g. 32 → 32 GB"],
-                ["ROM / Storage",   "e.g. 512 → 512 GB"],
-                ["Purchase Year",   "e.g. 2025 or date"],
-                ["Warranty",        "Under Warranty / Expired"],
-                ["Asset Status",    "Assigned / Available / etc."],
-                ["Asset Condition", "Good / Fair / Damaged"],
-                ["Ownership",       "Miles / Miles-GCC / Mojo / Rented / Employee Owned / Company Owned"],
-                ["Vendor",          "Supplier name"],
-                ["Employee Name",   "For assigned assets"],
-                ["Employee Code",   "Matches app user ecode"],
-                ["Department",      "Employee department"],
-              ].map(([col, desc]) => (
+              {(assetTypeFilter
+                ? (TEMPLATES[assetTypeFilter] ?? buildGenericTemplate(assetTypeFilter)).headers
+                : ["Asset Tag","Type","Brand","Model","Serial Number","Location"]
+              ).map((col) => (
                 <div key={col} className="flex justify-between text-xs py-0.5 border-b border-border/40 last:border-0">
                   <span className="font-mono text-muted-foreground">{col}</span>
-                  <span className="text-foreground/70 text-right ml-2">{desc}</span>
+                  <span className="text-foreground/70 text-right ml-2">{COLUMN_DESCRIPTIONS[col] ?? ""}</span>
                 </div>
               ))}
             </CardContent>
