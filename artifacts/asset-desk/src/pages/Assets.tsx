@@ -194,7 +194,10 @@ export default function Assets() {
   const { toast } = useToast();
 
   const [search, setSearch]           = useState("");
-  const [typeFilter, setTypeFilter]     = useState("all");
+  const [typeFilter, setTypeFilter]     = useState(() => {
+    if (typeof window === "undefined") return "all";
+    return new URLSearchParams(window.location.search).get("type") || "all";
+  });
   const [statusFilter, setStatusFilter] = useState("all");
   const [locationFilter, setLocationFilter] = useState("all");
   const [deptFilter, setDeptFilter]     = useState("all");
