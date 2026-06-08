@@ -17,8 +17,6 @@ import { cn } from "@/lib/utils";
 import { useManagedDevices } from "@/hooks/useManagedDevices";
 import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
 import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
-import HrOverview from "@/components/dashboard/HrOverview";
-import ManagerHierarchy from "@/components/dashboard/ManagerHierarchy";
 import { getAssetEmoji, ASSET_TYPE_CATEGORIES } from "@/lib/assetEmoji";
 import { useState } from "react";
 
@@ -392,12 +390,6 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
-
-      {/* Manager hierarchy overview */}
-      <ManagerHierarchy />
-
-      {/* HR & Asset Recovery overview */}
-      <HrOverview />
 
       {/* Pending acknowledgement alert */}
       {pendingAck > 0 && (

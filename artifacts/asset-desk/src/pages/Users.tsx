@@ -15,6 +15,8 @@ import ManagerSearchField from "@/components/ManagerSearchField";
 import TransferReporteesModal from "@/components/TransferReporteesModal";
 import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import LocationSelect from "@/components/LocationSelect";
+import ManagerHierarchy from "@/components/dashboard/ManagerHierarchy";
+import HrOverview from "@/components/dashboard/HrOverview";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1212,6 +1214,12 @@ export default function Users() {
           </span>
         ))}
       </div>
+
+      {/* Manager hierarchy overview */}
+      <ManagerHierarchy />
+
+      {/* HR & Asset Recovery overview */}
+      <HrOverview />
 
       {/* Filters */}
       <Card>
