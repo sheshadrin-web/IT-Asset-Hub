@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useManagedDevices } from "@/hooks/useManagedDevices";
 import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
 import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
+import AssetsInRecovery from "@/components/dashboard/AssetsInRecovery";
 import { getAssetEmoji, ASSET_TYPE_CATEGORIES } from "@/lib/assetEmoji";
 import { useState } from "react";
 
@@ -411,6 +412,9 @@ export default function Dashboard() {
         thresholdDays={restartThresholdDays}
         onThresholdChange={setRestartThresholdDays}
       />
+
+      {/* Assets in Recovery Mode */}
+      <AssetsInRecovery />
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

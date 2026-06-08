@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/context/AuthContext";
+import { useUsers } from "@/context/UsersContext";
 import { supabaseConfigured } from "@/lib/supabaseClient";
 import { getManagerHierarchyOverview } from "@/lib/dashboardHrService";
 import type { ManagerHierarchyOverview } from "@/lib/hrSyncTypes";
 import {
-  Network, UserCog, UserX, Users as UsersIcon, GitBranch, ArrowRight, AlertCircle,
+  Network, Users2, UserCog, UserX, Users as UsersIcon, GitBranch, ArrowRight, AlertCircle,
 } from "lucide-react";
 
 // Mirrors _hr_can_read() in the migration — only these roles may read HR data.
@@ -14,6 +15,7 @@ const HR_READ_ROLES = ["super_admin", "it_admin", "it_agent", "hr_admin"];
 
 export default function ManagerHierarchy() {
   const { session, loading: authLoading, currentUser } = useAuth();
+  const { users } = useUsers();
   const canRead = HR_READ_ROLES.includes(currentUser?.role ?? "");
 
   const [overview, setOverview] = useState<ManagerHierarchyOverview | null>(null);
@@ -41,19 +43,25 @@ export default function ManagerHierarchy() {
   if (!canRead) return null;
 
   const cards = [
-    { label: "Total Managers", value: overview?.total_managers ?? 0, icon: UserCog, color: "text-violet-600", bg: "bg-violet-500/10", href: "/users" },
-    { label: "Employees Without Manager", value: overview?.employees_without_manager ?? 0, icon: UserX, color: "text-amber-600", bg: "bg-amber-500/10", href: "/users" },
-    { label: "Managers With Direct Reports", value: overview?.managers_with_direct_reports ?? 0, icon: UsersIcon, color: "text-blue-600", bg: "bg-blue-500/10", href: "/users" },
-    { label: "Largest Team Size", value: overview?.largest_team_size ?? 0, icon: GitBranch, color: "text-emerald-600", bg: "bg-emerald-500/10", href: "/users" },
+    { label: "Total Users", value: users.length, icon: Users2, color: "text-indigo-600", bg: "bg-indigo-500/10", ring: "ring-indigo-500/15", href: "/users" },
+    { label: "Total Managers", value: overview?.total_managers ?? 0, icon: UserCog, color: "text-violet-600", bg: "bg-violet-500/10", ring: "ring-violet-500/15", href: "/users" },
+    { label: "Employees Without Manager", value: overview?.employees_without_manager ?? 0, icon: UserX, color: "text-amber-600", bg: "bg-amber-500/10", ring: "ring-amber-500/15", href: "/users" },
+    { label: "Managers With Direct Reports", value: overview?.managers_with_direct_reports ?? 0, icon: UsersIcon, color: "text-blue-600", bg: "bg-blue-500/10", ring: "ring-blue-500/15", href: "/users" },
+    { label: "Largest Team Size", value: overview?.largest_team_size ?? 0, icon: GitBranch, color: "text-emerald-600", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", href: "/users" },
   ];
 
   return (
-    <Card>
+    <Card className="overflow-hidden border-border/70">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-          <Network className="h-4 w-4 text-muted-foreground" />
-          Manager Hierarchy Overview
-        </CardTitle>
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-sm shadow-violet-500/25">
+            <Network className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground leading-tight">Manager Hierarchy Overview</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Team structure & reporting lines at a glance</p>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {error ? (
@@ -62,18 +70,21 @@ export default function ManagerHierarchy() {
             <p className="text-sm text-red-800">{error}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {cards.map(c => (
               <Link key={c.label} href={c.href}>
-                <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 group" data-testid={`widget-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
-                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 ${c.bg}`}>
-                    <c.icon className={`h-4 w-4 ${c.color}`} />
+                <div
+                  className="group relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card to-muted/40 p-4 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:border-border"
+                  data-testid={`widget-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 ring-1 ring-inset ${c.bg} ${c.ring}`}>
+                      <c.icon className={`h-5 w-5 ${c.color}`} />
+                    </div>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/20 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all flex-shrink-0" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xl font-bold text-foreground leading-none">{loading ? "—" : c.value}</p>
-                    <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{c.label}</p>
-                  </div>
-                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/20 group-hover:text-muted-foreground transition-colors ml-auto flex-shrink-0" />
+                  <p className="mt-3 text-2xl font-bold text-foreground leading-none tracking-tight">{loading ? "—" : c.value}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5 leading-tight">{c.label}</p>
                 </div>
               </Link>
             ))}
