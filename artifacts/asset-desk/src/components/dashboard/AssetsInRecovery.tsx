@@ -6,7 +6,7 @@ import { supabaseConfigured } from "@/lib/supabaseClient";
 import { getRecoveryAssets } from "@/lib/recoveryService";
 import type { RecoveryRow } from "@/lib/hrSyncTypes";
 import RecoveryTable from "@/components/recovery/RecoveryTable";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, AlertCircle } from "lucide-react";
 
 // Mirrors _hr_can_read() in the migration — only these roles may read HR data.
 const HR_READ_ROLES = ["super_admin", "it_admin", "it_agent", "hr_admin"];
@@ -18,6 +18,7 @@ export default function AssetsInRecovery() {
 
   const [recovery, setRecovery] = useState<RecoveryRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -28,8 +29,9 @@ export default function AssetsInRecovery() {
       const r = await getRecoveryAssets(null);
       // Active recovery only on the dashboard; recovered/lost live on the queues page.
       setRecovery(r.filter(x => x.recovery_status !== "recovered" && x.recovery_status !== "lost").slice(0, 5));
-    } catch {
-      setRecovery([]);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load assets in recovery");
     } finally {
       setLoading(false);
     }
@@ -51,6 +53,11 @@ export default function AssetsInRecovery() {
       <CardContent className="p-0">
         {loading ? (
           <div className="px-4 py-10 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : error ? (
+          <div className="m-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-3" data-testid="error-assets-in-recovery">
+            <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
         ) : (
           <RecoveryTable rows={recovery} canAct={canAct} onChanged={() => void load()} compact />
         )}
