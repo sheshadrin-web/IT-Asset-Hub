@@ -22,9 +22,9 @@ import { useUsers } from "@/context/UsersContext";
 import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { ASSET_TYPE_CATEGORIES, getAssetEmoji } from "@/lib/assetEmoji";
-import { buildReportingStructure, getDirectReports, managerDisplayName } from "@/lib/reportingManager";
+import { managerDisplayName } from "@/lib/reportingManager";
 import {
-  KpiCard, ChartContainer, MetricTile, HealthBar, InsightCard, LeaderboardCard,
+  KpiCard, ChartContainer, MetricTile, HealthBar, InsightCard,
   type TrendChip,
 } from "@/components/reports/widgets";
 import {
@@ -576,30 +576,6 @@ export default function Reports() {
     .map((t) => ({ ...t, emoji: getAssetEmoji(t.type) }));
   const maxMost = Math.max(1, ...mostAssets.map((t) => t.count));
 
-  // Reporting structure leaderboard (full recursive team size + active-report score)
-  const managerGroups = buildReportingStructure(users);
-  const employeesWithManager = users.filter((u) => (u.reporting_manager ?? "").trim() !== "").length;
-  const countTeam = (user: Profile, seen: Set<string>): number => {
-    if (seen.has(user.id)) return 0;
-    seen.add(user.id);
-    return getDirectReports(user, users).reduce((s, r) => s + 1 + countTeam(r, seen), 0);
-  };
-  const leaderboard = managerGroups
-    .map((g) => {
-      const direct = g.reports.length;
-      const active = g.reports.filter((r) => r.status === "active").length;
-      return {
-        id: g.manager.id,
-        name: g.manager.full_name,
-        dept: g.manager.department || "—",
-        teamSize: countTeam(g.manager, new Set<string>()),
-        directReports: direct,
-        activityScore: direct ? Math.round((active / direct) * 100) : 0,
-      };
-    })
-    .sort((a, b) => b.teamSize - a.teamSize || b.directReports - a.directReports)
-    .slice(0, 9);
-
   // AI insights computed from real aggregates
   const aiInsights: { icon: React.ElementType; tone: "blue" | "green" | "amber" | "purple" | "red"; title: string; text: string }[] = [];
   if (health.total > 0) {
@@ -930,42 +906,6 @@ export default function Reports() {
           )}
         </ChartContainer>
       </div>
-
-      {/* ── Reporting structure leaderboard ──────────────────────────────── */}
-      <ChartContainer
-        icon={Network} accent="#EC4899"
-        title="Reporting Structure"
-        subtitle={`${managerGroups.length} manager${managerGroups.length === 1 ? "" : "s"} · ${employeesWithManager} employee${employeesWithManager === 1 ? "" : "s"} with a manager assigned`}
-        action={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
-              onClick={() => handleExport(() => exportReportingStructureCsv(users), "Reporting structure")}>
-              <Download className="h-3.5 w-3.5" /> CSV
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
-              onClick={() => handleExportAsync(() => exportReportingStructureXlsx(users), "Reporting structure (Excel)")}>
-              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" /> Excel
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
-              onClick={() => handleExportAsync(() => exportReportingStructurePdf(users), "Reporting structure (PDF)")}>
-              <FileText className="h-3.5 w-3.5 text-red-500" /> PDF
-            </Button>
-          </div>
-        }
-      >
-        {leaderboard.length === 0 ? (
-          <EmptyChart icon={Network} message="No reporting relationships yet" sub="Assign reporting managers to employees to build the structure" />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pt-1">
-            {leaderboard.map((m, i) => (
-              <LeaderboardCard
-                key={m.id} rank={i + 1} name={m.name} subtitle={m.dept}
-                teamSize={m.teamSize} directReports={m.directReports} activityScore={m.activityScore}
-              />
-            ))}
-          </div>
-        )}
-      </ChartContainer>
 
       {/* ── AI insights panel ────────────────────────────────────────────── */}
       <ChartContainer
