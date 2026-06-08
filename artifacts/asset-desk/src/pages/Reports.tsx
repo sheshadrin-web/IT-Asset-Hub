@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -535,17 +534,6 @@ export default function Reports() {
     { name: "Retired",      count: assets.filter((a) => a.status === "Retired").length,      color: "#6b7280" },
   ].filter((d) => d.count > 0);
 
-  const ticketsByCategory = Object.entries(
-    tickets.reduce<Record<string, number>>((acc, t) => { acc[t.category] = (acc[t.category] || 0) + 1; return acc; }, {})
-  ).map(([name, count]) => ({ name: name.replace(" Issue", "").replace(" Request", " Req"), count })).sort((a, b) => b.count - a.count);
-
-  const ticketsByPriority = [
-    { name: "Critical", count: tickets.filter((t) => t.priority === "Critical").length, color: "#ef4444" },
-    { name: "High",     count: tickets.filter((t) => t.priority === "High").length,     color: "#f59e0b" },
-    { name: "Medium",   count: tickets.filter((t) => t.priority === "Medium").length,   color: "#2563eb" },
-    { name: "Low",      count: tickets.filter((t) => t.priority === "Low").length,      color: "#94a3b8" },
-  ].filter((d) => d.count > 0);
-
   const usersByRole = [
     { name: "Super Admin", count: users.filter((u) => u.role === "super_admin").length },
     { name: "IT Admin",    count: users.filter((u) => u.role === "it_admin").length },
@@ -588,19 +576,23 @@ export default function Reports() {
     .map((t) => ({ ...t, emoji: getAssetEmoji(t.type) }));
   const maxMost = Math.max(1, ...mostAssets.map((t) => t.count));
 
-  // Reporting structure leaderboard (2-level team size + active-report score)
+  // Reporting structure leaderboard (full recursive team size + active-report score)
   const managerGroups = buildReportingStructure(users);
   const employeesWithManager = users.filter((u) => (u.reporting_manager ?? "").trim() !== "").length;
+  const countTeam = (user: Profile, seen: Set<string>): number => {
+    if (seen.has(user.id)) return 0;
+    seen.add(user.id);
+    return getDirectReports(user, users).reduce((s, r) => s + 1 + countTeam(r, seen), 0);
+  };
   const leaderboard = managerGroups
     .map((g) => {
-      const direct   = g.reports.length;
-      const indirect = g.reports.reduce((s, r) => s + getDirectReports(r, users).length, 0);
-      const active   = g.reports.filter((r) => r.status === "active").length;
+      const direct = g.reports.length;
+      const active = g.reports.filter((r) => r.status === "active").length;
       return {
         id: g.manager.id,
         name: g.manager.full_name,
         dept: g.manager.department || "—",
-        teamSize: direct + indirect,
+        teamSize: countTeam(g.manager, new Set<string>()),
         directReports: direct,
         activityScore: direct ? Math.round((active / direct) * 100) : 0,
       };
@@ -984,8 +976,8 @@ export default function Reports() {
           <EmptyChart icon={Sparkles} message="No insights yet" sub="Insights appear as assets, tickets and users are added" />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-            {insightsToShow.map((ins, i) => (
-              <InsightCard key={i} icon={ins.icon} tone={ins.tone} title={ins.title} text={ins.text} />
+            {insightsToShow.map((ins) => (
+              <InsightCard key={ins.title} icon={ins.icon} tone={ins.tone} title={ins.title} text={ins.text} />
             ))}
           </div>
         )}
