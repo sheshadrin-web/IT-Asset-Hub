@@ -56,7 +56,10 @@ export const assetFormSchema = z.object({
   warrantyEndDate: z.string().optional().default(""),
   vendor:          z.string().optional(),
   invoice:         z.string().optional(),
-  ownership:       z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
+  ownership:       z.preprocess(
+                     (v) => (v === "" || v == null ? undefined : v),
+                     z.enum(ASSET_OWNERSHIP_OPTIONS as unknown as [string, ...string[]]).optional(),
+                   ),
   location:        z.string().min(1, "Location is required"),
   department:      z.string().optional(),
   accessories:     z.string().optional(),
@@ -491,6 +494,7 @@ export default function AssetForm({
                 <FormItem>
                   <FormLabel>Plan Amount</FormLabel>
                   <FormControl><Input {...field} placeholder="e.g. ₹499 / month" /></FormControl>
+                  <FormDescription className="text-xs">Optional</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -709,17 +713,21 @@ export default function AssetForm({
             <FormField control={form.control} name="ownership" render={({ field }) => (
               <FormItem>
                 <FormLabel>Ownership</FormLabel>
-                <Select value={field.value || "Miles"} onValueChange={field.onChange}>
+                <Select
+                  value={field.value || "__none__"}
+                  onValueChange={v => field.onChange(v === "__none__" ? "" : v)}
+                >
                   <FormControl>
-                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Miles" /></SelectTrigger>
+                    <SelectTrigger data-testid="select-ownership"><SelectValue placeholder="Not specified" /></SelectTrigger>
                   </FormControl>
                   <SelectContent>
+                    <SelectItem value="__none__">Not specified</SelectItem>
                     {ASSET_OWNERSHIP_OPTIONS.map(o => (
                       <SelectItem key={o} value={o}>{o}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <FormDescription className="text-xs">Who owns this asset</FormDescription>
+                <FormDescription className="text-xs">Optional — who owns this asset</FormDescription>
                 <FormMessage />
               </FormItem>
             )} />
