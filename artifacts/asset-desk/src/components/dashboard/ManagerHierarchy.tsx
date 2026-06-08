@@ -74,17 +74,17 @@ export default function ManagerHierarchy() {
             {cards.map(c => (
               <Link key={c.label} href={c.href}>
                 <div
-                  className="group relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card to-muted/40 p-4 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:border-border"
+                  className="group relative overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card to-muted/40 p-2.5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:border-border"
                   data-testid={`widget-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 ring-1 ring-inset ${c.bg} ${c.ring}`}>
-                      <c.icon className={`h-5 w-5 ${c.color}`} />
+                    <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ring-1 ring-inset ${c.bg} ${c.ring}`}>
+                      <c.icon className={`h-3.5 w-3.5 ${c.color}`} />
                     </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/20 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                    <ArrowRight className="h-3 w-3 text-muted-foreground/20 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all flex-shrink-0" />
                   </div>
-                  <p className="mt-3 text-2xl font-bold text-foreground leading-none tracking-tight">{loading ? "—" : c.value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1.5 leading-tight">{c.label}</p>
+                  <p className="mt-2 text-lg font-bold text-foreground leading-none tracking-tight">{loading ? "—" : c.value}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{c.label}</p>
                 </div>
               </Link>
             ))}
