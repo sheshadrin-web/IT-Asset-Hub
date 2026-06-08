@@ -101,6 +101,20 @@ function EndUserDashboard({ userName }: { userName: string }) {
   const resolvedCount = myTickets.filter((t) => ["Resolved", "Closed"].includes(t.status)).length;
   const recentTickets = [...myTickets].sort((a, b) => b.createdDate.localeCompare(a.createdDate)).slice(0, 5);
 
+  const myTypeCounts = myAssets.reduce<Record<string, number>>((acc, a) => {
+    const t = a.assetType || "Generic Asset";
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
+  const myTypeGroups = ASSET_TYPE_CATEGORIES
+    .map(cat => ({
+      label: cat.label,
+      items: cat.types
+        .map(t => ({ type: t, count: myTypeCounts[t] || 0 }))
+        .filter(i => i.count > 0),
+    }))
+    .filter(g => g.items.length > 0);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -124,6 +138,42 @@ function EndUserDashboard({ userName }: { userName: string }) {
           { label: "My Assets",   value: myAssets.length,   icon: Monitor,      color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/my-assets" },
         ].map((c) => <StatCard key={c.label} {...c} />)}
       </div>
+
+      {/* My assets by type */}
+      {myTypeGroups.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              My Assets by Type
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-5">
+              {myTypeGroups.map(group => (
+                <div key={group.label}>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{group.label}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
+                    {group.items.map(item => (
+                      <div
+                        key={item.type}
+                        className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5"
+                        data-testid={`my-asset-type-count-${item.type}`}
+                      >
+                        <span className="text-xl leading-none">{getAssetEmoji(item.type)}</span>
+                        <div className="min-w-0">
+                          <p className="text-lg font-bold text-foreground leading-tight">{item.count}</p>
+                          <p className="text-xs text-muted-foreground truncate">{item.type}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Assigned Assets */}
       {myAssets.length > 0 && (
