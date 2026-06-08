@@ -50,6 +50,12 @@ SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  #
 # Commands (lock / unlock / etc.) are polled far more frequently than the heavy
 # system sync so admin actions take effect within seconds, not minutes.
 COMMAND_POLL_SEC    = max(2, int(os.environ.get("MILES_AGENT_COMMAND_POLL", "5")))
+# Adaptive polling: when no commands are flowing, back off from the fast
+# COMMAND_POLL_SEC cadence to this slower idle cadence to cut Edge Function
+# invocations. Any command received snaps the loop back to the fast cadence
+# (and holds it there for BURST_WINDOW_SEC in case more follow).
+IDLE_POLL_SEC       = max(COMMAND_POLL_SEC, int(os.environ.get("MILES_AGENT_IDLE_POLL", "30")))
+BURST_WINDOW_SEC    = max(0, int(os.environ.get("MILES_AGENT_BURST_WINDOW", "60")))
 HTTP_TIMEOUT_SEC    = 30
 
 EMPLOYEE_EMAIL      = os.environ.get("MILES_EMPLOYEE_EMAIL", "")
@@ -1570,12 +1576,17 @@ def _looks_revoked(resp: dict) -> bool:
     return "revoked token" in err or "invalid or revoked" in err
 
 
-def poll_commands() -> bool:
-    """Poll + execute queued commands. Returns True if the portal has revoked our
-    token (so the caller can tear the agent down and exit)."""
+def poll_commands() -> tuple[bool, int]:
+    """Poll + execute queued commands. Returns (revoked, processed):
+      - `revoked`   True if the portal has revoked our token (so the caller can
+                    tear the agent down and exit).
+      - `processed` number of commands executed this poll — drives adaptive
+                    polling, since any command means we should keep the fast
+                    cadence so follow-up actions still apply within seconds."""
     resp = _get("/commands")
     if not resp.get("success"):
-        return _looks_revoked(resp)
+        return _looks_revoked(resp), 0
+    processed = 0
     for cmd in resp.get("commands", []):
         status, result, err = execute_command(cmd)
         _post("/commands/status", {
@@ -1584,12 +1595,13 @@ def poll_commands() -> bool:
             "result": result,
             "error":  err,
         })
+        processed += 1
         # A confirmed uninstall is terminal: the local files/token are gone, so
         # never run any further command claimed in the same batch. The run loop
         # sees _uninstall_requested next and exits.
         if _uninstall_requested:
             break
-    return False
+    return False, processed
 
 
 # ── entrypoints ─────────────────────────────────────────────────────────────
@@ -1657,6 +1669,7 @@ def run_loop() -> int:
         pass
     last_sync = 0.0
     revoked_strikes = 0
+    last_activity = float("-inf")  # last poll that carried commands; -inf = start idle (monotonic() can be ~0 right after boot)
     while True:
         now = time.monotonic()
         try:
@@ -1674,7 +1687,10 @@ def run_loop() -> int:
             # one-off network blip — means we must stop managing this laptop:
             # tear ourselves down and exit so no background process or console
             # window is left running.
-            if poll_commands():
+            revoked, processed = poll_commands()
+            if processed > 0:
+                last_activity = now  # activity → snap back to the fast cadence
+            if revoked:
                 revoked_strikes += 1
                 if revoked_strikes >= 2:
                     # Token revoked server-side: the device is already removed, so
@@ -1707,7 +1723,12 @@ def run_loop() -> int:
             reassert_lock()
         except Exception as e:
             print(f"[{datetime.now(timezone.utc).isoformat()}] loop error: {e}", file=sys.stderr)
-        time.sleep(COMMAND_POLL_SEC)
+        # Adaptive cadence: stay on the fast COMMAND_POLL_SEC tick while commands
+        # are actively flowing — and for BURST_WINDOW_SEC after the last one in
+        # case more follow — then fall back to the cheap IDLE_POLL_SEC tick. This
+        # is what cuts idle Edge Function invocations ~83% (5s → 30s).
+        active = (time.monotonic() - last_activity) < BURST_WINDOW_SEC
+        time.sleep(COMMAND_POLL_SEC if active else IDLE_POLL_SEC)
 
 
 # ── service install (auto-start after reboot) ───────────────────────────────
