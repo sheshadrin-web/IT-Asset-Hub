@@ -8,12 +8,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell, Legend, AreaChart, Area, CartesianGrid,
 } from "recharts";
 import {
   TrendingUp, Monitor, Ticket, Users, Download, FileText,
-  PieChart as PieChartIcon, BarChart2 as BarChartIcon,
+  PieChart as PieChartIcon,
   Package, Cpu, Wrench, Network, FileSpreadsheet,
+  Activity, Sparkles, CheckCircle2, Clock,
+  Boxes, Gauge, Building2, UserCheck, Layers, Zap, TrendingDown,
 } from "lucide-react";
 import { useAssets } from "@/context/AssetContext";
 import { useTickets } from "@/context/TicketContext";
@@ -21,7 +23,16 @@ import { useUsers } from "@/context/UsersContext";
 import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
 import { useToast } from "@/hooks/use-toast";
 import { ASSET_TYPE_CATEGORIES, getAssetEmoji } from "@/lib/assetEmoji";
-import { buildReportingStructure, managerDisplayName } from "@/lib/reportingManager";
+import { buildReportingStructure, getDirectReports, managerDisplayName } from "@/lib/reportingManager";
+import {
+  KpiCard, ChartContainer, MetricTile, HealthBar, InsightCard, LeaderboardCard,
+  type TrendChip,
+} from "@/components/reports/widgets";
+import {
+  assetGrowthSeries, userGrowthSeries, ticketTrendSeries, utilizationSeries,
+  ticketMetrics, assetHealth, utilizationPct, assetTypeCounts, departmentUsage,
+  latestDelta, SLA_TARGET_DAYS,
+} from "@/lib/reportsAnalytics";
 
 const tooltipStyle = {
   backgroundColor: "hsl(var(--card))",
@@ -504,13 +515,7 @@ export default function Reports() {
     }
   };
 
-  // Count every asset type that has at least 1 record; show emoji in label
-  const assetsByType = Array.from(ASSET_TYPE_CATEGORIES.flatMap((c) => c.types))
-    .map((t) => ({ name: `${getAssetEmoji(t)} ${t}`, type: t, count: assets.filter((a) => a.assetType === t).length }))
-    .filter((d) => d.count > 0)
-    .sort((a, b) => b.count - a.count);
-
-  // Category roll-up: Main Devices / Accessories / Fixed Assets
+  // Category roll-up: Main Devices / Accessories / Fixed Assets (used by export menu)
   const assetsByCategory = ASSET_TYPE_CATEGORIES.map((cat) => ({
     name:  cat.label,
     types: cat.types as readonly string[],
@@ -524,29 +529,21 @@ export default function Reports() {
   };
   const assetsByStatus = [
     { name: "Available",    count: assets.filter((a) => a.status === "Available").length,    color: "#22c55e" },
-    { name: "Assigned",     count: assets.filter((a) => a.status === "Assigned").length,     color: "#3b82f6" },
+    { name: "Assigned",     count: assets.filter((a) => a.status === "Assigned").length,     color: "#2563eb" },
     { name: "Under Repair", count: assets.filter((a) => a.status === "Under Repair").length, color: "#f59e0b" },
     { name: "Lost",         count: assets.filter((a) => a.status === "Lost").length,         color: "#ef4444" },
     { name: "Retired",      count: assets.filter((a) => a.status === "Retired").length,      color: "#6b7280" },
   ].filter((d) => d.count > 0);
 
-  const ticketsByStatus = [
-    { name: "Open",        count: tickets.filter((t) => t.status === "Open").length },
-    { name: "Assigned",    count: tickets.filter((t) => t.status === "Assigned").length },
-    { name: "In Progress", count: tickets.filter((t) => t.status === "In Progress").length },
-    { name: "Resolved",    count: tickets.filter((t) => t.status === "Resolved").length },
-    { name: "Closed",      count: tickets.filter((t) => t.status === "Closed").length },
-  ].filter((d) => d.count > 0);
-
   const ticketsByCategory = Object.entries(
     tickets.reduce<Record<string, number>>((acc, t) => { acc[t.category] = (acc[t.category] || 0) + 1; return acc; }, {})
-  ).map(([name, count]) => ({ name: name.replace(" Issue", "").replace(" Request", " Req"), count }));
+  ).map(([name, count]) => ({ name: name.replace(" Issue", "").replace(" Request", " Req"), count })).sort((a, b) => b.count - a.count);
 
   const ticketsByPriority = [
     { name: "Critical", count: tickets.filter((t) => t.priority === "Critical").length, color: "#ef4444" },
     { name: "High",     count: tickets.filter((t) => t.priority === "High").length,     color: "#f59e0b" },
-    { name: "Medium",   count: tickets.filter((t) => t.priority === "Medium").length,   color: "#3b82f6" },
-    { name: "Low",      count: tickets.filter((t) => t.priority === "Low").length,      color: "#6b7280" },
+    { name: "Medium",   count: tickets.filter((t) => t.priority === "Medium").length,   color: "#2563eb" },
+    { name: "Low",      count: tickets.filter((t) => t.priority === "Low").length,      color: "#94a3b8" },
   ].filter((d) => d.count > 0);
 
   const usersByRole = [
@@ -555,24 +552,111 @@ export default function Reports() {
     { name: "HR Admin",    count: users.filter((u) => u.role === "hr_admin").length },
     { name: "IT Agent",    count: users.filter((u) => u.role === "it_agent").length },
     { name: "End User",    count: users.filter((u) => u.role === "end_user").length },
-  ];
+  ].filter((d) => d.count > 0);
 
+  // ── Real analytics (time-series + derived metrics from live records) ────────
+  const assetGrowth = assetGrowthSeries(assets, 12);
+  const userGrowth  = userGrowthSeries(users, 12);
+  const ticketTrend = ticketTrendSeries(tickets, 12);
+  const utilTrend   = utilizationSeries(assets, 12);
+  const tm          = ticketMetrics(tickets);
+  const health      = assetHealth(assets);
+  const utilization = utilizationPct(assets);
+  const typeCounts  = assetTypeCounts(assets);
+  const deptUsage   = departmentUsage(assets, 6);
+
+  const activeUsers   = users.filter((u) => u.status === "active").length;
+  const inactiveUsers = users.length - activeUsers;
+  const openTickets   = tm.open + tm.assigned + tm.inProgress + tm.waiting;
+  const resolvedTotal = tm.resolved + tm.closed;
+  const resRate       = tickets.length > 0 ? `${Math.round((resolvedTotal / tickets.length) * 100)}%` : "—";
+
+  const assetsAddedThisMonth = latestDelta(assetGrowth);
+  const usersAddedThisMonth  = latestDelta(userGrowth);
+  const activeUsersChip: TrendChip = {
+    value: `${usersAddedThisMonth >= 0 ? "+" : ""}${usersAddedThisMonth} this mo`,
+    direction: usersAddedThisMonth > 0 ? "up" : usersAddedThisMonth < 0 ? "down" : "flat",
+  };
+  const assetsChip: TrendChip = {
+    value: `${assetsAddedThisMonth >= 0 ? "+" : ""}${assetsAddedThisMonth} this mo`,
+    direction: assetsAddedThisMonth > 0 ? "up" : assetsAddedThisMonth < 0 ? "down" : "flat",
+  };
+
+  // Smart insights: most assigned vs least utilised asset types
+  const mostAssets  = typeCounts.slice(0, 3).map((t) => ({ ...t, emoji: getAssetEmoji(t.type) }));
+  const leastAssets = (typeCounts.length > 3 ? typeCounts.slice(-3).reverse() : [])
+    .map((t) => ({ ...t, emoji: getAssetEmoji(t.type) }));
+  const maxMost = Math.max(1, ...mostAssets.map((t) => t.count));
+
+  // Reporting structure leaderboard (2-level team size + active-report score)
   const managerGroups = buildReportingStructure(users);
-  const topManagers = managerGroups
-    .map((g) => ({ name: g.manager.full_name, count: g.reports.length }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
   const employeesWithManager = users.filter((u) => (u.reporting_manager ?? "").trim() !== "").length;
+  const leaderboard = managerGroups
+    .map((g) => {
+      const direct   = g.reports.length;
+      const indirect = g.reports.reduce((s, r) => s + getDirectReports(r, users).length, 0);
+      const active   = g.reports.filter((r) => r.status === "active").length;
+      return {
+        id: g.manager.id,
+        name: g.manager.full_name,
+        dept: g.manager.department || "—",
+        teamSize: direct + indirect,
+        directReports: direct,
+        activityScore: direct ? Math.round((active / direct) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.teamSize - a.teamSize || b.directReports - a.directReports)
+    .slice(0, 9);
 
-  const resolved = tickets.filter((t) => t.status === "Resolved").length;
-  const resRate  = tickets.length > 0 ? `${Math.round((resolved / tickets.length) * 100)}%` : "—";
+  // AI insights computed from real aggregates
+  const aiInsights: { icon: React.ElementType; tone: "blue" | "green" | "amber" | "purple" | "red"; title: string; text: string }[] = [];
+  if (health.total > 0) {
+    aiInsights.push({
+      icon: Gauge, tone: utilization >= 75 ? "green" : "blue",
+      title: `${utilization}% of assets are assigned`,
+      text: `${health.assigned} of ${health.total} assets are actively in use across the org.`,
+    });
+  }
+  aiInsights.push(
+    openTickets === 0
+      ? { icon: CheckCircle2, tone: "green", title: "All tickets are resolved", text: "There are no open helpdesk tickets right now." }
+      : { icon: Ticket, tone: openTickets > 10 ? "amber" : "blue", title: `${openTickets} ticket${openTickets === 1 ? "" : "s"} still open`, text: `${resolvedTotal} resolved out of ${tm.total} total raised.` },
+  );
+  if (assetsAddedThisMonth > 0) {
+    aiInsights.push({
+      icon: TrendingUp, tone: "green",
+      title: `${assetsAddedThisMonth} new asset${assetsAddedThisMonth === 1 ? "" : "s"} this month`,
+      text: `Inventory has grown to ${health.total} total assets.`,
+    });
+  }
+  if (tm.slaCompliancePct !== null) {
+    aiInsights.push({
+      icon: CheckCircle2, tone: tm.slaCompliancePct >= 80 ? "green" : "amber",
+      title: `${tm.slaCompliancePct}% SLA compliance`,
+      text: `Share of tickets resolved within the ${SLA_TARGET_DAYS}-day target.`,
+    });
+  }
+  if (deptUsage.length > 0) {
+    aiInsights.push({
+      icon: Building2, tone: "purple",
+      title: `${deptUsage[0].name} leads asset usage`,
+      text: `Holds ${deptUsage[0].count} assets — the most of any department.`,
+    });
+  }
+  if (tm.avgResolutionDays !== null) {
+    aiInsights.push({
+      icon: Clock, tone: tm.avgResolutionDays <= SLA_TARGET_DAYS ? "green" : "amber",
+      title: `${tm.avgResolutionDays.toFixed(1)} day avg resolution`,
+      text: `Average time to resolve across ${resolvedTotal} closed ticket${resolvedTotal === 1 ? "" : "s"}.`,
+    });
+  }
+  const insightsToShow = aiInsights.slice(0, 6);
 
-  const summaryCards = [
-    { label: "Total Assets",    value: assets.length,  icon: Monitor,    color: "text-blue-500",    bg: "bg-blue-500/10" },
-    { label: "Total Tickets",   value: tickets.length, icon: Ticket,     color: "text-purple-500",  bg: "bg-purple-500/10" },
-    { label: "Total Users",     value: users.length,   icon: Users,      color: "text-emerald-500", bg: "bg-emerald-500/10" },
-    { label: "Resolution Rate", value: resRate,        icon: TrendingUp, color: "text-amber-500",   bg: "bg-amber-500/10" },
-  ];
+  const ROLE_BAR_COLORS = ["#8B5CF6", "#2563EB", "#EC4899", "#06B6D4", "#22C55E"];
+  const activeSplit = [
+    { name: "Active",   count: activeUsers,   color: "#22C55E" },
+    { name: "Inactive", count: inactiveUsers, color: "#EF4444" },
+  ].filter((d) => d.count > 0);
 
   return (
     <div className="space-y-6">
@@ -637,244 +721,275 @@ export default function Reports() {
         </DropdownMenu>
       </div>
 
+      {/* ── Executive KPI cards ──────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card key={card.label} className="premium-lift" data-testid={`card-report-${card.label.toLowerCase().replace(/\s+/g, "-")}`}>
-              <CardContent className="p-4">
-                <div className={`inline-flex rounded-xl p-2.5 ${card.bg} mb-3`}>
-                  <Icon className={`h-4 w-4 ${card.color}`} />
-                </div>
-                <div className="text-2xl font-bold text-foreground">{card.value}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">{card.label}</div>
-              </CardContent>
-            </Card>
-          );
-        })}
+        <KpiCard
+          icon={Boxes} label="Total Assets" value={health.total} accent="#2563EB"
+          chip={assetsChip} spark={assetGrowth.map((p) => p.total)}
+          footer={`Across ${assetsByCategory.length || 0} categor${assetsByCategory.length === 1 ? "y" : "ies"}`}
+          data-testid="card-kpi-total-assets"
+        />
+        <KpiCard
+          icon={UserCheck} label="Active Users" value={activeUsers} accent="#22C55E"
+          chip={activeUsersChip} spark={userGrowth.map((p) => p.total)}
+          footer={`${inactiveUsers} inactive · ${users.length} total`}
+          data-testid="card-kpi-active-users"
+        />
+        <KpiCard
+          icon={Ticket} label="Open Tickets" value={openTickets} accent="#F59E0B"
+          spark={ticketTrend.map((p) => p.created)}
+          footer={`${resolvedTotal} resolved · ${resRate} rate`}
+          data-testid="card-kpi-open-tickets"
+        />
+        <KpiCard
+          icon={Gauge} label="Asset Utilization" value={`${utilization}%`} accent="#8B5CF6"
+          spark={utilTrend.map((p) => p.pct)}
+          footer={`${health.assigned} of ${health.total} assigned`}
+          data-testid="card-kpi-utilization"
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Asset Status Breakdown</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />
-          </CardHeader>
-          <CardContent>
-            {assetsByStatus.length === 0 ? (
-              <EmptyChart icon={PieChartIcon} message="No assets yet" sub="Add assets to see the status breakdown" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
+      {/* ── Asset analytics: growth trend + distribution ─────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <ChartContainer
+          className="lg:col-span-3" icon={TrendingUp} accent="#2563EB"
+          title="Asset Growth Trend" subtitle="Cumulative inventory over the last 12 months"
+          action={<ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />}
+        >
+          {health.total === 0 ? (
+            <EmptyChart icon={TrendingUp} message="No assets yet" sub="Asset growth will plot here once inventory is added" />
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={assetGrowth} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="assetGrowthFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#2563EB" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="#2563EB" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Area type="monotone" dataKey="total" name="Total Assets" stroke="#2563EB" strokeWidth={2.5} fill="url(#assetGrowthFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </ChartContainer>
+
+        <ChartContainer
+          className="lg:col-span-2" icon={PieChartIcon} accent="#8B5CF6"
+          title="Asset Distribution" subtitle="By current status"
+        >
+          {assetsByStatus.length === 0 ? (
+            <EmptyChart icon={PieChartIcon} message="No assets yet" sub="Status breakdown will appear here" />
+          ) : (
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
-                  <Pie data={assetsByStatus} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="count">
+                  <Pie data={assetsByStatus} cx="50%" cy="50%" innerRadius={62} outerRadius={92} paddingAngle={3} dataKey="count">
                     {assetsByStatus.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
                   </Pie>
                   <Tooltip contentStyle={tooltipStyle} />
                   <Legend iconType="circle" iconSize={8} formatter={(v) => <span style={{ fontSize: "12px", color: "hsl(var(--foreground))" }}>{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Tickets by Status</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportTicketsCsv(tickets), "Tickets report")} label="tickets" />
-          </CardHeader>
-          <CardContent>
-            {ticketsByStatus.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No tickets yet" sub="Ticket status data will appear here once tickets are raised" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={ticketsByStatus} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4,4,0,0]} name="Tickets" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Tickets by Category</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportTicketsCsv(tickets), "Tickets report")} label="tickets" />
-          </CardHeader>
-          <CardContent>
-            {ticketsByCategory.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No tickets yet" sub="Categories will populate as tickets are raised" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={ticketsByCategory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4,4,0,0]} name="Tickets" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Tickets by Priority</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportTicketsCsv(tickets), "Tickets report")} label="tickets" />
-          </CardHeader>
-          <CardContent>
-            {ticketsByPriority.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No tickets yet" sub="Priority breakdown will appear as tickets are raised" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={ticketsByPriority} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="count" radius={[4,4,0,0]} name="Tickets">
-                    {ticketsByPriority.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center -mt-7">
+                <span className="text-2xl font-bold text-foreground">{health.total}</span>
+                <span className="text-xs text-muted-foreground">Total Assets</span>
+              </div>
+            </div>
+          )}
+        </ChartContainer>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Assets by Category</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />
-          </CardHeader>
-          <CardContent>
-            {assetsByCategory.length === 0 ? (
-              <EmptyChart icon={PieChartIcon} message="No assets yet" sub="Main Devices / Accessories / Fixed Assets" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
+      {/* ── Ticket performance metrics ───────────────────────────────────── */}
+      <ChartContainer
+        icon={Activity} accent="#F59E0B"
+        title="Ticket Performance" subtitle="Live helpdesk health & SLA"
+        action={<ExportCardButton onClick={() => handleExport(() => exportTicketsCsv(tickets), "Tickets report")} label="tickets" />}
+      >
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <MetricTile icon={Ticket} label="Open" value={tm.open + tm.assigned} accent="#F59E0B" />
+          <MetricTile icon={Activity} label="In Progress" value={tm.inProgress} accent="#2563EB" />
+          <MetricTile icon={CheckCircle2} label="Resolved" value={tm.resolved} accent="#22C55E" />
+          <MetricTile icon={Layers} label="Closed" value={tm.closed} accent="#6B7280" />
+          <MetricTile
+            icon={CheckCircle2} label="SLA Compliance"
+            value={tm.slaCompliancePct !== null ? `${tm.slaCompliancePct}%` : "—"}
+            accent="#8B5CF6" hint={`${SLA_TARGET_DAYS}-day target`}
+          />
+          <MetricTile
+            icon={Clock} label="Avg Resolution"
+            value={tm.avgResolutionDays !== null ? `${tm.avgResolutionDays.toFixed(1)}d` : "—"}
+            accent="#EC4899" hint="time to close"
+          />
+        </div>
+      </ChartContainer>
+
+      {/* ── Asset health + smart insights ────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <ChartContainer icon={Gauge} accent="#22C55E" title="Asset Health" subtitle="Status distribution">
+          {health.total === 0 ? (
+            <EmptyChart icon={Gauge} message="No assets yet" sub="Health bars will appear here" />
+          ) : (
+            <div className="space-y-4 pt-1">
+              <HealthBar label="Assigned"    value={health.assigned}    total={health.total} color="#2563EB" />
+              <HealthBar label="Available"   value={health.available}   total={health.total} color="#22C55E" />
+              <HealthBar label="Maintenance" value={health.maintenance} total={health.total} color="#F59E0B" />
+              <HealthBar label="Retired"     value={health.retired}     total={health.total} color="#6B7280" />
+            </div>
+          )}
+        </ChartContainer>
+
+        <ChartContainer icon={Zap} accent="#2563EB" title="Most Assigned Assets" subtitle="Top asset types in use">
+          {mostAssets.length === 0 ? (
+            <EmptyChart icon={Zap} message="No assets yet" sub="Top types will appear here" />
+          ) : (
+            <div className="space-y-3.5 pt-1">
+              {mostAssets.map((t) => (
+                <div key={t.type}>
+                  <div className="flex items-center justify-between text-sm mb-1.5">
+                    <span className="font-medium text-foreground truncate">{t.emoji} {t.type}</span>
+                    <span className="font-semibold text-foreground">{t.count}</span>
+                  </div>
+                  <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.round((t.count / maxMost) * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </ChartContainer>
+
+        <ChartContainer icon={TrendingDown} accent="#F59E0B" title="Least Utilized Assets" subtitle="Lowest-count asset types">
+          {leastAssets.length === 0 ? (
+            <EmptyChart icon={TrendingDown} message="Not enough variety yet" sub="Add more asset types to compare utilisation" />
+          ) : (
+            <div className="space-y-2.5 pt-1">
+              {leastAssets.map((t) => (
+                <div key={t.type} className="flex items-center justify-between rounded-xl border border-card-border/70 bg-card/60 px-3.5 py-2.5">
+                  <span className="text-sm font-medium text-foreground truncate">{t.emoji} {t.type}</span>
+                  <span className="text-xs font-semibold text-muted-foreground bg-muted rounded-full px-2.5 py-0.5">{t.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </ChartContainer>
+      </div>
+
+      {/* ── User analytics ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <ChartContainer
+          icon={Users} accent="#8B5CF6" title="Users by Role" subtitle="Access distribution"
+          action={<ExportCardButton onClick={() => handleExport(() => exportUsersCsv(users), "Users report")} label="users" />}
+        >
+          {usersByRole.length === 0 ? (
+            <EmptyChart icon={Users} message="No users yet" sub="Roles will appear once users are added" />
+          ) : (
+            <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={usersByRole} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="count" radius={[6, 6, 0, 0]} name="Users">
+                  {usersByRole.map((entry, i) => <Cell key={entry.name} fill={ROLE_BAR_COLORS[i % ROLE_BAR_COLORS.length]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartContainer>
+
+        <ChartContainer icon={Building2} accent="#2563EB" title="Department Usage" subtitle="Assets held per department">
+          {deptUsage.length === 0 ? (
+            <EmptyChart icon={Building2} message="No department data" sub="Assign assets to departments to compare" />
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(180, deptUsage.length * 34)}>
+              <BarChart data={deptUsage} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
+                <XAxis type="number" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} axisLine={false} tickLine={false} interval={0} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="count" fill="#2563EB" radius={[0, 6, 6, 0]} name="Assets" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartContainer>
+
+        <ChartContainer icon={UserCheck} accent="#22C55E" title="Active vs Inactive" subtitle="User account status">
+          {activeSplit.length === 0 ? (
+            <EmptyChart icon={UserCheck} message="No users yet" sub="Account status will appear here" />
+          ) : (
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={210}>
                 <PieChart>
-                  <Pie data={assetsByCategory} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="count">
-                    {assetsByCategory.map((entry) => <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name] ?? "#94a3b8"} />)}
+                  <Pie data={activeSplit} cx="50%" cy="50%" innerRadius={58} outerRadius={86} paddingAngle={3} dataKey="count">
+                    {activeSplit.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
                   </Pie>
                   <Tooltip contentStyle={tooltipStyle} />
                   <Legend iconType="circle" iconSize={8} formatter={(v) => <span style={{ fontSize: "12px", color: "hsl(var(--foreground))" }}>{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Assets by Type</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportAssetsCsv(assets), "Assets report")} label="assets" />
-          </CardHeader>
-          <CardContent>
-            {assetsByType.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No assets yet" sub="A breakdown across all 22 asset types will appear here" />
-            ) : (
-              <ResponsiveContainer width="100%" height={Math.max(220, assetsByType.length * 26)}>
-                <BarChart data={assetsByType} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
-                  <XAxis type="number" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} axisLine={false} tickLine={false} interval={0} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="count" fill="#6366f1" radius={[0,4,4,0]} name="Assets" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold">Users by Role</CardTitle>
-            <ExportCardButton onClick={() => handleExport(() => exportUsersCsv(users), "Users report")} label="users" />
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={usersByRole} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="count" fill="#8b5cf6" radius={[4,4,0,0]} name="Users" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Reporting Structure */}
-      <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between flex-wrap gap-2">
-          <div>
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Network className="h-4 w-4 text-pink-500" /> Reporting Structure
-            </CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">
-              {managerGroups.length} manager{managerGroups.length === 1 ? "" : "s"} · {employeesWithManager} employee{employeesWithManager === 1 ? "" : "s"} with a manager assigned
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={users.length === 0}
-              onClick={() => handleExport(() => exportReportingStructureCsv(users), "Reporting structure")}
-            >
-              <Download className="h-3.5 w-3.5" /> CSV
-            </Button>
-            <Button
-              variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={users.length === 0}
-              onClick={() => handleExportAsync(() => exportReportingStructureXlsx(users), "Reporting structure (Excel)")}
-            >
-              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" /> Excel
-            </Button>
-            <Button
-              variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-              disabled={users.length === 0}
-              onClick={() => handleExportAsync(() => exportReportingStructurePdf(users), "Reporting structure (PDF)")}
-            >
-              <FileText className="h-3.5 w-3.5 text-red-500" /> PDF
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {managerGroups.length === 0 ? (
-            <EmptyChart icon={Network} message="No reporting relationships yet" sub="Assign reporting managers to employees to build the structure" />
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Largest Teams</p>
-                <ResponsiveContainer width="100%" height={Math.max(180, topManagers.length * 30)}>
-                  <BarChart data={topManagers} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
-                    <XAxis type="number" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} axisLine={false} tickLine={false} interval={0} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="count" fill="#ec4899" radius={[0,4,4,0]} name="Direct Reports" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="max-h-[280px] overflow-y-auto rounded-lg border border-border divide-y divide-border">
-                {managerGroups.map((g) => (
-                  <div key={g.manager.id} className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-foreground">{g.manager.full_name}</p>
-                      <span className="text-xs font-medium text-muted-foreground bg-muted rounded-full px-2 py-0.5">
-                        {g.reports.length} report{g.reports.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 truncate">
-                      {g.reports.map((r) => r.full_name).join(", ")}
-                    </p>
-                  </div>
-                ))}
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center -mt-7">
+                <span className="text-2xl font-bold text-foreground">{users.length}</span>
+                <span className="text-xs text-muted-foreground">Total Users</span>
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartContainer>
+      </div>
+
+      {/* ── Reporting structure leaderboard ──────────────────────────────── */}
+      <ChartContainer
+        icon={Network} accent="#EC4899"
+        title="Reporting Structure"
+        subtitle={`${managerGroups.length} manager${managerGroups.length === 1 ? "" : "s"} · ${employeesWithManager} employee${employeesWithManager === 1 ? "" : "s"} with a manager assigned`}
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
+              onClick={() => handleExport(() => exportReportingStructureCsv(users), "Reporting structure")}>
+              <Download className="h-3.5 w-3.5" /> CSV
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
+              onClick={() => handleExportAsync(() => exportReportingStructureXlsx(users), "Reporting structure (Excel)")}>
+              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" /> Excel
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" disabled={users.length === 0}
+              onClick={() => handleExportAsync(() => exportReportingStructurePdf(users), "Reporting structure (PDF)")}>
+              <FileText className="h-3.5 w-3.5 text-red-500" /> PDF
+            </Button>
+          </div>
+        }
+      >
+        {leaderboard.length === 0 ? (
+          <EmptyChart icon={Network} message="No reporting relationships yet" sub="Assign reporting managers to employees to build the structure" />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pt-1">
+            {leaderboard.map((m, i) => (
+              <LeaderboardCard
+                key={m.id} rank={i + 1} name={m.name} subtitle={m.dept}
+                teamSize={m.teamSize} directReports={m.directReports} activityScore={m.activityScore}
+              />
+            ))}
+          </div>
+        )}
+      </ChartContainer>
+
+      {/* ── AI insights panel ────────────────────────────────────────────── */}
+      <ChartContainer
+        icon={Sparkles} accent="#8B5CF6"
+        title="AI Insights" subtitle="Auto-generated from your live asset, ticket & user data"
+      >
+        {insightsToShow.length === 0 ? (
+          <EmptyChart icon={Sparkles} message="No insights yet" sub="Insights appear as assets, tickets and users are added" />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {insightsToShow.map((ins, i) => (
+              <InsightCard key={i} icon={ins.icon} tone={ins.tone} title={ins.title} text={ins.text} />
+            ))}
+          </div>
+        )}
+      </ChartContainer>
     </div>
   );
 }
