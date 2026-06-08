@@ -31,6 +31,8 @@ interface OrgSettings {
   session_timeout:     number;
   timezone:            string;
   date_format:         string;
+  agent_active_poll_sec: number;
+  agent_idle_poll_sec:   number;
 }
 
 const DEFAULTS: OrgSettings = {
@@ -44,6 +46,8 @@ const DEFAULTS: OrgSettings = {
   session_timeout:     30,
   timezone:            "Asia/Kolkata",
   date_format:         "DD MMM YYYY",
+  agent_active_poll_sec: 5,
+  agent_idle_poll_sec:   30,
 };
 
 const TIMEZONES = [
@@ -97,6 +101,8 @@ export default function Settings() {
   const [supportEmail,       setSupportEmail]       = useState(DEFAULTS.support_email);
   const [timezone,           setTimezone]           = useState(DEFAULTS.timezone);
   const [dateFormat,         setDateFormat]         = useState(DEFAULTS.date_format);
+  const [activePoll,         setActivePoll]         = useState(String(DEFAULTS.agent_active_poll_sec));
+  const [idlePoll,           setIdlePoll]           = useState(String(DEFAULTS.agent_idle_poll_sec));
 
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -116,6 +122,8 @@ export default function Settings() {
     setSessionTimeout(String(row.session_timeout));
     setTimezone(row.timezone ?? DEFAULTS.timezone);
     setDateFormat(row.date_format ?? DEFAULTS.date_format);
+    setActivePoll(String(row.agent_active_poll_sec ?? DEFAULTS.agent_active_poll_sec));
+    setIdlePoll(String(row.agent_idle_poll_sec ?? DEFAULTS.agent_idle_poll_sec));
   };
 
   const load = useCallback(async () => {
@@ -155,6 +163,20 @@ export default function Settings() {
       toast({ title: "Invalid session timeout", description: "Enter a value between 5 and 480 minutes.", variant: "destructive" });
       return;
     }
+    const activeNum = parseInt(activePoll, 10);
+    const idleNum   = parseInt(idlePoll, 10);
+    if (isNaN(activeNum) || activeNum < 2 || activeNum > 3600) {
+      toast({ title: "Invalid active poll interval", description: "Enter a value between 2 and 3600 seconds.", variant: "destructive" });
+      return;
+    }
+    if (isNaN(idleNum) || idleNum < 2 || idleNum > 3600) {
+      toast({ title: "Invalid idle poll interval", description: "Enter a value between 2 and 3600 seconds.", variant: "destructive" });
+      return;
+    }
+    if (idleNum < activeNum) {
+      toast({ title: "Invalid poll intervals", description: "Idle interval must be greater than or equal to the active interval.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     const { data, error: saveError } = await supabase.rpc("save_org_settings", {
       p_org_name:            orgName,
@@ -167,6 +189,8 @@ export default function Settings() {
       p_session_timeout:     timeoutNum,
       p_timezone:            timezone,
       p_date_format:         dateFormat,
+      p_agent_active_poll_sec: activeNum,
+      p_agent_idle_poll_sec:   idleNum,
     });
     setSaving(false);
     if (saveError) {
@@ -301,6 +325,21 @@ export default function Settings() {
                           </SelectContent>
                         </Select>
                       </div>
+                    </div>
+                  </div>
+                </SettingsCard>
+
+                <SettingsCard icon={Monitor} title="Device Agent Polling" description="How often installed agents check in for commands. Changes apply to every agent automatically on its next check-in — no reinstall or restart needed.">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="active-poll">Active Interval (seconds)</Label>
+                      <Input id="active-poll" type="number" value={activePoll} onChange={e => setActivePoll(e.target.value)} disabled={disabled} className="w-32" min="2" max="3600" data-testid="input-active-poll" />
+                      <p className="text-xs text-muted-foreground">Fast cadence while commands are flowing. Default 5s.</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="idle-poll">Idle Interval (seconds)</Label>
+                      <Input id="idle-poll" type="number" value={idlePoll} onChange={e => setIdlePoll(e.target.value)} disabled={disabled} className="w-32" min="2" max="3600" data-testid="input-idle-poll" />
+                      <p className="text-xs text-muted-foreground">Slow cadence when idle. Default 30s. Must be ≥ active.</p>
                     </div>
                   </div>
                 </SettingsCard>

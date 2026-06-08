@@ -1576,6 +1576,29 @@ def _looks_revoked(resp: dict) -> bool:
     return "revoked token" in err or "invalid or revoked" in err
 
 
+def _apply_server_poll(poll: object, active_sec: int, idle_sec: int) -> tuple[int, int]:
+    """Apply the server-driven poll cadence carried on the /sync response, live.
+
+    The portal/DB sets the interval once and every agent picks it up here on its
+    next heavy /sync — no reinstall, restart, or env change. Values are clamped to
+    sane bounds and idle is never faster than active. Missing/garbage values keep
+    the current cadence (which itself defaults to the env vars / constants), so a
+    server that omits `poll` (or an older server) never breaks the agent."""
+    if not isinstance(poll, dict):
+        return active_sec, idle_sec
+
+    def _clamp(v: object, fallback: int) -> int:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return fallback
+        return max(2, min(3600, n))
+
+    new_active = _clamp(poll.get("active"), active_sec)
+    new_idle   = max(new_active, _clamp(poll.get("idle"), idle_sec))
+    return new_active, new_idle
+
+
 def poll_commands() -> tuple[bool, int]:
     """Poll + execute queued commands. Returns (revoked, processed):
       - `revoked`   True if the portal has revoked our token (so the caller can
@@ -1670,14 +1693,22 @@ def run_loop() -> int:
     last_sync = 0.0
     revoked_strikes = 0
     last_activity = float("-inf")  # last poll that carried commands; -inf = start idle (monotonic() can be ~0 right after boot)
+    # Live poll cadence. Seeded from the env/constants, then overridden by whatever
+    # the server returns on /sync — so the portal can retune the whole fleet once
+    # and every agent converges with no reinstall/restart/env change.
+    active_sec, idle_sec = COMMAND_POLL_SEC, IDLE_POLL_SEC
     while True:
         now = time.monotonic()
         try:
             # Heavy system sync + wallpaper + lock reconcile on the slow cycle.
             if now - last_sync >= SYNC_INTERVAL_SEC:
                 sync = _post("/sync", {"payload": collect_system_info()})
-                if isinstance(sync, dict) and sync.get("success") and ("locked" in sync):
-                    reconcile_lock(bool(sync.get("locked")))
+                if isinstance(sync, dict) and sync.get("success"):
+                    if "locked" in sync:
+                        reconcile_lock(bool(sync.get("locked")))
+                    # Server-driven poll cadence: the portal/DB sets it once and we
+                    # adopt it here live, clamped, with idle never faster than active.
+                    active_sec, idle_sec = _apply_server_poll(sync.get("poll"), active_sec, idle_sec)
                 apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
                 _maybe_notify_long_uptime()
                 last_sync = now
@@ -1728,7 +1759,7 @@ def run_loop() -> int:
         # case more follow — then fall back to the cheap IDLE_POLL_SEC tick. This
         # is what cuts idle Edge Function invocations ~83% (5s → 30s).
         active = (time.monotonic() - last_activity) < BURST_WINDOW_SEC
-        time.sleep(COMMAND_POLL_SEC if active else IDLE_POLL_SEC)
+        time.sleep(active_sec if active else idle_sec)
 
 
 # ── service install (auto-start after reboot) ───────────────────────────────
