@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.7.0"
+AGENT_VERSION       = "0.8.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -1941,6 +1941,159 @@ def _show_access_dialog(title: str, message: str, timeout_sec: int = 60) -> bool
         return False
 
 
+# ── remote desktop transport (Commit 2 — spike only) ─────────────────────────
+# This block proves the bidirectional transport works end to end: after the end
+# user approves a session, the agent joins the per-session Supabase Realtime
+# broadcast channel and answers the portal's `ping` with `pong`. There is NO
+# screen capture and NO mouse/keyboard control here — those are Commits 3–5.
+# It is fully isolated from /sync, /commands and the Agent Key flow: nothing runs
+# until a session is approved, and any failure is logged and swallowed.
+_active_remote_sessions: set[str] = set()
+_active_remote_lock = threading.Lock()
+
+
+def _ensure_websockets() -> bool:
+    """Return True if the `websockets` library is importable. Already-deployed
+    agents predate this dependency, so we best-effort `pip install` it once at
+    runtime (windowless, quiet). Failure is non-fatal — the transport just stays
+    disabled until the agent is reinstalled."""
+    try:
+        import websockets  # noqa: F401
+        return True
+    except Exception:
+        pass
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+             "--quiet", "websockets"],
+            check=True, timeout=120,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import websockets  # noqa: F401
+        return True
+    except Exception as e:
+        print(f"[remote] websockets unavailable, transport disabled: {e}", file=sys.stderr)
+        return False
+
+
+def start_remote_session(session_id: str) -> None:
+    """Entry point: dedupe per session, then run the transport. Safe to call from
+    multiple threads — only one transport runs per session id."""
+    with _active_remote_lock:
+        if session_id in _active_remote_sessions:
+            return
+        _active_remote_sessions.add(session_id)
+    try:
+        _run_remote_session(session_id)
+    except Exception as e:
+        print(f"[remote] session {session_id} ended: {e}", file=sys.stderr)
+    finally:
+        with _active_remote_lock:
+            _active_remote_sessions.discard(session_id)
+
+
+def _run_remote_session(session_id: str) -> None:
+    # 1. Poll until the portal has issued a token for this approved session.
+    cfg = None
+    for _ in range(60):  # ~2 min ceiling (60 × 2 s)
+        resp = _get(f"/remote-access/session?session_id={session_id}")
+        if resp.get("ready"):
+            cfg = resp
+            break
+        if resp.get("success") is False:
+            print(f"[remote] cannot fetch session token: {resp.get('error')}", file=sys.stderr)
+            return
+        time.sleep(2)
+    if not cfg:
+        print("[remote] portal never issued a session token; giving up", file=sys.stderr)
+        return
+
+    if not _ensure_websockets():
+        return
+    from websockets.sync.client import connect as ws_connect
+
+    realtime_url = cfg.get("realtime_url")
+    anon_key     = cfg.get("anon_key")
+    channel      = cfg.get("channel_name")
+    if not (realtime_url and anon_key and channel):
+        print("[remote] incomplete realtime config from portal", file=sys.stderr)
+        return
+
+    topic  = f"realtime:{channel}"
+    ws_url = f"{realtime_url}?apikey={anon_key}&vsn=1.0.0"
+    _ref = [0]
+    def next_ref() -> str:
+        _ref[0] += 1
+        return str(_ref[0])
+
+    print(f"[remote] joining channel {channel}", file=sys.stderr)
+    with ws_connect(ws_url, open_timeout=20, close_timeout=5) as ws:
+        join_ref = next_ref()
+        # Match supabase-js: topic is `realtime:<channel>`, broadcast self=false
+        # so we never receive our own pong, public channel (no RLS in the spike).
+        ws.send(json.dumps({
+            "topic":   topic,
+            "event":   "phx_join",
+            "payload": {"config": {"broadcast": {"self": False, "ack": False},
+                                    "presence": {"key": ""},
+                                    "private": False}},
+            "ref":      join_ref,
+            "join_ref": join_ref,
+        }))
+
+        last_hb  = time.monotonic()
+        deadline = time.monotonic() + 600  # hard 10-min cap for the spike
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now - last_hb >= 25:  # Phoenix heartbeat keeps the socket alive
+                try:
+                    ws.send(json.dumps({"topic": "phoenix", "event": "heartbeat",
+                                         "payload": {}, "ref": next_ref()}))
+                except Exception:
+                    break
+                last_hb = now
+            try:
+                raw = ws.recv(timeout=5)
+            except TimeoutError:
+                continue
+            except Exception:
+                break
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            if msg.get("event") != "broadcast":
+                continue
+            inner = msg.get("payload") or {}
+            evt   = inner.get("event")
+            if evt == "ping":
+                p = inner.get("payload") or {}
+                # Echo the nonce + ts so the portal can correlate and measure RTT.
+                ws.send(json.dumps({
+                    "topic":   topic,
+                    "event":   "broadcast",
+                    "payload": {
+                        "type":  "broadcast",
+                        "event": "pong",
+                        "payload": {
+                            "nonce":   p.get("nonce"),
+                            "ts":      p.get("ts"),
+                            "agent":   socket.gethostname(),
+                            "version": AGENT_VERSION,
+                        },
+                    },
+                    "ref": next_ref(),
+                }))
+                print(f"[remote] ping->pong nonce={p.get('nonce')}", file=sys.stderr)
+            elif evt == "end":
+                print("[remote] portal ended the session", file=sys.stderr)
+                break
+    print(f"[remote] session {session_id} transport closed", file=sys.stderr)
+
+
 def poll_remote_access() -> None:
     """Poll for pending Assisted Access requests and show a native Allow/Deny
     dialog to the end user. Called on every fast-poll cycle; safe and fast when
@@ -1985,6 +2138,11 @@ def poll_remote_access() -> None:
                         "session_id": session_id,
                         "response":   response,
                     })
+                    if allowed:
+                        # Commit-2 spike: once approved, join the per-session
+                        # Realtime channel so the portal can prove the round-trip.
+                        threading.Thread(target=start_remote_session,
+                                         args=(session_id,), daemon=True).start()
                 except Exception:
                     pass
 
