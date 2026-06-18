@@ -235,3 +235,20 @@ BEGIN
   );
 END;
 $$;
+
+
+-- ── HOTFIX: _sha256_hex search_path ──────────────────────────────────────────
+-- pgcrypto's digest() lives in the `extensions` schema on Supabase.
+-- The original function had no search_path set, so when called from within
+-- a SECURITY DEFINER RPC that restricts search_path to `public`, the call to
+-- digest() failed with "function digest(text, unknown) does not exist".
+-- Fix: set search_path = public, extensions and qualify the call.
+CREATE OR REPLACE FUNCTION public._sha256_hex(p_text TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+  SELECT encode(extensions.digest(p_text, 'sha256'), 'hex');
+$$;
