@@ -146,19 +146,89 @@ def _read_file(path: str) -> str:
 
 
 # ── per-OS collectors ───────────────────────────────────────────────────────
+# Placeholder strings that some OEMs bake into firmware — treated as "no data".
+_WIN_BAD_VALUES = {
+    "", "to be filled by o.e.m.", "default string", "none", "n/a",
+    "not applicable", "system serial number", "0", "unknown",
+    "no asset tag", "asset-1234567890",
+}
+
+
+def _cim_clean(val: str) -> str:
+    """Strip whitespace; return empty string for known placeholder values."""
+    v = val.strip()
+    return "" if v.lower() in _WIN_BAD_VALUES else v
+
+
 def _collect_windows() -> dict:
-    ram_raw = _wmic_kv("computersystem", "TotalPhysicalMemory")
-    ram_gb  = f"{round(int(ram_raw) / (1024**3))} GB" if ram_raw.isdigit() else ""
-    storage = _ps("[math]::Round((Get-CimInstance Win32_DiskDrive | Measure-Object -Property Size -Sum).Sum / 1GB)")
+    # ── Serial Number ─────────────────────────────────────────────────────────
+    # Primary: Get-CimInstance Win32_Bios (modern, replaces deprecated wmic bios).
+    # Fallback chain covers firmware that stores S/N in the enclosure or baseboard.
+    serial = _cim_clean(_ps("(Get-CimInstance Win32_Bios).SerialNumber"))
+    if not serial:
+        serial = _cim_clean(_ps("(Get-CimInstance Win32_SystemEnclosure).SerialNumber"))
+    if not serial:
+        serial = _cim_clean(_ps("(Get-CimInstance Win32_BaseBoard).SerialNumber"))
+    if not serial:
+        serial = _cim_clean(_wmic_kv("bios", "SerialNumber"))
+
+    # ── Brand / Model ─────────────────────────────────────────────────────────
+    brand = (
+        _cim_clean(_ps("(Get-CimInstance Win32_ComputerSystem).Manufacturer"))
+        or _cim_clean(_wmic_kv("computersystem", "Manufacturer"))
+    )
+    model = (
+        _cim_clean(_ps("(Get-CimInstance Win32_ComputerSystem).Model"))
+        or _cim_clean(_wmic_kv("computersystem", "Model"))
+    )
+
+    # ── Processor ────────────────────────────────────────────────────────────
+    processor = (
+        _cim_clean(_ps("(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"))
+        or _cim_clean(_wmic_kv("cpu", "Name"))
+    )
+
+    # ── RAM ──────────────────────────────────────────────────────────────────
+    # CIM gives the exact physical memory size in bytes; wmic is the fallback.
+    ram_raw = (
+        _ps("(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory").strip()
+        or _wmic_kv("computersystem", "TotalPhysicalMemory")
+    )
+    ram_gb = f"{round(int(ram_raw) / (1024**3))} GB" if ram_raw and ram_raw.isdigit() else ""
+
+    # ── Storage ───────────────────────────────────────────────────────────────
+    # Strategy 1 — sum all physical disks (covers NVMe + SATA, most accurate).
+    storage_num = _ps(
+        "$d=(Get-CimInstance Win32_DiskDrive|Measure-Object -Property Size -Sum).Sum;"
+        "if($d -and $d -gt 0){[math]::Round($d/1GB)}else{''}"
+    ).strip()
+    # Strategy 2 — C: logical disk size (reliable single-drive proxy).
+    if not storage_num or not storage_num.isdigit():
+        storage_num = _ps(
+            "$d=Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='C:'\";"
+            "if($d -and $d.Size -gt 0){[math]::Round($d.Size/1GB)}else{''}"
+        ).strip()
+    # Strategy 3 — wmic diskdrive fallback (first disk only, older Windows).
+    if not storage_num or not storage_num.isdigit():
+        raw = _wmic_kv("diskdrive", "Size")
+        if raw and raw.isdigit():
+            storage_num = str(round(int(raw) / (1024 ** 3)))
+    storage = f"{storage_num} GB" if storage_num and storage_num.isdigit() else ""
+
+    # ── OS ────────────────────────────────────────────────────────────────────
+    os_version = _ps(
+        "$o=Get-CimInstance Win32_OperatingSystem;$o.Caption+' '+$o.Version"
+    ).strip() or _ps("(Get-CimInstance Win32_OperatingSystem).Caption").strip()
+
     return {
-        "serial_number": _wmic_kv("bios", "SerialNumber"),
-        "brand":         _wmic_kv("computersystem", "Manufacturer"),
-        "model":         _wmic_kv("computersystem", "Model"),
-        "processor":     _wmic_kv("cpu", "Name"),
+        "serial_number": serial,
+        "brand":         brand,
+        "model":         model,
+        "processor":     processor,
         "ram":           ram_gb,
-        "storage":       f"{storage} GB" if storage.isdigit() else "",
+        "storage":       storage,
         "os_name":       "Windows",
-        "os_version":    _ps("(Get-CimInstance Win32_OperatingSystem).Caption + ' ' + (Get-CimInstance Win32_OperatingSystem).Version"),
+        "os_version":    os_version,
     }
 
 
