@@ -1,17 +1,13 @@
-// Miles IT Assets — Agent API
+// Miles IT Assets — Agent API (Phase 1)
 // Single edge function that routes all agent endpoints. Authenticated via the
 // `X-Agent-Token` header. Database mutations happen inside SECURITY DEFINER
 // RPCs so the surface here is intentionally thin and easy to port to AWS later.
 //
-// Routes:
-//   POST /agent-api/register                { payload }
-//   POST /agent-api/sync                    { payload }
+// Routes (all POST except where noted):
+//   POST /agent-api/register        { payload }
+//   POST /agent-api/sync            { payload }
 //   GET  /agent-api/commands
-//   POST /agent-api/commands/status         { id, status, result?, error? }
-//   GET  /agent-api/wallpaper/active
-//   POST /agent-api/wallpaper/status        { wallpaper_id, status, error? }
-//   GET  /agent-api/remote-access           ← returns pending assisted sessions for this device
-//   POST /agent-api/remote-access/respond   { session_id, response: "approved"|"denied" }
+//   POST /agent-api/commands/status { id, status, result?, error? }
 //
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -51,24 +47,9 @@ Deno.serve(async (req) => {
   if (!token) return json({ success: false, error: "missing X-Agent-Token" }, 401);
 
   try {
-    // ── GET /commands ──────────────────────────────────────────────────────
+    // GET /commands
     if (req.method === "GET" && path === "/commands") {
       const r = await rpc("agent_fetch_commands", { p_token: token });
-      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
-    }
-
-    // ── GET /wallpaper/active ──────────────────────────────────────────────
-    if (req.method === "GET" && path === "/wallpaper/active") {
-      const r = await rpc("agent_get_active_wallpaper", { p_token: token });
-      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
-    }
-
-    // ── GET /remote-access ─────────────────────────────────────────────────
-    // Returns pending "requested" assisted-access sessions for this device.
-    // The agent polls this on every fast-poll cycle and shows a native dialog
-    // to the logged-in user if any sessions are waiting for approval.
-    if (req.method === "GET" && path === "/remote-access") {
-      const r = await rpc("agent_get_pending_remote_access", { p_token: token });
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
@@ -85,6 +66,17 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
+    if (req.method === "GET" && path === "/wallpaper/active") {
+      const r = await rpc("agent_get_active_wallpaper", { p_token: token });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
+    // GET /remote-access — pending Assisted Access sessions for this device
+    if (req.method === "GET" && path === "/remote-access") {
+      const r = await rpc("agent_get_pending_remote_access", { p_token: token });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
     if (req.method === "POST" && path === "/wallpaper/status") {
       const r = await rpc("agent_report_wallpaper", {
         p_token:        token,
@@ -97,7 +89,7 @@ Deno.serve(async (req) => {
 
     if (req.method === "POST" && path === "/commands/status") {
       const r = await rpc("agent_update_command", {
-        p_token:      token,
+        p_token: token,
         p_command_id: body.id,
         p_status:     body.status,
         p_result:     body.result ?? null,
@@ -106,9 +98,7 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
-    // ── POST /remote-access/respond ────────────────────────────────────────
-    // Called by the agent after the end user clicks Allow or Deny in the dialog.
-    // body: { session_id: string, response: "approved" | "denied" }
+    // POST /remote-access/respond — { session_id, response: "approved"|"denied" }
     if (req.method === "POST" && path === "/remote-access/respond") {
       const r = await rpc("agent_respond_remote_access", {
         p_token:      token,
