@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { AssetProvider } from "@/context/AssetContext";
 import { TicketProvider } from "@/context/TicketContext";
 import { UsersProvider } from "@/context/UsersContext";
+import { AssetConfigProvider } from "@/context/AssetConfigContext";
 import { UserRole } from "@/data/mockData";
 import Layout from "@/components/Layout";
 
@@ -300,16 +301,18 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <AssetProvider>
-            <TicketProvider>
-              <UsersProvider>
-                <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-                  <RecoveryGate />
-                </WouterRouter>
-                <Toaster />
-              </UsersProvider>
-            </TicketProvider>
-          </AssetProvider>
+          <AssetConfigProvider>
+            <AssetProvider>
+              <TicketProvider>
+                <UsersProvider>
+                  <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                    <RecoveryGate />
+                  </WouterRouter>
+                  <Toaster />
+                </UsersProvider>
+              </TicketProvider>
+            </AssetProvider>
+          </AssetConfigProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
