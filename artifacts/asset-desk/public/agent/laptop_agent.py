@@ -43,10 +43,12 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.6.1"
+AGENT_VERSION       = "0.7.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
+# Self-update: check once every 24 h. Set to 0 to disable.
+SELF_UPDATE_INTERVAL_SEC = int(os.environ.get("MILES_AGENT_UPDATE_INTERVAL", "86400"))
 # Commands (lock / unlock / etc.) are polled far more frequently than the heavy
 # system sync so admin actions take effect within seconds, not minutes.
 COMMAND_POLL_SEC    = max(2, int(os.environ.get("MILES_AGENT_COMMAND_POLL", "5")))
@@ -180,6 +182,125 @@ def _read_file(path: str) -> str:
             return f.read().strip()
     except Exception:
         return ""
+
+
+# ── self-update ──────────────────────────────────────────────────────────────
+# The agent stores this module path at startup so it can atomically replace
+# itself and restart when a newer version is available on the portal.
+_AGENT_SCRIPT_PATH   = os.path.abspath(__file__)
+_last_update_check   = 0.0   # monotonic time of the last version check
+
+
+def _agent_script_url() -> str:
+    """Return the URL where the latest laptop_agent.py is served.
+
+    install.ps1 / install.sh saves MILES_AGENT_URL as a user-level env var
+    during enrollment — that's the canonical source.  We fall back to deriving
+    a URL from MILES_AGENT_API_BASE so the function always returns something
+    sensible even if the var was accidentally cleared.
+    """
+    url = os.environ.get("MILES_AGENT_URL", "").strip()
+    if url:
+        return url
+    # Derive from API base: strip the Supabase edge-function suffix and append
+    # the Render-hosted asset path.  Example:
+    #   API_BASE = "https://abc.supabase.co/functions/v1/agent-api"
+    # This fallback may not always work (it depends on the portal hosting layout)
+    # but it is better than returning nothing.
+    base = API_BASE.split("/functions/")[0]  # https://abc.supabase.co
+    return base + "/agent/laptop_agent.py"
+
+
+def _parse_version(src: str) -> tuple[int, ...]:
+    """Extract AGENT_VERSION from agent source and return as a comparable tuple.
+    Returns (0,) if the version string cannot be found or parsed."""
+    import re
+    m = re.search(r'^AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', src, re.MULTILINE)
+    if not m:
+        return (0,)
+    try:
+        return tuple(int(x) for x in m.group(1).split("."))
+    except Exception:
+        return (0,)
+
+
+def _self_update(force: bool = False) -> tuple[bool, str]:
+    """Check for a newer agent script and apply it if one exists.
+
+    Steps:
+      1. Rate-limit to SELF_UPDATE_INTERVAL_SEC (skipped when force=True).
+      2. Download the remote script to a temp file.
+      3. Parse its AGENT_VERSION — skip if not strictly newer.
+      4. Compile-check the download so a truncated/corrupt file never replaces us.
+      5. Atomically replace the local script with os.replace().
+      6. os.execv() to restart the current process in-place with the new code.
+         (execv replaces the process image — the caller never returns.)
+
+    Returns (updated: bool, message: str). 'updated' is only False when the
+    function returns normally; True is returned conceptually but execv() means
+    the caller never sees it — the process has already been replaced.
+    """
+    global _last_update_check
+    now = time.monotonic()
+
+    if not force:
+        if SELF_UPDATE_INTERVAL_SEC <= 0:
+            return (False, "self-update disabled")
+        if now - _last_update_check < SELF_UPDATE_INTERVAL_SEC:
+            return (False, "not due yet")
+
+    _last_update_check = now
+
+    url = _agent_script_url()
+    if not url:
+        return (False, "no agent URL configured")
+
+    tmp_path = _AGENT_SCRIPT_PATH + ".update_tmp"
+    try:
+        r = requests.get(url, timeout=30, stream=True)
+        if r.status_code != 200:
+            return (False, f"download failed: HTTP {r.status_code}")
+
+        with open(tmp_path, "wb") as fh:
+            for chunk in r.iter_content(chunk_size=16384):
+                fh.write(chunk)
+
+        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as fh:
+            new_src = fh.read()
+
+        new_ver = _parse_version(new_src)
+        cur_ver = _parse_version(f'AGENT_VERSION = "{AGENT_VERSION}"')
+        if new_ver <= cur_ver:
+            os.remove(tmp_path)
+            return (False, f"already up to date (local={AGENT_VERSION})")
+
+        # Validate: reject if the new script does not compile cleanly.
+        import py_compile
+        try:
+            py_compile.compile(tmp_path, doraise=True)
+        except py_compile.PyCompileError as exc:
+            os.remove(tmp_path)
+            return (False, f"new script failed syntax check: {exc}")
+
+        # Atomic replace — on the same filesystem this is a rename, never a
+        # partial write. If the replace fails the old script is untouched.
+        os.replace(tmp_path, _AGENT_SCRIPT_PATH)
+
+        # Restart in-place. os.execv() replaces this process with a fresh
+        # Python interpreter running the updated script — the run loop, any
+        # threads, and open handles are cleanly replaced without leaving a
+        # ghost process.  This line never returns.
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    except Exception as exc:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        return (False, f"update error: {exc}")
+
+    return (True, "updated")   # unreachable after execv, kept for type-checker
 
 
 # ── per-OS collectors ───────────────────────────────────────────────────────
@@ -1512,6 +1633,12 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     if ctype in ("sync_now", "collect_system_info"):
         _post("/sync", {"payload": collect_system_info()})
         return ("completed", "synced", None)
+    if ctype == "update_agent":
+        # Force an immediate self-update check regardless of the daily timer.
+        # If a newer version is on the server, the agent replaces itself and
+        # restarts (os.execv) — this return is only reached when already current.
+        _self_update(force=True)
+        return ("completed", f"agent is already up to date (v{AGENT_VERSION})", None)
     if ctype == "update_wallpaper":
         # Always pull the current active wallpaper from the portal (force re-apply)
         status, err = apply_active_wallpaper(force=True)
@@ -1837,6 +1964,11 @@ def run_loop() -> int:
                     active_sec, idle_sec = _apply_server_poll(sync.get("poll"), active_sec, idle_sec)
                 apply_active_wallpaper()   # post-sync wallpaper check (no-op if unchanged)
                 _maybe_notify_long_uptime()
+                # Self-update: silently check for a newer agent once per day.
+                # If an update is available, _self_update() atomically replaces
+                # this script and calls os.execv() — the process never returns
+                # past that line. On a no-op check it returns immediately.
+                _self_update()
                 last_sync = now
             # Commands (lock / unlock) on the fast cycle so they apply in seconds.
             # poll_commands() also reports if the portal has revoked our token
