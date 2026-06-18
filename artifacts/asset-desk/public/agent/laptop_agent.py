@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.8.0"
+AGENT_VERSION       = "0.8.1"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -1950,6 +1950,18 @@ def _show_access_dialog(title: str, message: str, timeout_sec: int = 60) -> bool
 # until a session is approved, and any failure is logged and swallowed.
 _active_remote_sessions: set[str] = set()
 _active_remote_lock = threading.Lock()
+# One id per agent PROCESS. Used to claim a session so two agent instances can
+# never serve the same session token (the first to claim wins; we exit if not).
+_AGENT_INSTANCE_ID = uuid.uuid4().hex
+
+
+def _current_user() -> str:
+    """Best-effort interactive/OS user name for the transport handshake."""
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
 
 
 def _ensure_websockets() -> bool:
@@ -2011,6 +2023,16 @@ def _run_remote_session(session_id: str) -> None:
         print("[remote] portal never issued a session token; giving up", file=sys.stderr)
         return
 
+    # 2. Claim the session for THIS instance. If another agent already owns it
+    #    we are rejected and must not join — prevents one token serving two agents.
+    claim = _post("/remote-access/claim", {
+        "session_id":  session_id,
+        "instance_id": _AGENT_INSTANCE_ID,
+    })
+    if not claim.get("claimed"):
+        print(f"[remote] claim rejected: {claim.get('error')}", file=sys.stderr)
+        return
+
     if not _ensure_websockets():
         return
     from websockets.sync.client import connect as ws_connect
@@ -2018,6 +2040,7 @@ def _run_remote_session(session_id: str) -> None:
     realtime_url = cfg.get("realtime_url")
     anon_key     = cfg.get("anon_key")
     channel      = cfg.get("channel_name")
+    device_id    = cfg.get("asset_id")
     if not (realtime_url and anon_key and channel):
         print("[remote] incomplete realtime config from portal", file=sys.stderr)
         return
@@ -2079,10 +2102,12 @@ def _run_remote_session(session_id: str) -> None:
                         "type":  "broadcast",
                         "event": "pong",
                         "payload": {
-                            "nonce":   p.get("nonce"),
-                            "ts":      p.get("ts"),
-                            "agent":   socket.gethostname(),
-                            "version": AGENT_VERSION,
+                            "nonce":     p.get("nonce"),
+                            "ts":        p.get("ts"),
+                            "agent":     socket.gethostname(),
+                            "version":   AGENT_VERSION,
+                            "user":      _current_user(),
+                            "device_id": device_id,
                         },
                     },
                     "ref": next_ref(),
