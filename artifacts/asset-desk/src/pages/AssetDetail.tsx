@@ -149,7 +149,7 @@ export default function AssetDetail() {
   const assetType = lookupAsset?.assetType;
   const assetUuid = lookupAsset?.id;
   useEffect(() => {
-    if (!assetUuid || !supabaseConfigured || assetType !== "Laptop") {
+    if (!assetUuid || !supabaseConfigured || (assetType !== "Laptop" && assetType !== "Desktop")) {
       setDevice(null);
       setCommands([]);
       return;
@@ -309,7 +309,7 @@ export default function AssetDetail() {
                   <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
                     {asset.status}
                   </span>
-                  {asset.assetType === "Laptop" && device && (
+                  {(asset.assetType === "Laptop" || asset.assetType === "Desktop") && device && (
                     isOnline(device) ? (
                       <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600">
                         <span className="relative flex h-2 w-2">
@@ -924,7 +924,7 @@ export default function AssetDetail() {
           </Card>
 
           {/* ── Device Agent (Laptops only) ───────────────── */}
-          {asset.assetType === "Laptop" && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
+          {(asset.assetType === "Laptop" || asset.assetType === "Desktop") && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
 
           {/* ── Asset Recovery (only when a recovery is in progress) ─────── */}
           {asset.id && <RecoveryCard assetId={asset.id} />}
