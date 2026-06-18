@@ -28,6 +28,19 @@ from __future__ import annotations
 
 import os
 import sys
+
+# ── Windows console UTF-8 fix ────────────────────────────────────────────────
+# Windows cmd / PowerShell default to cp1252 which can't encode Unicode chars
+# used in agent log messages (✓ U+2713, — U+2014, → U+2192). Reconfigure
+# stdout/stderr to UTF-8 at startup so print() never raises UnicodeEncodeError.
+# errors="replace" means if a character still can't be encoded, it prints "?"
+# rather than crashing the entire install.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass  # Python < 3.7 or frozen binary without reconfigure — best effort
 import json
 import time
 import socket
