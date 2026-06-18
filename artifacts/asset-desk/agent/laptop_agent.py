@@ -109,8 +109,45 @@ def _run(cmd: list[str], timeout: int = 15) -> str:
         return ""
 
 
+def _ps_exe() -> str:
+    """Return the correct PowerShell executable for this process.
+
+    On Windows, Python (and therefore the agent) may be 32-bit even when the OS
+    is 64-bit (WOW64 mode).  In that case the normal 'powershell' alias resolves
+    to 32-bit PowerShell, which can silently miss 64-bit WMI/CIM data (notably
+    Win32_DiskDrive sizes, storage totals, and some BIOS fields).
+
+    The fix is to call the 64-bit PowerShell via the special 'sysnative' redirect
+    that Windows exposes to 32-bit processes.  If we're already a 64-bit process,
+    or sysnative doesn't exist (pure 32-bit OS), we fall back to 'powershell'.
+
+    Architecture map used in data collection:
+      struct.calcsize('P') == 4  →  32-bit Python process
+      struct.calcsize('P') == 8  →  64-bit Python process (native or WOW64 is N/A)
+    """
+    if not IS_WIN:
+        return "powershell"
+    try:
+        import struct
+        if struct.calcsize("P") == 4:
+            # 32-bit process: try sysnative redirect for native 64-bit PowerShell
+            sysnative = os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                "sysnative", "WindowsPowerShell", "v1.0", "powershell.exe",
+            )
+            if os.path.exists(sysnative):
+                return sysnative
+    except Exception:
+        pass
+    return "powershell"
+
+
+# Resolve once at import time so every _ps() call reuses the same executable.
+_PS_EXE = _ps_exe() if IS_WIN else "powershell"
+
+
 def _ps(snippet: str) -> str:
-    return _run(["powershell", "-NoProfile", "-Command", snippet])
+    return _run([_PS_EXE, "-NoProfile", "-Command", snippet])
 
 
 def _wmic_kv(cls: str, field: str) -> str:
@@ -215,10 +252,28 @@ def _collect_windows() -> dict:
             storage_num = str(round(int(raw) / (1024 ** 3)))
     storage = f"{storage_num} GB" if storage_num and storage_num.isdigit() else ""
 
-    # ── OS ────────────────────────────────────────────────────────────────────
-    os_version = _ps(
-        "$o=Get-CimInstance Win32_OperatingSystem;$o.Caption+' '+$o.Version"
-    ).strip() or _ps("(Get-CimInstance Win32_OperatingSystem).Caption").strip()
+    # ── OS + Architecture ────────────────────────────────────────────────────
+    # OSArchitecture returns "64-bit", "32-bit", or "ARM 64-bit" automatically.
+    os_obj      = _ps("$o=Get-CimInstance Win32_OperatingSystem;$o.Caption+'|'+$o.Version+'|'+$o.OSArchitecture")
+    os_parts    = os_obj.split("|") if "|" in os_obj else [os_obj, "", ""]
+    os_caption  = os_parts[0].strip()
+    os_ver_num  = os_parts[1].strip()
+    os_arch     = os_parts[2].strip()   # e.g. "64-bit", "32-bit", "ARM 64-bit"
+
+    # Fallback: use platform module when CIM call fails
+    if not os_caption:
+        os_caption = _ps("(Get-CimInstance Win32_OperatingSystem).Caption").strip()
+    if not os_arch:
+        os_arch = _ps("(Get-CimInstance Win32_OperatingSystem).OSArchitecture").strip()
+    if not os_arch:
+        # Last resort: derive from Python's own pointer size
+        try:
+            import struct
+            os_arch = "64-bit" if struct.calcsize("P") == 8 else "32-bit"
+        except Exception:
+            os_arch = platform.machine()   # e.g. "AMD64", "x86", "ARM64"
+
+    os_version = " ".join(filter(None, [os_caption, os_ver_num])).strip()
 
     return {
         "serial_number": serial,
@@ -229,6 +284,7 @@ def _collect_windows() -> dict:
         "storage":       storage,
         "os_name":       "Windows",
         "os_version":    os_version,
+        "os_arch":       os_arch,        # "64-bit" | "32-bit" | "ARM 64-bit"
     }
 
 
