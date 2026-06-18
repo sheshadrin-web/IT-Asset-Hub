@@ -531,13 +531,38 @@ export default function AssetTypesConfig() {
   }
 
   if (error) {
+    const isPermissionError = error.toLowerCase().includes("permission denied");
+    const isMissingTable    = error.toLowerCase().includes("does not exist") || error.toLowerCase().includes("schema cache");
+    const grantSql = `GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT ON schema_asset_types  TO anon, authenticated;
+GRANT SELECT ON schema_asset_fields TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE ON schema_asset_types  TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON schema_asset_fields TO authenticated;`;
+
     return (
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-5 py-4 flex items-start gap-3">
         <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-destructive">Could not load configuration</p>
           <p className="text-xs text-muted-foreground mt-0.5">{error}</p>
-          <p className="text-xs text-muted-foreground mt-1">Run migration <code className="font-mono bg-muted px-1 rounded">001_schema_asset_types.sql</code> in Supabase SQL Editor first.</p>
+
+          {isMissingTable && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Run migration <code className="font-mono bg-muted px-1 rounded">001_schema_asset_types.sql</code> in Supabase SQL Editor first.
+            </p>
+          )}
+
+          {isPermissionError && (
+            <div className="mt-2">
+              <p className="text-xs text-muted-foreground">
+                The tables exist but are missing role grants. Run this in <strong>Supabase → SQL Editor</strong>:
+              </p>
+              <pre className="mt-1.5 text-[10px] font-mono bg-muted/80 border border-border rounded-md px-3 py-2 overflow-x-auto whitespace-pre leading-relaxed">
+                {grantSql}
+              </pre>
+            </div>
+          )}
+
           <Button variant="outline" size="sm" onClick={reload} className="mt-3">Retry</Button>
         </div>
       </div>
