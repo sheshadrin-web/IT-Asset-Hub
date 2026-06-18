@@ -99,6 +99,18 @@ Deno.serve(async (req) => {
       return json(data);
     }
 
+    // POST /remote-access/claim — { session_id, instance_id }. Single-agent lock:
+    // the first instance to claim wins; another instance with the same token is
+    // rejected so one (possibly shared) token can't drive two agents.
+    if (req.method === "POST" && path === "/remote-access/claim") {
+      const r = await rpc("agent_claim_remote_session", {
+        p_token:       token,
+        p_session_id:  body.session_id,
+        p_instance_id: body.instance_id,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
     if (req.method === "POST" && path === "/wallpaper/status") {
       const r = await rpc("agent_report_wallpaper", {
         p_token:        token,
