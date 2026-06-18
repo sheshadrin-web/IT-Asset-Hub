@@ -79,12 +79,14 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
 - ✅ **Force remove agent** — unmanage a device from the portal
 - ✅ One-line install command generated per OS (Windows / macOS / Linux)
 
-### 🔌 Remote Access (Portal Phase)
-- ✅ **Assisted Access** — send a remote access request; end user approves on their device (agent integration Phase 2)
+### 🔌 Remote Access
+- ✅ **Assisted Access** — IT admin sends a request; a native OS dialog appears on the end-user's screen (Windows: MessageBoxW, macOS: osascript, Linux: zenity/kdialog); user clicks Allow or Deny; 60-second auto-deny timeout
 - ✅ **Unattended Access** — super_admin only; direct session without user approval
-- ✅ Session lifecycle: requested → approved/denied → active → ended/failed
+- ✅ Session lifecycle: `requested → approved/denied → active → ended/failed`
 - ✅ Full audit log for every session transition
-- ✅ Per-asset session history panel
+- ✅ Per-asset session history panel with auto-polling every 5 seconds
+- ✅ Toast notifications on status changes
+- ✅ Pulsing indicator when a session is active
 
 ### 👥 Employee Allocations
 - ✅ One-click assign / un-assign with handover notes
@@ -163,6 +165,16 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
               │  │  sessions    │   │  RPCs (gated ops)  │    │
               │  │  + more…     │   └────────────────────┘    │
               │  └──────────────┘                              │
+              │                                                │
+              │  ┌─────────────────────────────────────────┐  │
+              │  │       Edge Function: agent-api          │  │
+              │  │  POST /register   POST /sync            │  │
+              │  │  GET  /commands   POST /commands/status │  │
+              │  │  GET  /wallpaper/active                 │  │
+              │  │  POST /wallpaper/status                 │  │
+              │  │  GET  /remote-access          ← NEW     │  │
+              │  │  POST /remote-access/respond  ← NEW     │  │
+              │  └─────────────────────────────────────────┘  │
               └────────────────────────────────────────────────┘
                                       ▲
                                       │ Agent API (HTTPS polling)
@@ -171,7 +183,9 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
                        │   Runs on managed Windows /     │
                        │   macOS / Linux devices         │
                        │   Picks up commands → executes  │
-                       │   → reports back status         │
+                       │   Polls for remote access       │
+                       │   → shows native Allow/Deny     │
+                       │     popup to end user           │
                        └─────────────────────────────────┘
 ```
 
@@ -189,22 +203,29 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
 IT-Asset-Hub/
 ├── artifacts/
 │   └── asset-desk/              # React + Vite SPA
-│       └── src/
-│           ├── components/      # UI components
-│           │   ├── DeviceAgentCard.tsx   # Agent commands, remote access
-│           │   ├── RemoteAccessModal.tsx # Assisted / Unattended sessions
-│           │   ├── AssetForm.tsx         # Dynamic asset form (reads DB config)
-│           │   ├── AssetDetail.tsx       # Full asset detail page
-│           │   ├── WallpaperManager.tsx  # Push wallpapers to devices
-│           │   └── settings/
-│           │       └── AssetTypesConfig.tsx  # Schema admin panel
-│           ├── context/
-│           │   ├── AuthContext.tsx       # Role, session, hasRole()
-│           │   └── AssetConfigContext.tsx# Asset types + fields from DB
-│           ├── lib/
-│           │   ├── supabaseClient.ts
-│           │   └── auditService.ts
-│           └── pages/           # Route pages
+│       ├── src/
+│       │   ├── components/      # UI components
+│       │   │   ├── DeviceAgentCard.tsx   # Agent commands + Remote Access button
+│       │   │   ├── RemoteAccessModal.tsx # Assisted / Unattended sessions UI
+│       │   │   ├── AssetForm.tsx         # Dynamic asset form (reads DB config)
+│       │   │   ├── AssetDetail.tsx       # Full asset detail page
+│       │   │   ├── WallpaperManager.tsx  # Push wallpapers to devices
+│       │   │   └── settings/
+│       │   │       └── AssetTypesConfig.tsx  # Schema admin panel
+│       │   ├── context/
+│       │   │   ├── AuthContext.tsx       # Role, session, hasRole()
+│       │   │   └── AssetConfigContext.tsx# Asset types + fields from DB
+│       │   ├── lib/
+│       │   │   ├── supabaseClient.ts
+│       │   │   └── auditService.ts
+│       │   └── pages/           # Route pages
+│       └── public/
+│           └── agent/
+│               └── laptop_agent.py      # Downloadable Python agent
+│
+├── artifacts/asset-desk/
+│   └── supabase/functions/agent-api/
+│       └── index.ts             # Supabase Edge Function (all agent routes)
 │
 ├── migrations/
 │   ├── 001_schema_asset_types.sql   # Asset type/field config tables
@@ -247,7 +268,17 @@ migrations/002_remote_access_sessions.sql
 
 You can run them from the Supabase Dashboard → SQL Editor, or via the Supabase Management API.
 
-### 4. Start dev server
+### 4. Deploy Edge Function
+
+```bash
+cd artifacts/asset-desk
+supabase functions deploy agent-api \
+  --project-ref <your-project-ref> \
+  --no-verify-jwt \
+  --use-api
+```
+
+### 5. Start dev server
 
 ```bash
 pnpm --filter @workspace/asset-desk run dev
@@ -319,16 +350,33 @@ RBAC is enforced at **three layers**:
 
 ### Key RPCs (SECURITY DEFINER)
 
-| RPC                            | Role required       | What it does                                      |
-|--------------------------------|---------------------|---------------------------------------------------|
-| `generate_agent_token`         | super_admin         | Creates a signed agent key + managed_device row   |
-| `revoke_agent_token`           | super_admin         | Revokes a key and marks device inactive           |
-| `queue_device_command`         | super_admin         | Enqueues lock / unlock / restart / update command |
-| `force_remove_agent`           | super_admin         | Unmanages a device and writes audit log           |
-| `request_remote_access`        | super_admin/it_admin | Creates a remote access session                  |
-| `update_remote_access_session` | super_admin/it_admin | Transitions session status, writes audit log     |
-| `get_remote_access_sessions`   | super_admin/it_admin | Returns recent sessions for an asset             |
-| `get_audit_logs`               | hr_admin+           | Returns the audit log (read-only)                 |
+#### Portal-side (called by authenticated users via Supabase JS client)
+
+| RPC                            | Role required        | What it does                                      |
+|--------------------------------|----------------------|---------------------------------------------------|
+| `generate_agent_token`         | super_admin          | Creates a signed agent key + managed_device row   |
+| `revoke_agent_token`           | super_admin          | Revokes a key and marks device inactive           |
+| `queue_device_command`         | super_admin          | Enqueues lock / unlock / restart / update command |
+| `force_remove_agent`           | super_admin          | Unmanages a device and writes audit log           |
+| `request_remote_access`        | super_admin/it_admin | Creates a remote access session                   |
+| `update_remote_access_session` | super_admin/it_admin | Transitions session status, writes audit log      |
+| `get_remote_access_sessions`   | super_admin/it_admin | Returns recent sessions for an asset              |
+| `get_audit_logs`               | hr_admin+            | Returns the audit log (read-only)                 |
+
+#### Agent-side (called by the Edge Function using the service role, keyed by agent token)
+
+| RPC                                | Auth              | What it does                                                    |
+|------------------------------------|-------------------|-----------------------------------------------------------------|
+| `agent_register`                   | agent token       | Registers / updates device info in `managed_devices`            |
+| `agent_sync`                       | agent token       | Periodic heartbeat — updates `last_seen`, returns config        |
+| `agent_fetch_commands`             | agent token       | Returns pending commands for this device                        |
+| `agent_update_command`             | agent token       | Reports command result (completed / failed)                     |
+| `agent_get_active_wallpaper`       | agent token       | Returns the active wallpaper URL for this device                |
+| `agent_report_wallpaper`           | agent token       | Reports wallpaper apply result                                  |
+| `agent_get_pending_remote_access`  | agent token       | Returns `requested` sessions pending end-user approval          |
+| `agent_respond_remote_access`      | agent token       | Posts the end-user's Allow/Deny response, updates session       |
+
+All agent-side RPCs use `_auth_agent(p_token)` internally — if the token is invalid or revoked, the RPC returns `{ success: false }` without leaking any data.
 
 ---
 
@@ -341,9 +389,12 @@ The device agent is a Python script that runs as a background service on managed
 1. IT admin generates an **Agent Key** from the portal for a specific asset
 2. The portal shows a **one-line install command** (with the key embedded) for Windows / macOS / Linux
 3. The agent script is downloaded and started — it registers the device in `managed_devices`
-4. The agent **polls Supabase** every 30 seconds for pending `device_commands`
+4. The agent **polls Supabase** (via the Edge Function) on an adaptive cadence:
+   - Fast (5 s) while commands are flowing or a remote access session is pending
+   - Slow (30 s) when idle — cuts edge-function invocations ~83%
 5. On receiving a command, the agent executes it locally (lock screen, restart, etc.) and reports back the result
-6. The portal shows live status, last-seen time, and command history
+6. The agent also polls for **remote access approval requests** and shows a native dialog to the logged-in user
+7. The portal shows live status, last-seen time, and command history
 
 ### Supported commands
 
@@ -355,33 +406,86 @@ The device agent is a Python script that runs as a background service on managed
 | `push_wallpaper`  | Downloads and sets a new wallpaper          |
 | `update_agent`    | Self-updates the agent script               |
 
+### Agent API routes (Edge Function)
+
+All routes are authenticated via `X-Agent-Token` header.
+
+| Method | Route                      | Purpose                                           |
+|--------|----------------------------|---------------------------------------------------|
+| POST   | `/register`                | First-run device registration                     |
+| POST   | `/sync`                    | Periodic heartbeat + config pull                  |
+| GET    | `/commands`                | Fetch pending commands                            |
+| POST   | `/commands/status`         | Report command result                             |
+| GET    | `/wallpaper/active`        | Get active wallpaper URL                          |
+| POST   | `/wallpaper/status`        | Report wallpaper apply result                     |
+| GET    | `/remote-access`           | Fetch pending Assisted Access sessions            |
+| POST   | `/remote-access/respond`   | Post end-user Allow/Deny response                 |
+
 ---
 
 ## 🔌 Remote Access
 
-Remote access sessions are tracked in the portal with a full audit trail. The live remote desktop engine is planned for Phase 2.
+Remote access sessions are tracked with a full audit trail. The end-user approval popup runs natively on the managed device via the Python agent.
 
-### Session flow
+### Session flow — Assisted Access
 
 ```
-IT Admin opens RemoteAccessModal
+IT Admin clicks "Request Assisted Access" in portal
          │
          ▼
-  ┌──────────────┐    ┌────────────────────────────────────────┐
-  │   Assisted   │───▶│ status: requested                      │
-  │   Access     │    │ End-user sees approval prompt (Phase 2)│
-  └──────────────┘    │ → approved / denied by user            │
-                      │ → active / ended by admin              │
-                      └────────────────────────────────────────┘
+  Portal calls request_remote_access RPC
+  → session created (status: requested)
+         │
+         ▼ (agent polls GET /remote-access every 5 s)
+  Python agent finds pending session
+         │
+         ▼
+  Native OS dialog appears on end-user's screen:
+  ┌─────────────────────────────────────────────────────┐
+  │  Miles IT — Remote Access Request                   │
+  │                                                     │
+  │  [Admin Name] is requesting remote access to        │
+  │  your computer.                                     │
+  │                                                     │
+  │  Click Allow to permit, or Deny to reject.          │
+  │  Auto-denied in 60 seconds if no response.          │
+  │                                                     │
+  │           [ Deny ]          [ Allow ]               │
+  └─────────────────────────────────────────────────────┘
 
-  ┌──────────────┐    ┌────────────────────────────────────────┐
-  │  Unattended  │───▶│ Warning confirmation shown to admin    │
-  │  Access      │    │ status: active immediately             │
-  │ (super_admin)│    │ → ended by admin when done             │
-  └──────────────┘    └────────────────────────────────────────┘
+  Platform implementations:
+    Windows  — ctypes MessageBoxW (no extra packages)
+    macOS    — osascript display dialog
+    Linux    — zenity → kdialog fallback
+
+         │ user clicks Allow or Deny (or 60 s elapses)
+         ▼
+  Agent POSTs to /remote-access/respond
+  → session status: approved / denied
+  → audit log written
+         │
+         ▼
+  Portal modal polls every 5 s → updates status
+  → toast notification fires
+  → pulsing dot shows when session is active
 ```
 
-Every transition writes to `audit_logs` via `_log_remote_access_audit()`.
+### Session flow — Unattended Access
+
+```
+super_admin only — confirmation dialog in portal
+         │
+         ▼
+  Portal calls request_remote_access (mode: unattended)
+  → session status: active immediately (no user prompt)
+         │
+         ▼
+  Admin connects via remote desktop tool
+  Admin clicks "End Session" when done
+  → session status: ended + audit log
+```
+
+Every status transition writes to `audit_logs` via `_log_remote_access_audit()`.
 
 ---
 
@@ -403,6 +507,20 @@ The portal is deployed as a **Vite static build** on [Render](https://render.com
 | Publish dir     | `artifacts/asset-desk/dist`          |
 | Auto-deploy     | Yes (from `main` branch)             |
 
+### Edge Function deployment
+
+The agent API Edge Function must be deployed via the **Supabase CLI** (not the Management REST API) so the TypeScript is correctly bundled for Deno:
+
+```bash
+SUPABASE_ACCESS_TOKEN=<your-token> \
+supabase functions deploy agent-api \
+  --project-ref <your-project-ref> \
+  --no-verify-jwt \
+  --use-api
+```
+
+> **Note:** Deploying Edge Functions via the Management API's `body` field does **not** compile the TypeScript and causes a BOOT_ERROR. Always use `supabase functions deploy --use-api`.
+
 ### Database
 
 Supabase manages the PostgreSQL database, Auth, and Storage — no separate DB deployment needed. Run new migration files from `migrations/` in the Supabase SQL Editor after each schema change.
@@ -411,7 +529,7 @@ Supabase manages the PostgreSQL database, Auth, and Storage — no separate DB d
 
 ## 🚧 Future Enhancements
 
-- [ ] 🖥️ **Live remote desktop** — Phase 2 of remote access (WebRTC or third-party engine)
+- [ ] 🖥️ **Live remote desktop** — WebRTC or third-party engine for actual screen sharing (portal session tracking + end-user popup are complete ✅)
 - [ ] 📱 **Mobile app** (Expo / React Native) for on-the-go asset scanning
 - [ ] 📷 **QR / barcode** generation per asset + camera scan
 - [ ] 🧾 **Software license** tracking with seat-count & renewal alerts
