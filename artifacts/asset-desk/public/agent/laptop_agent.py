@@ -1852,6 +1852,135 @@ def _apply_server_poll(poll: object, active_sec: int, idle_sec: int) -> tuple[in
     return new_active, new_idle
 
 
+
+# ── Remote Access — end-user approval popup ───────────────────────────────────
+# Sessions that have already been shown to the user (within this process run).
+# Prevents showing the same dialog twice on the same agent invocation.
+_prompted_sessions: set[str] = set()
+_remote_access_lock = threading.Lock()
+
+
+def _show_access_dialog(title: str, message: str, timeout_sec: int = 60) -> bool:
+    """Show a native Allow/Deny dialog to the logged-in user.
+    Returns True if the user clicks Allow (or the OS-equivalent positive button).
+    Returns False on Deny, timeout, or any error — always safe to call, never raises.
+
+    Platform notes:
+      Windows  — ctypes MessageBoxW (no extra packages, works in user session)
+      macOS    — osascript display dialog (built-in)
+      Linux    — zenity → kdialog fallback (headless → auto-deny)
+    """
+    try:
+        if IS_WIN:
+            import ctypes
+            # MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND
+            MB_FLAGS = 0x04 | 0x20 | 0x40000 | 0x10000
+            result_holder: list[int] = [7]  # 7 = IDNO default (deny on timeout)
+
+            def _show() -> None:
+                result_holder[0] = ctypes.windll.user32.MessageBoxW(
+                    None, message, title, MB_FLAGS
+                )
+
+            t = threading.Thread(target=_show, daemon=True)
+            t.start()
+            t.join(timeout=timeout_sec)
+            return result_holder[0] == 6  # IDYES = 6
+
+        elif IS_MAC:
+            script = (
+                f'set dlg to display dialog "{message}" '
+                f'buttons {{"Deny", "Allow"}} default button "Allow" '
+                f'with title "{title}" giving up after {timeout_sec}'
+            )
+            r = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=timeout_sec + 5,
+            )
+            return "button returned:Allow" in r.stdout
+
+        elif IS_LIN:
+            # GNOME / GTK
+            try:
+                r = subprocess.run(
+                    ["zenity", "--question",
+                     f"--title={title}", f"--text={message}",
+                     "--ok-label=Allow", "--cancel-label=Deny",
+                     f"--timeout={timeout_sec}"],
+                    timeout=timeout_sec + 5,
+                )
+                return r.returncode == 0
+            except FileNotFoundError:
+                pass
+            # KDE fallback
+            try:
+                r = subprocess.run(
+                    ["kdialog", "--yesno", message, "--title", title],
+                    timeout=timeout_sec + 5,
+                )
+                return r.returncode == 0
+            except FileNotFoundError:
+                pass
+            # Headless — no GUI toolkit found, auto-deny
+            return False
+
+    except Exception:
+        return False
+
+
+def poll_remote_access() -> None:
+    """Poll for pending Assisted Access requests and show a native Allow/Deny
+    dialog to the end user. Called on every fast-poll cycle; safe and fast when
+    no sessions are pending (single GET that returns an empty list).
+
+    The dialog runs in a daemon thread so it never blocks the main poll loop.
+    Sessions are tracked in _prompted_sessions to avoid showing the same dialog
+    twice within a single agent process lifetime.
+    """
+    global _prompted_sessions
+    try:
+        resp = _get("/remote-access")
+        if not resp.get("success"):
+            return
+        sessions = resp.get("sessions") or []
+        for s in sessions:
+            sid = s.get("id")
+            if not sid:
+                continue
+            # Fast path — skip without acquiring the lock if we've seen it
+            if sid in _prompted_sessions:
+                continue
+            with _remote_access_lock:
+                if sid in _prompted_sessions:
+                    continue
+                _prompted_sessions.add(sid)
+
+            requester = s.get("requested_by") or "Your IT Admin"
+            title = "Miles IT — Remote Access Request"
+            message = (
+                f"{requester} is requesting remote access to your computer.\n\n"
+                f"Click Allow to permit access, or Deny to reject the request.\n"
+                f"If you do not respond within 60 seconds, access will be automatically denied."
+            )
+
+            # Handle in a background thread so the poll loop keeps ticking
+            def _handle(session_id: str = sid, msg: str = message) -> None:
+                try:
+                    allowed   = _show_access_dialog(title, msg, timeout_sec=60)
+                    response  = "approved" if allowed else "denied"
+                    _post("/remote-access/respond", {
+                        "session_id": session_id,
+                        "response":   response,
+                    })
+                except Exception:
+                    pass
+
+            threading.Thread(target=_handle, daemon=True).start()
+
+    except Exception:
+        pass
+
+
 def poll_commands() -> tuple[bool, int]:
     """Poll + execute queued commands. Returns (revoked, processed):
       - `revoked`   True if the portal has revoked our token (so the caller can
@@ -1977,6 +2106,7 @@ def run_loop() -> int:
             # tear ourselves down and exit so no background process or console
             # window is left running.
             revoked, processed = poll_commands()
+            poll_remote_access()  # prompt end user for any pending Assisted Access requests
             if processed > 0:
                 last_activity = now  # activity → snap back to the fast cadence
             if revoked:
