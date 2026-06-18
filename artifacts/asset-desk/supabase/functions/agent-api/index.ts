@@ -77,6 +77,28 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
+    // GET /remote-access/session?session_id=... — the agent polls this after the
+    // end user approves. Returns { ready:false } until the portal has issued a
+    // session token, then { ready:true, session_token, channel_name, ... } plus
+    // the public Realtime connection params so the agent can join the per-session
+    // broadcast channel WITHOUT hardcoding any key. The anon key returned here is
+    // the same public key already shipped in the browser bundle.
+    if (req.method === "GET" && path === "/remote-access/session") {
+      const sessionId = url.searchParams.get("session_id") ?? "";
+      const r = await rpc("agent_get_remote_session_token", {
+        p_token:      token,
+        p_session_id: sessionId,
+      });
+      if (!r.ok) return json({ success: false, error: r.error }, 400);
+      const data = (r.data ?? {}) as Record<string, unknown>;
+      if (data.ready === true) {
+        // https://<ref>.supabase.co -> wss://<ref>.supabase.co/realtime/v1/websocket
+        data.realtime_url = SUPABASE_URL.replace(/^http/, "ws") + "/realtime/v1/websocket";
+        data.anon_key     = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+      }
+      return json(data);
+    }
+
     if (req.method === "POST" && path === "/wallpaper/status") {
       const r = await rpc("agent_report_wallpaper", {
         p_token:        token,
