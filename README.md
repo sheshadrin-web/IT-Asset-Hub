@@ -1,25 +1,21 @@
 <div align="center">
 
-# 🖥️ IT-Asset-Hub
+# 🖥️ IT Asset Hub — Miles Education
 
-### *One source of truth for every laptop, license, and ticket at Miles Education.*
+### *One source of truth for every asset, device, and IT request at Miles Education.*
 
-**Built for [Miles Education Pvt Ltd](https://www.mileseducation.com)** — a modern, full-stack IT Asset Management & Helpdesk System that helps the Miles IT team track hardware, software licenses, employee allocations, and support tickets — end to end.
+**Built for [Miles Education Pvt Ltd](https://www.mileseducation.com)** — a modern, full-stack IT Asset Management system that helps the Miles IT team track hardware, software licenses, employee allocations, helpdesk tickets, and live device agents — end to end.
 
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
-[![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=next.js&logoColor=white)](https://nextjs.org)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![Django](https://img.shields.io/badge/Django-5-092E20?logo=django&logoColor=white)](https://www.djangoproject.com)
-[![DRF](https://img.shields.io/badge/DRF-3.15-A30000?logo=django&logoColor=white)](https://www.django-rest-framework.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)](https://jwt.io)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
-[![Nginx](https://img.shields.io/badge/Nginx-Reverse_Proxy-009639?logo=nginx&logoColor=white)](https://nginx.org)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react\&logoColor=white)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite\&logoColor=white)](https://vitejs.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript\&logoColor=white)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-38B2AC?logo=tailwind-css\&logoColor=white)](https://tailwindcss.com)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase\&logoColor=white)](https://supabase.com)
+[![Render](https://img.shields.io/badge/Deployed_on-Render-46E3B7?logo=render\&logoColor=white)](https://render.com)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#-license)
-[![Made for Miles Education](https://img.shields.io/badge/Built_for-Miles_Education-1d4ed8.svg)](https://www.mileseducation.com)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://it-asset-hub-a7rf.onrender.com)
 
-[🌐 Live Portal](https://it-asset-hub-a7rf.onrender.com) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-installation-steps) · [📡 API Docs](#-api-endpoints)
+[🌐 Live Portal](https://it-asset-hub-a7rf.onrender.com) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-quick-start) · [👥 Roles](#-role-based-access)
 
 `Internal tool · Miles Education Pvt Ltd · Bengaluru, India 🇮🇳`
 
@@ -34,59 +30,72 @@
 3. [Tech Stack](#-tech-stack)
 4. [Architecture Overview](#-architecture-overview)
 5. [Folder Structure](#-folder-structure)
-6. [Installation Steps](#-installation-steps)
+6. [Quick Start](#-quick-start)
 7. [Environment Variables](#-environment-variables)
-8. [API Endpoints](#-api-endpoints)
-9. [Authentication Flow](#-authentication-flow)
-10. [Role-Based Access](#-role-based-access)
-11. [Asset Lifecycle Workflow](#-asset-lifecycle-workflow)
+8. [Role-Based Access](#-role-based-access)
+9. [Database Schema](#-database-schema)
+10. [Device Agent System](#-device-agent-system)
+11. [Remote Access](#-remote-access)
 12. [Screenshots](#-screenshots)
 13. [Deployment](#-deployment)
-14. [Troubleshooting](#-troubleshooting)
-15. [Future Enhancements](#-future-enhancements)
-16. [Contributing Guidelines](#-contributing-guidelines)
-17. [License](#-license)
-18. [Contact](#-contact)
+14. [Future Enhancements](#-future-enhancements)
+15. [License](#-license)
+16. [Contact](#-contact)
 
 ---
 
 ## 💡 Why This Project?
 
-Before IT-Asset-Hub, the Miles Education IT team — like most growing companies — was juggling assets across **Excel sheets, WhatsApp threads, and email approvals**.
-That breaks down fast at 100+ employees: lost devices, expired warranties, untracked licenses, no audit trail.
+Before IT Asset Hub, the Miles Education IT team was managing assets across **Excel sheets, WhatsApp threads, and email approvals** — which breaks down fast at 100+ employees.
 
-**IT-Asset-Hub** was purpose-built for Miles Education to solve this with:
+**IT Asset Hub** solves this with:
 
-- 🎯 A single, searchable inventory for **22 asset categories** (laptops, monitors, mobiles, peripherals, network gear, fixed assets)
-- 🔐 **Role-based access** so admins, helpdesk agents, and employees each see exactly what they need
+- 🎯 A single searchable inventory for **22+ asset categories** (laptops, monitors, mobiles, peripherals, network gear, fixed assets)
+- 🔐 **Role-based access** so super admins, IT admins, HR, helpdesk agents, and employees each see exactly what they need
+- 🤖 **Live device agent** — remotely lock, unlock, restart, manage wallpapers, and start remote access sessions on managed laptops
 - 📝 A built-in **helpdesk** that links every ticket to a real asset
 - 📊 **Real-time reports** with one-click CSV / XLSX exports for finance & audit
-- 📨 Automated **assignment emails** with employee acknowledgement
+- 📨 **Assignment emails** with employee acknowledgement
 
-> Deployed to production at Miles Education and actively managing the company's IT inventory across every office. Also serves as a portfolio-grade showcase of modern full-stack engineering — REST API design, JWT auth, role-based authorization, containerized deployment, and clean React UX.
+> Deployed to production and actively managing Miles Education's IT inventory across every office.
 
 ---
 
 ## ✨ Features
 
 ### 🖥️ Asset Management
-- ✅ **22 asset categories** grouped into Main Devices · Accessories · Fixed Assets
-- ✅ Auto-generated asset IDs (`MILES-LAP-001`, `MILES-MOB-042`, …)
+- ✅ **22+ asset categories** grouped into Main Devices · Accessories · Fixed Assets
+- ✅ Auto-generated asset tags (`MILES-LAP-001`, `MILES-MOB-042`, …)
 - ✅ Full lifecycle tracking: *Available → Assigned → Under Repair → Retired / Lost*
+- ✅ **Dynamic asset type & field configuration** — admins can add new asset types and custom fields through the portal with no code changes (stored in `schema_asset_types` + `schema_asset_fields`)
 - ✅ Searchable, filterable inventory with photo uploads
-- ✅ Warranty + purchase-date tracking with expiry alerts
+- ✅ Warranty + purchase-date tracking
+
+### 🤖 Device Agent System
+- ✅ **Agent key generation** — issue signed keys per device for the Python laptop agent
+- ✅ **Live device commands** — Lock, Unlock, Force Restart sent from the portal and picked up by the agent
+- ✅ **Wallpaper management** — push custom wallpapers to managed devices
+- ✅ **Agent health monitoring** — last-seen timestamp, online/offline/inactive status
+- ✅ **Force remove agent** — unmanage a device from the portal
+- ✅ One-line install command generated per OS (Windows / macOS / Linux)
+
+### 🔌 Remote Access (Portal Phase)
+- ✅ **Assisted Access** — send a remote access request; end user approves on their device (agent integration Phase 2)
+- ✅ **Unattended Access** — super_admin only; direct session without user approval
+- ✅ Session lifecycle: requested → approved/denied → active → ended/failed
+- ✅ Full audit log for every session transition
+- ✅ Per-asset session history panel
 
 ### 👥 Employee Allocations
 - ✅ One-click assign / un-assign with handover notes
 - ✅ Bulk assignment workflow
 - ✅ Email notification + in-app acknowledgement by employee
-- ✅ Complete audit trail of every assignment
+- ✅ Complete assignment history
 
 ### 📥 Bulk Import
-- ✅ Per-type CSV templates for all 22 categories
-- ✅ Smart column detection (handles Google Sheets & Excel exports)
+- ✅ Per-type CSV templates for all categories
+- ✅ Smart column detection
 - ✅ Per-row validation with errors shown **before** import
-- ✅ Failed-row diagnostics surfaced on the Done screen
 
 ### 🎫 Helpdesk Tickets
 - ✅ Raise tickets linked to assets or stand-alone
@@ -94,72 +103,83 @@ That breaks down fast at 100+ employees: lost devices, expired warranties, untra
 - ✅ Auto-assign agents by category
 
 ### 📊 Reports & Analytics
-- ✅ Assets by Category (donut) + Assets by Type (bar) for all 22 types
+- ✅ Assets by Category (donut) + Assets by Type (bar)
 - ✅ Per-category CSV exports
-- ✅ Full XLSX summary across 7 sheets (Assets, Tickets, Users, By Type, By Status, By Category, By Department)
-- ✅ 26-column rich CSV (processor, RAM, OS, IMEI, vendor, invoice, e-code, …)
+- ✅ Full XLSX summary (Assets, Tickets, Users, By Type, By Status, By Category, By Department)
 
 ### 🔐 Security
-- ✅ JWT-based auth (access + refresh tokens)
-- ✅ Role-based access control (RBAC)
-- ✅ CSP / X-Frame-Options security headers
-- ✅ Audit log for every sensitive operation
+- ✅ **Row-Level Security** on every Supabase table — users can only read/write rows they're allowed to
+- ✅ **SECURITY DEFINER RPCs** for sensitive operations (device commands, remote access, audit writes)
+- ✅ **Audit log** — every sensitive operation writes to `audit_logs` with actor, action, entity, and metadata
+- ✅ **Role-based access control** enforced at the DB level via Postgres role checks inside RLS policies
 
 ---
 
 ## 🧰 Tech Stack
 
-| Layer            | Technology                                      |
-|------------------|-------------------------------------------------|
-| **Frontend**     | React 18, Next.js 14, Tailwind CSS, shadcn/ui   |
-| **State / Data** | TanStack Query, React Context, Axios            |
-| **Backend**      | Django 5, Django REST Framework 3.15            |
-| **Database**     | PostgreSQL 16                                   |
-| **Auth**         | JWT (Access + Refresh, rotation enabled)        |
-| **Async**        | Celery + Redis (email & report generation)      |
-| **Storage**      | S3-compatible object storage (asset photos)     |
-| **DevOps**       | Docker, Docker Compose, Nginx reverse proxy     |
-| **CI / CD**      | GitHub Actions                                  |
-| **Monitoring**   | Sentry (optional), structured JSON logs         |
+| Layer              | Technology                                                    |
+|--------------------|---------------------------------------------------------------|
+| **Frontend**       | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, shadcn/ui    |
+| **State / Data**   | React Context, TanStack Query, Zod validation                 |
+| **Backend / DB**   | Supabase — PostgreSQL 16, Auth, Storage, RLS, Edge Functions  |
+| **Database client**| Supabase JS client (`@supabase/supabase-js`)                  |
+| **Auth**           | Supabase Auth (email/password + role stored in `profiles`)    |
+| **Deployment**     | Render (static site, auto-deploy from `main`)                 |
+| **Icons**          | Lucide React                                                  |
+| **Package manager**| pnpm (monorepo)                                               |
 
 ---
 
 ## 🏗️ Architecture Overview
 
 ```
-                          ┌──────────────────────────┐
-                          │       End Users          │
-                          │  (Admin / IT / Employee) │
-                          └────────────┬─────────────┘
-                                       │ HTTPS
-                                       ▼
-                          ┌──────────────────────────┐
-                          │     Nginx (TLS, gzip)    │
-                          │  Static + reverse proxy  │
-                          └────────────┬─────────────┘
-                                       │
-                ┌──────────────────────┴──────────────────────┐
-                ▼                                             ▼
-  ┌─────────────────────────────┐               ┌─────────────────────────────┐
-  │  Next.js / React Frontend   │ ──REST/JWT──▶ │  Django + DRF API Server    │
-  │  (SSR pages + CSR app)      │               │  (asset / user / ticket)    │
-  └─────────────────────────────┘               └──────────────┬──────────────┘
-                                                                │
-                          ┌─────────────────────────────────────┼─────────────────────────┐
-                          ▼                                     ▼                         ▼
-              ┌────────────────────┐              ┌────────────────────┐    ┌────────────────────┐
-              │   PostgreSQL 16    │              │   Redis + Celery   │    │   Object Storage   │
-              │  (assets, users,   │              │ (emails, reports,  │    │  (asset photos,    │
-              │   tickets, audit)  │              │  scheduled jobs)   │    │   invoices)        │
-              └────────────────────┘              └────────────────────┘    └────────────────────┘
+                       ┌─────────────────────────────────┐
+                       │     End Users (Browser)         │
+                       │  Admin / IT / Agent / Employee  │
+                       └──────────────┬──────────────────┘
+                                      │ HTTPS
+                                      ▼
+                       ┌─────────────────────────────────┐
+                       │     Render CDN / Static Site    │
+                       │   React + Vite (SPA)            │
+                       └──────────────┬──────────────────┘
+                                      │ Supabase JS (REST + Realtime)
+                                      ▼
+              ┌────────────────────────────────────────────────┐
+              │                  Supabase                      │
+              │                                                │
+              │  ┌──────────────┐   ┌────────────────────┐    │
+              │  │  PostgreSQL  │   │   Supabase Auth    │    │
+              │  │  (16)        │   │  (JWT, profiles)   │    │
+              │  │              │   └────────────────────┘    │
+              │  │  Tables:     │                              │
+              │  │  assets      │   ┌────────────────────┐    │
+              │  │  profiles    │   │  Supabase Storage  │    │
+              │  │  tickets     │   │  (photos, agents)  │    │
+              │  │  agent_keys  │   └────────────────────┘    │
+              │  │  audit_logs  │                              │
+              │  │  remote_     │   ┌────────────────────┐    │
+              │  │  access_     │   │  SECURITY DEFINER  │    │
+              │  │  sessions    │   │  RPCs (gated ops)  │    │
+              │  │  + more…     │   └────────────────────┘    │
+              │  └──────────────┘                              │
+              └────────────────────────────────────────────────┘
+                                      ▲
+                                      │ Agent API (HTTPS polling)
+                       ┌─────────────────────────────────┐
+                       │   Laptop Agent (Python)         │
+                       │   Runs on managed Windows /     │
+                       │   macOS / Linux devices         │
+                       │   Picks up commands → executes  │
+                       │   → reports back status         │
+                       └─────────────────────────────────┘
 ```
 
 **Design principles**
-
-- **Contract-first API** — OpenAPI 3.1 spec generates typed clients & docs
-- **Stateless backend** — horizontal scale via container replicas behind Nginx
-- **Background jobs** — long-running work (XLSX exports, emails) handed to Celery
-- **Defense in depth** — JWT + RBAC + row-level checks + audit log
+- **Supabase-first** — all business logic is enforced at the DB layer via RLS + SECURITY DEFINER functions, not just in the frontend
+- **Role checks in the DB** — even if the client is bypassed, the RPC will reject the call if the caller's `profiles.role` doesn't qualify
+- **Audit everything** — every command, session, assignment, and deletion writes to `audit_logs`
+- **Agent-side verification** — device agent validates its key against Supabase before executing any command
 
 ---
 
@@ -167,484 +187,240 @@ That breaks down fast at 100+ employees: lost devices, expired warranties, untra
 
 ```
 IT-Asset-Hub/
-├── frontend/                 # Next.js + React + Tailwind
-│   ├── app/                  # App-router pages (dashboard, assets, tickets, reports)
-│   ├── components/           # Shared UI components (shadcn/ui)
-│   ├── lib/                  # API client, hooks, utils
-│   ├── public/               # Static assets, favicons
-│   └── next.config.js
+├── artifacts/
+│   └── asset-desk/              # React + Vite SPA
+│       └── src/
+│           ├── components/      # UI components
+│           │   ├── DeviceAgentCard.tsx   # Agent commands, remote access
+│           │   ├── RemoteAccessModal.tsx # Assisted / Unattended sessions
+│           │   ├── AssetForm.tsx         # Dynamic asset form (reads DB config)
+│           │   ├── AssetDetail.tsx       # Full asset detail page
+│           │   ├── WallpaperManager.tsx  # Push wallpapers to devices
+│           │   └── settings/
+│           │       └── AssetTypesConfig.tsx  # Schema admin panel
+│           ├── context/
+│           │   ├── AuthContext.tsx       # Role, session, hasRole()
+│           │   └── AssetConfigContext.tsx# Asset types + fields from DB
+│           ├── lib/
+│           │   ├── supabaseClient.ts
+│           │   └── auditService.ts
+│           └── pages/           # Route pages
 │
-├── backend/                  # Django + DRF
-│   ├── config/               # settings, urls, wsgi/asgi
-│   ├── apps/
-│   │   ├── accounts/         # User, Profile, JWT views, RBAC
-│   │   ├── assets/           # Asset CRUD, assignment, lifecycle
-│   │   ├── tickets/          # Helpdesk ticketing
-│   │   ├── reports/          # CSV / XLSX exports
-│   │   └── audit/            # Audit log middleware + model
-│   ├── manage.py
-│   └── requirements.txt
+├── migrations/
+│   ├── 001_schema_asset_types.sql   # Asset type/field config tables
+│   └── 002_remote_access_sessions.sql # Remote access table + RPCs
 │
-├── docker/
-│   ├── nginx.conf            # TLS termination, gzip, static caching
-│   ├── Dockerfile.frontend
-│   └── Dockerfile.backend
-│
-├── docs/
-│   ├── screenshots/          # README screenshots
-│   └── architecture.md
-│
-├── .github/workflows/        # CI: lint, test, build, deploy
-├── docker-compose.yml
-├── .env.example
 └── README.md
 ```
 
 ---
 
-## 🚀 Installation Steps
+## 🚀 Quick Start
 
 ### Prerequisites
-- 🐳 Docker 24+ and Docker Compose v2
-- 📦 Node 20+ (for local frontend dev)
-- 🐍 Python 3.12+ (for local backend dev)
-- 🐘 PostgreSQL 16 (if running outside Docker)
+- Node.js 20+ and pnpm
+- A Supabase project (free tier works)
 
-### Option A — One command via Docker (recommended)
+### 1. Clone & install
 
 ```bash
-# 1. Clone
 git clone https://github.com/sheshadrin-web/IT-Asset-Hub.git
 cd IT-Asset-Hub
-
-# 2. Copy env template and fill in values
-cp .env.example .env
-
-# 3. Bring everything up
-docker compose up -d --build
-
-# 4. Run initial migrations & create superuser
-docker compose exec backend python manage.py migrate
-docker compose exec backend python manage.py createsuperuser
-
-# 5. Visit
-#    Frontend → http://localhost
-#    API      → http://localhost/api
-#    Admin    → http://localhost/admin
+pnpm install
 ```
 
-### Option B — Local dev (without Docker)
+### 2. Configure environment
 
 ```bash
-# Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver 8000
+cp artifacts/asset-desk/.env.example artifacts/asset-desk/.env.local
+# Fill in your Supabase URL and anon key
+```
 
-# Frontend (new terminal)
-cd frontend
-npm install
-npm run dev          # http://localhost:3000
+### 3. Run migrations
+
+Run all SQL files in `migrations/` in order against your Supabase project:
+
+```
+migrations/001_schema_asset_types.sql
+migrations/002_remote_access_sessions.sql
+```
+
+You can run them from the Supabase Dashboard → SQL Editor, or via the Supabase Management API.
+
+### 4. Start dev server
+
+```bash
+pnpm --filter @workspace/asset-desk run dev
 ```
 
 ---
 
 ## 🔐 Environment Variables
 
-Copy `.env.example` → `.env` and fill in your values.
-
-### `.env.example`
-
 ```bash
-# ── Django ─────────────────────────────────────────────────────────────
-DJANGO_SECRET_KEY=change-me-to-a-long-random-string
-DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,it-asset-hub.example.com
+# artifacts/asset-desk/.env.local
 
-# ── PostgreSQL ─────────────────────────────────────────────────────────
-POSTGRES_DB=itassethub
-POSTGRES_USER=itassethub
-POSTGRES_PASSWORD=super-secret-password
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-# ── JWT ────────────────────────────────────────────────────────────────
-JWT_ACCESS_LIFETIME_MIN=15
-JWT_REFRESH_LIFETIME_DAYS=7
-JWT_ROTATE_REFRESH=True
-
-# ── Email (SMTP) ───────────────────────────────────────────────────────
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_HOST_USER=it@yourcompany.com
-EMAIL_HOST_PASSWORD=your-16-char-app-password
-DEFAULT_FROM_EMAIL="IT Helpdesk <it@yourcompany.com>"
-
-# ── Redis / Celery ─────────────────────────────────────────────────────
-REDIS_URL=redis://redis:6379/0
-CELERY_BROKER_URL=redis://redis:6379/1
-
-# ── Object Storage (S3 / R2 / MinIO) ───────────────────────────────────
-AWS_S3_ENDPOINT_URL=https://s3.amazonaws.com
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-AWS_STORAGE_BUCKET_NAME=it-asset-hub-photos
-
-# ── Frontend (Next.js) ─────────────────────────────────────────────────
-NEXT_PUBLIC_API_BASE_URL=http://localhost/api
-NEXT_PUBLIC_APP_NAME="IT Asset Hub"
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-> ⚠️ **Never commit `.env`** — it's already in `.gitignore`. Use a secret manager (Vault, AWS SM, GitHub Encrypted Secrets) in production.
-
----
-
-## 📡 API Endpoints
-
-All endpoints are prefixed with `/api/v1` and (except auth) require `Authorization: Bearer <access_token>`.
-
-### 🔑 Auth
-
-| Method | Endpoint                  | Description                          |
-|--------|---------------------------|--------------------------------------|
-| POST   | `/auth/login/`            | Get access + refresh tokens          |
-| POST   | `/auth/refresh/`          | Rotate access token                  |
-| POST   | `/auth/logout/`           | Blacklist refresh token              |
-| GET    | `/auth/me/`               | Current user + role                  |
-
-### 🖥️ Assets
-
-| Method | Endpoint                          | Description                          |
-|--------|-----------------------------------|--------------------------------------|
-| GET    | `/assets/`                        | List + filter + paginate             |
-| POST   | `/assets/`                        | Create asset (IT Admin+)             |
-| GET    | `/assets/{id}/`                   | Asset detail                         |
-| PATCH  | `/assets/{id}/`                   | Update asset                         |
-| DELETE | `/assets/{id}/`                   | Soft-delete (Super Admin)            |
-| POST   | `/assets/{id}/assign/`            | Assign to user                       |
-| POST   | `/assets/{id}/return/`            | Return asset                         |
-| POST   | `/assets/{id}/acknowledge/`       | Employee acknowledges receipt        |
-| POST   | `/assets/bulk-import/`            | CSV bulk import                      |
-| GET    | `/assets/export/?format=csv|xlsx` | Export inventory                     |
-
-### 🎫 Tickets
-
-| Method | Endpoint                       | Description                          |
-|--------|--------------------------------|--------------------------------------|
-| GET    | `/tickets/`                    | List tickets (filtered by role)      |
-| POST   | `/tickets/`                    | Raise new ticket                     |
-| GET    | `/tickets/{id}/`               | Ticket detail + comments             |
-| POST   | `/tickets/{id}/comments/`      | Add comment                          |
-| PATCH  | `/tickets/{id}/status/`        | Change status                        |
-
-### 👤 Users (Admin only)
-
-| Method | Endpoint            | Description                |
-|--------|---------------------|----------------------------|
-| GET    | `/users/`           | List users                 |
-| POST   | `/users/`           | Invite new user            |
-| PATCH  | `/users/{id}/role/` | Change role                |
-| DELETE | `/users/{id}/`      | Deactivate user            |
-
-### 📊 Reports
-
-| Method | Endpoint                            | Description             |
-|--------|-------------------------------------|-------------------------|
-| GET    | `/reports/summary/`                 | Dashboard KPIs          |
-| GET    | `/reports/by-category/`             | Counts per category     |
-| GET    | `/reports/by-type/`                 | Counts per type         |
-| GET    | `/reports/full.xlsx`                | Full multi-sheet XLSX   |
-
-### Sample Response — `GET /api/v1/assets/MILES-LAP-001/`
-
-```json
-{
-  "id": "MILES-LAP-001",
-  "asset_type": "Laptop",
-  "brand": "Dell",
-  "model": "Latitude 5430",
-  "serial_number": "5CD2345XYZ",
-  "processor": "Intel i7-1265U",
-  "ram": "16 GB",
-  "storage": "512 GB SSD",
-  "operating_system": "Windows 11 Pro",
-  "status": "Assigned",
-  "assigned_to": {
-    "id": "f1b2…",
-    "full_name": "Sheshadri Nagaraj",
-    "email": "sheshadri.n@mileseducation.com",
-    "ecode": "MPE1042",
-    "department": "Engineering"
-  },
-  "assigned_at": "2026-04-12T09:14:22Z",
-  "acknowledged": true,
-  "acknowledged_at": "2026-04-12T09:31:08Z",
-  "purchase_date": "2024-03-15",
-  "warranty_end_date": "2027-03-14",
-  "vendor": "Dell Direct",
-  "location": "Bengaluru",
-  "photos": [
-    "https://cdn.example.com/assets/MILES-LAP-001/front.jpg"
-  ]
-}
-```
-
-### Sample Response — `POST /api/v1/auth/login/`
-
-```json
-{
-  "access":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": "f1b2…",
-    "email": "admin@yourcompany.com",
-    "role": "SUPER_ADMIN",
-    "full_name": "Admin User"
-  }
-}
-```
-
-### Sample Response — `GET /api/v1/reports/summary/`
-
-```json
-{
-  "total_assets": 128,
-  "available": 17,
-  "assigned": 102,
-  "under_repair": 6,
-  "open_tickets": 4,
-  "by_category": {
-    "Main Devices": 128,
-    "Accessories":  0,
-    "Fixed Assets": 0
-  }
-}
-```
-
----
-
-## 🔐 Authentication Flow
-
-```
-┌────────┐  1. POST /auth/login          ┌─────────────┐
-│ Client │ ────────────────────────────▶ │   Backend   │
-│        │ ◀──────────────────────────── │             │
-│        │  2. { access, refresh, user } └─────────────┘
-│        │
-│        │  3. Store access (memory) + refresh (httpOnly cookie / secure store)
-│        │
-│        │  4. Every request:
-│        │     Authorization: Bearer <access>
-│        │ ────────────────────────────▶ ┌─────────────┐
-│        │                               │  Protected  │
-│        │ ◀──────────────────────────── │   resource  │
-│        │                               └─────────────┘
-│        │
-│        │  5. On 401:  POST /auth/refresh  →  new access (+ rotated refresh)
-│        │  6. Retry original request transparently
-└────────┘
-```
-
-- **Access tokens** are short-lived (15 min default)
-- **Refresh tokens** are rotated on every use and blacklisted on logout
-- All sensitive endpoints additionally check **role + object-level permissions**
+> The anon key is safe to include in the frontend — all access is governed by Row-Level Security at the Postgres level. Never use the service role key in the frontend.
 
 ---
 
 ## 👥 Role-Based Access
 
-| Role              | Assets                       | Tickets                       | Users          | Reports         |
-|-------------------|------------------------------|-------------------------------|----------------|-----------------|
-| 🟣 **Super Admin**   | Full CRUD + delete            | Full CRUD                     | Full CRUD      | Full + export   |
-| 🔵 **IT Admin**      | Full CRUD, assign, import     | Manage + assign agents        | Read           | Full + export   |
-| 🟢 **Helpdesk Agent**| Read + status update          | Work on assigned tickets      | Read           | Read            |
-| ⚪ **Employee**      | Read **own** assigned assets  | Raise + comment on own tickets | —              | —               |
+Five roles are enforced at the database level (RLS policies check `profiles.role`):
 
-RBAC is enforced at three layers:
-1. **JWT claim** carries the role
-2. **DRF permission class** gates each viewset action
-3. **Queryset filter** prevents row-level leakage (`.filter(assigned_to=request.user)`)
+| Role            | Assets                         | Agent Commands                 | Remote Access                    | Reports       | Users          |
+|-----------------|--------------------------------|--------------------------------|----------------------------------|---------------|----------------|
+| 🟣 **super_admin** | Full CRUD + delete             | All commands + force remove    | Assisted + Unattended            | Full + export | Full CRUD      |
+| 🔵 **it_admin**    | Full CRUD, assign, import      | Read status, basic commands    | Assisted only                    | Full + export | Read           |
+| 🟠 **hr_admin**    | Read + assignment history      | —                              | —                                | HR-scoped     | Read           |
+| 🟢 **it_agent**    | Read + status update           | —                              | —                                | Read          | —              |
+| ⚪ **end_user**    | Read own assigned assets       | —                              | —                                | —             | —              |
+
+RBAC is enforced at **three layers**:
+1. **Frontend** — UI elements are conditionally rendered by role
+2. **RLS policies** — `SELECT/INSERT/UPDATE/DELETE` on every table checks `auth.uid()` + `profiles.role`
+3. **SECURITY DEFINER RPCs** — sensitive operations (device commands, remote access) validate the caller's role inside the function body before executing
 
 ---
 
-## 🔄 Asset Lifecycle Workflow
+## 🗄️ Database Schema
+
+### Core tables
+
+| Table                    | Purpose                                                    |
+|--------------------------|------------------------------------------------------------|
+| `assets`                 | Every asset record with all fields                         |
+| `profiles`               | Extended user info including `role`, `ecode`, `department` |
+| `asset_assignment_history` | Full timeline of assign / return / acknowledge events    |
+| `tickets`                | Helpdesk tickets linked to assets                          |
+| `ticket_comments`        | Comment threads on tickets                                 |
+| `audit_logs`             | Append-only log of every sensitive operation               |
+
+### Agent tables
+
+| Table                  | Purpose                                                      |
+|------------------------|--------------------------------------------------------------|
+| `agent_tokens`         | Signed keys issued to managed devices                        |
+| `managed_devices`      | Live device status (hostname, OS, last_seen, is_managed)     |
+| `device_commands`      | Queue of commands (lock, unlock, restart, …) + status        |
+| `wallpaper_configs`    | Wallpaper assignments per device                             |
+| `remote_access_sessions` | Remote access session lifecycle + audit trail              |
+
+### Schema config tables
+
+| Table                 | Purpose                                                        |
+|-----------------------|----------------------------------------------------------------|
+| `schema_asset_types`  | Admin-configurable asset type definitions (name, group, emoji) |
+| `schema_asset_fields` | Per-type custom field definitions (key, label, type, section)  |
+
+### Key RPCs (SECURITY DEFINER)
+
+| RPC                            | Role required       | What it does                                      |
+|--------------------------------|---------------------|---------------------------------------------------|
+| `generate_agent_token`         | super_admin         | Creates a signed agent key + managed_device row   |
+| `revoke_agent_token`           | super_admin         | Revokes a key and marks device inactive           |
+| `queue_device_command`         | super_admin         | Enqueues lock / unlock / restart / update command |
+| `force_remove_agent`           | super_admin         | Unmanages a device and writes audit log           |
+| `request_remote_access`        | super_admin/it_admin | Creates a remote access session                  |
+| `update_remote_access_session` | super_admin/it_admin | Transitions session status, writes audit log     |
+| `get_remote_access_sessions`   | super_admin/it_admin | Returns recent sessions for an asset             |
+| `get_audit_logs`               | hr_admin+           | Returns the audit log (read-only)                 |
+
+---
+
+## 🤖 Device Agent System
+
+The device agent is a Python script that runs as a background service on managed laptops.
+
+### How it works
+
+1. IT admin generates an **Agent Key** from the portal for a specific asset
+2. The portal shows a **one-line install command** (with the key embedded) for Windows / macOS / Linux
+3. The agent script is downloaded and started — it registers the device in `managed_devices`
+4. The agent **polls Supabase** every 30 seconds for pending `device_commands`
+5. On receiving a command, the agent executes it locally (lock screen, restart, etc.) and reports back the result
+6. The portal shows live status, last-seen time, and command history
+
+### Supported commands
+
+| Command           | Effect on device                            |
+|-------------------|---------------------------------------------|
+| `lock_screen`     | Locks the Windows / macOS / Linux session   |
+| `unlock_screen`   | Unlocks the session                         |
+| `force_restart`   | Initiates a system reboot                   |
+| `push_wallpaper`  | Downloads and sets a new wallpaper          |
+| `update_agent`    | Self-updates the agent script               |
+
+---
+
+## 🔌 Remote Access
+
+Remote access sessions are tracked in the portal with a full audit trail. The live remote desktop engine is planned for Phase 2.
+
+### Session flow
 
 ```
-   ┌───────────┐   assign    ┌──────────┐   acknowledge   ┌────────────────┐
-   │ Available │ ──────────▶ │ Assigned │ ──────────────▶ │ Active (in use)│
-   └───────────┘             └──────────┘                 └────────┬───────┘
-         ▲                         │                               │
-         │ return                  │ report issue                  │
-         │                         ▼                               │
-         │                  ┌──────────────┐    repair complete    │
-         │                  │ Under Repair │ ◀─────────────────────┘
-         │                  └──────┬───────┘
-         │                         │
-         │                         │ irreparable
-         │                         ▼
-         │                  ┌──────────────┐
-         └───── reissue ─── │   Retired    │
-                            └──────┬───────┘
-                                   │ lost / stolen
-                                   ▼
-                            ┌──────────────┐
-                            │     Lost     │
-                            └──────────────┘
+IT Admin opens RemoteAccessModal
+         │
+         ▼
+  ┌──────────────┐    ┌────────────────────────────────────────┐
+  │   Assisted   │───▶│ status: requested                      │
+  │   Access     │    │ End-user sees approval prompt (Phase 2)│
+  └──────────────┘    │ → approved / denied by user            │
+                      │ → active / ended by admin              │
+                      └────────────────────────────────────────┘
+
+  ┌──────────────┐    ┌────────────────────────────────────────┐
+  │  Unattended  │───▶│ Warning confirmation shown to admin    │
+  │  Access      │    │ status: active immediately             │
+  │ (super_admin)│    │ → ended by admin when done             │
+  └──────────────┘    └────────────────────────────────────────┘
 ```
 
-Every transition writes a row in `asset_assignment_history` with **who, when, why, and notes** — full audit trail for finance & compliance.
+Every transition writes to `audit_logs` via `_log_remote_access_audit()`.
 
 ---
 
 ## 📸 Screenshots
 
-### 🔐 Sign-in
-![Login](docs/screenshots/01-login.png)
-
-### 🏠 Admin Dashboard
-At-a-glance KPIs across all 129 assets, with status distribution, tickets by category, and active ticket queue.
-![Dashboard](docs/screenshots/02-dashboard.png)
-
-### 🖥️ Asset Management
-Searchable, filterable inventory across all asset types with auto-generated asset IDs, assignee, warranty, and acknowledgement status.
-![Assets List](docs/screenshots/03-assets-list.png)
-
-### ➕ Add Asset
-Full-form asset creation with type-specific fields (processor, RAM, OS, IMEI, vendor, invoice, …).
-![Add Asset](docs/screenshots/04-add-asset.png)
-
-### 📥 Bulk Import
-Per-type CSV templates for all 22 categories with row-level validation.
-![Bulk Import](docs/screenshots/05-bulk-import.png)
-
-### 📊 Reports & Analytics
-Asset status breakdown, tickets by status / category / priority, with one-click CSV / XLSX export.
-![Reports](docs/screenshots/06-reports.png)
-
-### 🎫 Helpdesk Tickets
-Ticket queue linked to assets, with priority, status, and assignee tracking.
-![Tickets](docs/screenshots/07-tickets.png)
-
-### 👥 User Management
-Manage IT staff, helpdesk agents, and end-users with role-based access control.
-![Users](docs/screenshots/08-users.png)
+*Screenshots will be added here once production UI is stable.*
 
 ---
 
 ## 🚀 Deployment
 
-### Docker Compose (single host)
+The portal is deployed as a **Vite static build** on [Render](https://render.com) with automatic deploys on every push to `main`.
 
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose exec backend python manage.py migrate
-docker compose exec backend python manage.py collectstatic --noinput
-```
+### Render settings
 
-### Nginx (TLS termination snippet)
+| Setting         | Value                                |
+|-----------------|--------------------------------------|
+| Build command   | `pnpm --filter @workspace/asset-desk run build` |
+| Publish dir     | `artifacts/asset-desk/dist`          |
+| Auto-deploy     | Yes (from `main` branch)             |
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name it-asset-hub.example.com;
+### Database
 
-    ssl_certificate     /etc/letsencrypt/live/it-asset-hub.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/it-asset-hub.example.com/privkey.pem;
-
-    add_header X-Frame-Options "SAMEORIGIN";
-    add_header X-Content-Type-Options "nosniff";
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: https:;";
-
-    client_max_body_size 25M;
-
-    location /api/  { proxy_pass http://backend:8000; }
-    location /admin/{ proxy_pass http://backend:8000; }
-    location /     { proxy_pass http://frontend:3000; }
-}
-```
-
-### CI / CD (GitHub Actions, summary)
-
-```yaml
-name: deploy
-on: { push: { branches: [main] } }
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker compose build
-      - run: docker compose push
-      - name: SSH deploy
-        uses: appleboy/ssh-action@v1
-        with:
-          host:     ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key:      ${{ secrets.DEPLOY_KEY }}
-          script:   cd /srv/it-asset-hub && docker compose pull && docker compose up -d
-```
-
----
-
-## 🛠️ Troubleshooting
-
-| Symptom                                            | Likely cause                                          | Fix                                                                              |
-|----------------------------------------------------|-------------------------------------------------------|----------------------------------------------------------------------------------|
-| `401 Unauthorized` on every request                | Access token expired / clock skew                     | Trigger refresh flow; check container clock (`ntpd`)                             |
-| `CSRF verification failed` in admin                | Missing `CSRF_TRUSTED_ORIGINS`                        | Add your domain to `CSRF_TRUSTED_ORIGINS` in settings                            |
-| `connection refused` to Postgres                   | DB not up yet / wrong host                            | `docker compose logs db`; ensure `POSTGRES_HOST=db` matches compose service name |
-| Bulk import fails with `null value in column ...`  | CSV column missing for NOT NULL field                 | Use the per-type template; blank cells are auto-converted to `""`                |
-| Emails not sending                                 | Gmail blocked the password / 2FA off                  | Generate an **App Password** and use that instead of your account password       |
-| Static files 404 in production                     | `collectstatic` not run                               | `docker compose exec backend python manage.py collectstatic --noinput`           |
-| Nginx returns `413 Request Entity Too Large`       | Photo upload bigger than default 1 MB                 | Add `client_max_body_size 25M;` (see Nginx snippet above)                        |
-| Frontend can't reach API in Docker                 | Hard-coded `localhost` in `NEXT_PUBLIC_API_BASE_URL`  | Use the public domain or compose service name                                    |
+Supabase manages the PostgreSQL database, Auth, and Storage — no separate DB deployment needed. Run new migration files from `migrations/` in the Supabase SQL Editor after each schema change.
 
 ---
 
 ## 🚧 Future Enhancements
 
-- [ ] 📱 **Mobile app** (React Native / Expo) for on-the-go asset scanning
-- [ ] 📷 **QR / barcode** generation per asset + camera scan to look up
+- [ ] 🖥️ **Live remote desktop** — Phase 2 of remote access (WebRTC or third-party engine)
+- [ ] 📱 **Mobile app** (Expo / React Native) for on-the-go asset scanning
+- [ ] 📷 **QR / barcode** generation per asset + camera scan
 - [ ] 🧾 **Software license** tracking with seat-count & renewal alerts
-- [ ] 🤖 **AI ticket triage** — auto-classify category & suggested resolution
+- [ ] 🔔 **Slack / MS Teams** notifications for tickets and device alerts
 - [ ] 📅 **Procurement workflow** — purchase requests → approvals → PO → GRN
-- [ ] 🔔 **Slack / MS Teams** notifications
-- [ ] 🌍 **Multi-tenant** mode for MSPs managing multiple clients
-- [ ] 🌓 **Dark mode** polish + accessibility (WCAG 2.2 AA)
-- [ ] 📈 **Predictive analytics** — warranty expiry forecasting, refresh planning
-- [ ] 🔌 **SSO** (Google Workspace / Microsoft Entra ID / Okta)
-
----
-
-## 🤝 Contributing Guidelines
-
-Contributions are welcome and appreciated! 🎉
-
-1. **Fork** the repo and create your branch from `main`
-   ```bash
-   git checkout -b feat/amazing-feature
-   ```
-2. **Code style**
-   - Backend: `black`, `ruff`, `isort` — run `make lint`
-   - Frontend: `eslint`, `prettier` — run `npm run lint`
-3. **Write tests** for new features (pytest / vitest)
-4. **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/)
-   ```
-   feat(assets): add QR code generation
-   fix(auth): rotate refresh token on logout
-   docs(readme): add deployment section
-   ```
-5. **Open a Pull Request** with a clear description, screenshots if UI, and a checklist
-6. CI must be green before review
-
-### Local checks before pushing
-
-```bash
-make lint test           # backend
-npm run lint && npm test # frontend
-```
+- [ ] 🤖 **AI ticket triage** — auto-classify category & suggest resolution
+- [ ] 🌍 **Multi-location** dashboard filtered by Miles / Miles-GCC / Mojo offices
+- [ ] 🌓 **Dark mode** toggle
+- [ ] 🔌 **SSO** (Google Workspace)
 
 ---
 
@@ -663,8 +439,6 @@ accordance with the terms of the agreement you entered into with
 Miles Education.
 ```
 
-For commercial licensing or reuse outside Miles Education, please contact the maintainer below.
-
 ---
 
 ## 📬 Contact
@@ -672,14 +446,10 @@ For commercial licensing or reuse outside Miles Education, please contact the ma
 <div align="center">
 
 **Sheshadri Nagaraj**
-IT Asset Management & Helpdesk Lead
-**Miles Education Pvt Ltd** · [mileseducation.com](https://www.mileseducation.com)
+IT Asset Management Lead · **Miles Education Pvt Ltd** · [mileseducation.com](https://www.mileseducation.com)
 
-[![Email](https://img.shields.io/badge/Email-sheshadri.n%40mileseducation.com-D14836?logo=gmail&logoColor=white)](mailto:sheshadri.n@mileseducation.com)
-[![GitHub](https://img.shields.io/badge/GitHub-sheshadrin--web-181717?logo=github&logoColor=white)](https://github.com/sheshadrin-web)
-[![Repo](https://img.shields.io/badge/Repo-IT--Asset--Hub-blue?logo=github&logoColor=white)](https://github.com/sheshadrin-web/IT-Asset-Hub)
-[![Live Demo](https://img.shields.io/badge/Live-Demo-success?logo=render&logoColor=white)](https://it-asset-hub-a7rf.onrender.com)
-
-⭐ If this project helped you, please consider giving it a **star** — it really helps!
+[![Email](https://img.shields.io/badge/Email-sheshadri.n%40mileseducation.com-D14836?logo=gmail\&logoColor=white)](mailto:sheshadri.n@mileseducation.com)
+[![GitHub](https://img.shields.io/badge/GitHub-sheshadrin--web-181717?logo=github\&logoColor=white)](https://github.com/sheshadrin-web)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-success?logo=render\&logoColor=white)](https://it-asset-hub-a7rf.onrender.com)
 
 </div>
