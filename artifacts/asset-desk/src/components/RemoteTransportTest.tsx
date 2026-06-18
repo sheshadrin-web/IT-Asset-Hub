@@ -25,6 +25,8 @@ export default function RemoteTransportTest({ sessionId }: { sessionId: string }
   const [error,     setError]     = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
+  const [agentUser, setAgentUser] = useState<string | null>(null);
+  const [deviceId,  setDeviceId]  = useState<string | null>(null);
   const [pongCount, setPongCount] = useState(0);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -56,11 +58,16 @@ export default function RemoteTransportTest({ sessionId }: { sessionId: string }
       channelRef.current = channel;
 
       channel.on("broadcast", { event: "pong" }, (msg) => {
-        const p = (msg.payload ?? {}) as { nonce?: string; ts?: number; agent?: string };
+        const p = (msg.payload ?? {}) as {
+          nonce?: string; ts?: number; agent?: string;
+          user?: string; device_id?: string; version?: string;
+        };
         if (typeof p.ts === "number") {
           setLatencyMs(Math.max(0, Math.round(performance.now() - p.ts)));
         }
-        if (p.agent) setAgentName(p.agent);
+        if (p.agent) setAgentName(p.version ? `${p.agent} (v${p.version})` : p.agent);
+        if (p.user) setAgentUser(p.user);
+        if (p.device_id) setDeviceId(p.device_id);
         setPongCount((c) => c + 1);
         setPhase("ok");
       });
@@ -159,6 +166,13 @@ export default function RemoteTransportTest({ sessionId }: { sessionId: string }
           </span>
           {latencyMs !== null && <span>~{latencyMs} ms</span>}
           <span className="text-muted-foreground">{pongCount} pong{pongCount === 1 ? "" : "s"}</span>
+        </div>
+      )}
+
+      {phase === "ok" && (agentUser || deviceId) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+          {agentUser && <span>user: <span className="font-medium text-foreground">{agentUser}</span></span>}
+          {deviceId && <span>device: <span className="font-mono">{deviceId.slice(0, 8)}…</span></span>}
         </div>
       )}
     </div>
