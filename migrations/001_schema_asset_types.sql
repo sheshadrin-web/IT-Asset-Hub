@@ -73,7 +73,17 @@ CREATE TRIGGER trg_schema_asset_fields_updated_at
   BEFORE UPDATE ON schema_asset_fields
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ── 4. Row-Level Security ────────────────────────────────────────────────────
+-- ── 4. PostgreSQL role grants ─────────────────────────────────────────────────
+-- Required when tables are created via SQL Editor (not the dashboard UI).
+-- Without these, Supabase returns "permission denied" even for authenticated users.
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT ON schema_asset_types  TO anon, authenticated;
+GRANT SELECT ON schema_asset_fields TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE ON schema_asset_types  TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON schema_asset_fields TO authenticated;
+
+-- ── 5. Row-Level Security ────────────────────────────────────────────────────
 
 ALTER TABLE schema_asset_types  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_asset_fields ENABLE ROW LEVEL SECURITY;
@@ -113,7 +123,7 @@ CREATE POLICY "rls_saf_write"
     )
   );
 
--- ── 5. Audit-log write policy (allow authenticated to insert) ────────────────
+-- ── 6. Audit-log write policy (allow authenticated to insert) ────────────────
 -- The audit_logs table already exists; we add an insert policy if it's RLS-enabled.
 DO $$
 BEGIN
@@ -132,7 +142,7 @@ EXCEPTION WHEN OTHERS THEN
   NULL; -- policy already exists or table has different RLS setup — safe to skip
 END $$;
 
--- ── 6. Seed: Asset Types ─────────────────────────────────────────────────────
+-- ── 7. Seed: Asset Types ─────────────────────────────────────────────────────
 -- Exact values from the live app. ON CONFLICT DO NOTHING = safe to re-run.
 
 INSERT INTO schema_asset_types (name, group_name, emoji, sort_order) VALUES
@@ -161,7 +171,7 @@ INSERT INTO schema_asset_types (name, group_name, emoji, sort_order) VALUES
   ('Firewall',         'Fixed Assets', '🔒', 230)
 ON CONFLICT (name) DO NOTHING;
 
--- ── 7. Seed: Fields per asset type ──────────────────────────────────────────
+-- ── 8. Seed: Fields per asset type ──────────────────────────────────────────
 
 DO $$
 DECLARE
