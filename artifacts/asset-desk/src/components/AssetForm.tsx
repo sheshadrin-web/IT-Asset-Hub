@@ -16,12 +16,13 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 import AccessoriesSelector from "@/components/AccessoriesSelector";
 import LocationSelect from "@/components/LocationSelect";
-import { ASSET_TYPE_CATEGORIES, ALL_ASSET_TYPES } from "@/lib/assetEmoji";
+import { ASSET_TYPE_CATEGORIES } from "@/lib/assetEmoji";
+import { useAssetConfig } from "@/context/AssetConfigContext";
 import { ASSET_OWNERSHIP_OPTIONS } from "@/data/mockData";
 
 export const assetFormSchema = z.object({
   assetId:         z.string().min(1, "Asset ID is required (e.g. AST-001)"),
-  assetType:       z.enum(ALL_ASSET_TYPES as unknown as [string, ...string[]]),
+  assetType:       z.string().min(1, "Asset type is required"),
   brand:           z.string().optional().default(""),
   model:           z.string().optional().default(""),
   serialNumber:    z.string().optional().default(""),
@@ -172,6 +173,13 @@ export default function AssetForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(defaultValues)]);
 
+  const { groupedTypes: configGroups, loading: configLoading } = useAssetConfig();
+
+  // Use DB-driven types when loaded; fall back to static list while loading or if migration hasn't run yet
+  const typeGroups = !configLoading && configGroups.length > 0
+    ? configGroups.map(g => ({ label: g.label, types: g.types.map(t => ({ name: t.name, emoji: t.emoji || getAssetEmoji(t.name) })) }))
+    : ASSET_TYPE_CATEGORIES.map(g => ({ label: g.label, types: (g.types as readonly string[]).map(t => ({ name: t, emoji: getAssetEmoji(t) })) }));
+
   const [typeOpen, setTypeOpen] = useState(false);
   const assetType = form.watch("assetType");
   const isLaptop  = assetType === "Laptop";
@@ -246,20 +254,20 @@ export default function AssetForm({
                     <CommandInput placeholder="Search asset type…" />
                     <CommandList className="max-h-72 overflow-y-auto">
                       <CommandEmpty>No asset type found.</CommandEmpty>
-                      {ASSET_TYPE_CATEGORIES.map(({ label, types }) => (
+                      {typeGroups.map(({ label, types }) => (
                         <CommandGroup key={label} heading={label}>
                           {types.map((t) => (
                             <CommandItem
-                              key={t}
-                              value={t}
+                              key={t.name}
+                              value={t.name}
                               onSelect={() => {
-                                field.onChange(t);
+                                field.onChange(t.name);
                                 setTypeOpen(false);
                               }}
                             >
-                              <span className="mr-2" aria-hidden>{getAssetEmoji(t)}</span>
-                              <span>{t}</span>
-                              <Check className={cn("ml-auto h-4 w-4", field.value === t ? "opacity-100" : "opacity-0")} />
+                              <span className="mr-2" aria-hidden>{t.emoji}</span>
+                              <span>{t.name}</span>
+                              <Check className={cn("ml-auto h-4 w-4", field.value === t.name ? "opacity-100" : "opacity-0")} />
                             </CommandItem>
                           ))}
                         </CommandGroup>
