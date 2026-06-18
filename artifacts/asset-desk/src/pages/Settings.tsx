@@ -17,8 +17,9 @@ import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import { cn } from "@/lib/utils";
 import {
   Bell, Shield, Monitor, Loader2, Plug, ChevronRight, Users, Workflow,
-  ScrollText, ShieldCheck, ArrowRight, RefreshCw,
+  ScrollText, ShieldCheck, ArrowRight, RefreshCw, Layers,
 } from "lucide-react";
+import AssetTypesConfig from "@/components/settings/AssetTypesConfig";
 
 interface OrgSettings {
   org_name:            string;
@@ -78,16 +79,17 @@ const ADMIN_ROLES = ["super_admin", "it_admin", "hr_admin"];
 
 type TabId =
   | "general" | "notifications" | "security" | "integrations"
-  | "users" | "automation" | "audit";
+  | "users" | "automation" | "audit" | "configuration";
 
 const TABS: { id: TabId; label: string; icon: typeof Monitor }[] = [
-  { id: "general",       label: "General",       icon: Monitor },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "security",      label: "Security",      icon: Shield },
-  { id: "integrations",  label: "Integrations",  icon: Plug },
-  { id: "users",         label: "Users & Roles", icon: Users },
-  { id: "automation",    label: "Automation",    icon: Workflow },
-  { id: "audit",         label: "Audit Logs",    icon: ScrollText },
+  { id: "general",       label: "General",        icon: Monitor },
+  { id: "notifications", label: "Notifications",  icon: Bell },
+  { id: "security",      label: "Security",       icon: Shield },
+  { id: "integrations",  label: "Integrations",   icon: Plug },
+  { id: "users",         label: "Users & Roles",  icon: Users },
+  { id: "automation",    label: "Automation",     icon: Workflow },
+  { id: "audit",         label: "Audit Logs",     icon: ScrollText },
+  { id: "configuration", label: "Configuration",  icon: Layers },
 ];
 
 export default function Settings() {
@@ -550,6 +552,22 @@ export default function Settings() {
           {activeTab === "automation" && <AutomationRules />}
 
           {activeTab === "audit" && <AuditLogs />}
+
+          {activeTab === "configuration" && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-card-border/70 bg-card/85 backdrop-blur-md shadow-sm px-5 py-4">
+                <div className="flex items-center gap-3 mb-1">
+                  <Layers className="h-5 w-5 text-primary" />
+                  <h2 className="text-base font-semibold text-foreground">Asset Types & Fields</h2>
+                </div>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Add, edit, or deactivate asset types and configure which fields appear in the Add / Edit Asset form.
+                  Deactivating a type hides it from the form — existing assets are never affected.
+                </p>
+                <AssetTypesConfig />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
