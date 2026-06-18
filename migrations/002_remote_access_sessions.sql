@@ -47,22 +47,21 @@ CREATE OR REPLACE FUNCTION _log_remote_access_audit(
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public
 AS $$
-DECLARE
-  v_actor_name  TEXT;
-  v_actor_email TEXT;
 BEGIN
-  SELECT full_name, email
-    INTO v_actor_name, v_actor_email
-    FROM profiles
-   WHERE id = auth.uid();
-
+  -- audit_logs schema: actor_user_id (uuid), action, entity_type, entity_id (uuid),
+  --                    description, metadata (jsonb) — no actor_name/actor_email columns
   INSERT INTO audit_logs (
-    actor_name, actor_email,
-    action, entity_type, entity_id,
-    description, metadata
+    actor_user_id,
+    action,
+    entity_type,
+    entity_id,
+    description,
+    metadata
   ) VALUES (
-    v_actor_name, v_actor_email,
-    p_action, 'remote_access', p_asset_id::TEXT,
+    auth.uid(),
+    p_action,
+    'remote_access',
+    p_asset_id,
     p_description,
     jsonb_build_object('session_id', p_session_id)
   );
