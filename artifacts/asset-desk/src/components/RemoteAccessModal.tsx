@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   MonitorPlay, WifiOff, Clock, CheckCircle2, XCircle,
   AlertTriangle, Loader2, Users, Monitor, RefreshCw,
@@ -7,7 +7,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -31,37 +30,41 @@ interface RemoteSession {
 }
 
 interface Props {
-  open:        boolean;
-  onClose:     () => void;
-  assetId:     string;
-  agentKeyId:  string;
+  open:         boolean;
+  onClose:      () => void;
+  assetId:      string;
+  agentKeyId:   string;
   isSuperAdmin: boolean;
-  assetTag?:   string | null;
+  assetTag?:    string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_META: Record<SessionStatus, { label: string; cls: string; icon: React.ElementType }> = {
-  requested: { label: "Waiting for approval", cls: "text-amber-700  bg-amber-50  border-amber-200",  icon: Clock        },
-  approved:  { label: "Approved",             cls: "text-sky-700    bg-sky-50    border-sky-200",    icon: CheckCircle2 },
-  denied:    { label: "Denied",               cls: "text-red-700    bg-red-50    border-red-200",    icon: XCircle      },
-  active:    { label: "Session Active",       cls: "text-emerald-700 bg-emerald-50 border-emerald-200", icon: MonitorPlay },
-  ended:     { label: "Ended",               cls: "text-slate-600  bg-slate-50  border-slate-200",  icon: WifiOff      },
-  failed:    { label: "Failed",              cls: "text-red-700    bg-red-50    border-red-200",    icon: XCircle      },
+  requested: { label: "Waiting for approval", cls: "text-amber-700  bg-amber-50  border-amber-200",    icon: Clock        },
+  approved:  { label: "Approved",             cls: "text-sky-700    bg-sky-50    border-sky-200",      icon: CheckCircle2 },
+  denied:    { label: "Denied by user",       cls: "text-red-700    bg-red-50    border-red-200",      icon: XCircle      },
+  active:    { label: "Session Active",       cls: "text-emerald-700 bg-emerald-50 border-emerald-200", icon: MonitorPlay  },
+  ended:     { label: "Ended",               cls: "text-slate-600  bg-slate-50  border-slate-200",    icon: WifiOff      },
+  failed:    { label: "Failed",              cls: "text-red-700    bg-red-50    border-red-200",      icon: XCircle      },
 };
+
+// Statuses where we should keep polling for an update from the agent
+const PENDING_STATUSES: SessionStatus[] = ["requested", "approved"];
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    dateStyle: "medium", timeStyle: "short",
-  });
+  return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function SessionBadge({ status }: { status: SessionStatus }) {
   const m = STATUS_META[status];
   const Icon = m.icon;
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border", m.cls)}>
+    <span className={cn(
+      "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border",
+      m.cls,
+    )}>
       <Icon className="h-3 w-3" />
       {m.label}
     </span>
@@ -70,20 +73,26 @@ function SessionBadge({ status }: { status: SessionStatus }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+const POLL_INTERVAL_MS = 5000;
+
 export default function RemoteAccessModal({
   open, onClose, assetId, agentKeyId, isSuperAdmin, assetTag,
 }: Props) {
   const { toast } = useToast();
 
   // ── UI state ─────────────────────────────────────────────────────────────
-  const [step, setStep]           = useState<"choose" | "confirm_unattended" | "busy" | "session">("choose");
-  const [mode, setMode]           = useState<AccessMode>("assisted");
+  const [step,          setStep]          = useState<"choose" | "confirm_unattended" | "busy" | "session">("choose");
+  const [mode,          setMode]          = useState<AccessMode>("assisted");
   const [activeSession, setActiveSession] = useState<RemoteSession | null>(null);
+  const [isPolling,     setIsPolling]     = useState(false);
 
   // ── Session history ───────────────────────────────────────────────────────
-  const [sessions,     setSessions]     = useState<RemoteSession[]>([]);
+  const [sessions,        setSessions]        = useState<RemoteSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Load recent history ───────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     setSessionsLoading(true);
     const { data, error } = await supabase.rpc("get_remote_access_sessions", {
@@ -95,14 +104,77 @@ export default function RemoteAccessModal({
     }
   }, [assetId]);
 
-  // Reload history whenever the modal opens
+  // ── Poll active session status from DB ────────────────────────────────────
+  const pollSessionStatus = useCallback(async (sessionId: string) => {
+    const { data, error } = await supabase
+      .from("remote_access_sessions")
+      .select("id, mode, status, started_at, ended_at, created_at")
+      .eq("id", sessionId)
+      .single();
+
+    if (error || !data) return;
+
+    const updated = data as RemoteSession;
+    setActiveSession(prev => prev ? { ...prev, ...updated } : prev);
+
+    // If no longer pending, stop polling and refresh history
+    if (!PENDING_STATUSES.includes(updated.status as SessionStatus)) {
+      stopPolling();
+      void loadSessions();
+
+      if (updated.status === "denied") {
+        toast({ title: "Remote access denied", description: "The end user declined the request.", variant: "destructive" });
+      } else if (updated.status === "active") {
+        toast({ title: "Remote access approved", description: "The session is now active." });
+      }
+    }
+  }, [loadSessions, toast]);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setIsPolling(false);
+  }
+
+  function startPolling(sessionId: string) {
+    stopPolling();
+    setIsPolling(true);
+    pollRef.current = setInterval(() => {
+      void pollSessionStatus(sessionId);
+    }, POLL_INTERVAL_MS);
+  }
+
+  // ── Reset on open / stop polling on close ────────────────────────────────
   useEffect(() => {
     if (open) {
       setStep("choose");
+      setMode("assisted");
       setActiveSession(null);
+      stopPolling();
       void loadSessions();
+    } else {
+      stopPolling();
     }
-  }, [open, loadSessions]);
+    return () => stopPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // ── Start polling when an assisted session is waiting ────────────────────
+  useEffect(() => {
+    if (
+      step === "session" &&
+      activeSession &&
+      PENDING_STATUSES.includes(activeSession.status)
+    ) {
+      startPolling(activeSession.id);
+    } else {
+      stopPolling();
+    }
+    return () => stopPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, activeSession?.id, activeSession?.status]);
 
   // ── Request session ───────────────────────────────────────────────────────
   async function startSession(selectedMode: AccessMode) {
@@ -124,7 +196,7 @@ export default function RemoteAccessModal({
 
     const sessionId = data.session_id as string;
 
-    // For unattended mode (portal-only phase): immediately mark as active
+    // For unattended (portal-only phase): mark active immediately
     if (selectedMode === "unattended") {
       await supabase.rpc("update_remote_access_session", {
         p_session_id: sessionId,
@@ -132,7 +204,6 @@ export default function RemoteAccessModal({
       });
     }
 
-    // Build a local session object to show immediately
     const newSession: RemoteSession = {
       id:                sessionId,
       mode:              selectedMode,
@@ -150,6 +221,7 @@ export default function RemoteAccessModal({
   // ── End session ───────────────────────────────────────────────────────────
   async function endSession() {
     if (!activeSession) return;
+    stopPolling();
     setStep("busy");
     const { data, error } = await supabase.rpc("update_remote_access_session", {
       p_session_id: activeSession.id,
@@ -172,13 +244,15 @@ export default function RemoteAccessModal({
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+    <Dialog open={open} onOpenChange={v => { if (!v) { stopPolling(); onClose(); } }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <MonitorPlay className="h-4 w-4 text-muted-foreground" />
             Remote Access
-            {assetTag && <span className="text-muted-foreground font-normal text-sm">— {assetTag}</span>}
+            {assetTag && (
+              <span className="text-muted-foreground font-normal text-sm">— {assetTag}</span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
@@ -189,7 +263,7 @@ export default function RemoteAccessModal({
               Select a remote access mode. The device agent must be online for the session to connect.
             </p>
             <div className="grid grid-cols-2 gap-3">
-              {/* Assisted Access */}
+              {/* Assisted */}
               <button
                 type="button"
                 onClick={() => setMode("assisted")}
@@ -205,19 +279,15 @@ export default function RemoteAccessModal({
                 </p>
               </button>
 
-              {/* Unattended Access */}
+              {/* Unattended */}
               <button
                 type="button"
                 disabled={!isSuperAdmin}
                 onClick={() => isSuperAdmin && setMode("unattended")}
                 className={cn(
                   "rounded-lg border p-4 text-left transition-colors",
-                  isSuperAdmin
-                    ? "hover:border-primary/60 hover:bg-accent cursor-pointer"
-                    : "opacity-50 cursor-not-allowed",
-                  mode === "unattended" && isSuperAdmin
-                    ? "border-primary bg-accent ring-1 ring-primary"
-                    : "border-border",
+                  isSuperAdmin ? "hover:border-primary/60 hover:bg-accent cursor-pointer" : "opacity-50 cursor-not-allowed",
+                  mode === "unattended" && isSuperAdmin ? "border-primary bg-accent ring-1 ring-primary" : "border-border",
                 )}
               >
                 <Monitor className="h-5 w-5 mb-2 text-violet-600" />
@@ -230,26 +300,22 @@ export default function RemoteAccessModal({
               </button>
             </div>
 
-            {/* End-user message preview for Assisted */}
             {mode === "assisted" && (
               <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
                 <p className="font-medium mb-0.5">Message shown to end user:</p>
-                <p className="italic text-sky-700">
-                  "IT Admin is requesting remote access to this system."
-                </p>
+                <p className="italic text-sky-700">"IT Admin is requesting remote access to this system."</p>
                 <p className="mt-1 text-[11px] text-sky-600">
-                  User can Allow or Deny the request. You will be notified of their response.
+                  User can Allow or Deny. The portal will update automatically once they respond.
                 </p>
               </div>
             )}
 
-            {/* Unattended warning */}
             {mode === "unattended" && isSuperAdmin && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 flex gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
                 <p>
                   Unattended access connects directly without notifying the user.
-                  Only use this when unattended access is enabled for this device and the user is aware.
+                  Only use this when unattended access is enabled for this device.
                 </p>
               </div>
             )}
@@ -257,23 +323,11 @@ export default function RemoteAccessModal({
             <DialogFooter className="pt-1 gap-2">
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
               {mode === "assisted" ? (
-                <Button
-                  type="button"
-                  onClick={() => void startSession("assisted")}
-                  className="gap-2"
-                  data-testid="button-request-assisted-access"
-                >
+                <Button type="button" onClick={() => void startSession("assisted")} className="gap-2" data-testid="button-request-assisted-access">
                   <Users className="h-4 w-4" /> Request Assisted Access
                 </Button>
               ) : (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => setStep("confirm_unattended")}
-                  className="gap-2"
-                  disabled={!isSuperAdmin}
-                  data-testid="button-confirm-unattended-access"
-                >
+                <Button type="button" variant="destructive" onClick={() => setStep("confirm_unattended")} disabled={!isSuperAdmin} className="gap-2" data-testid="button-confirm-unattended-access">
                   <Monitor className="h-4 w-4" /> Start Unattended Access
                 </Button>
               )}
@@ -293,19 +347,14 @@ export default function RemoteAccessModal({
                   notifying the end user. The session will be recorded in the audit log.
                 </p>
                 <p className="text-[11px] text-red-700">
-                  Note: The full remote desktop engine is not yet active. This records the session
-                  in the portal for tracking purposes (Phase 2 will activate the live connection).
+                  Note: The live remote desktop engine is not yet active (Phase 2).
+                  This records the session for tracking purposes.
                 </p>
               </div>
             </div>
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => setStep("choose")}>Back</Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => void startSession("unattended")}
-                data-testid="button-start-unattended-confirmed"
-              >
+              <Button type="button" variant="destructive" onClick={() => void startSession("unattended")} data-testid="button-start-unattended-confirmed">
                 Confirm &amp; Connect
               </Button>
             </DialogFooter>
@@ -332,31 +381,53 @@ export default function RemoteAccessModal({
                 <span className="text-[11px] opacity-70">{fmt(activeSession.created_at)}</span>
               </div>
 
-              {activeSession.mode === "assisted" && activeSession.status === "requested" && (
-                <p className="text-xs">
-                  A request has been sent to the device.
-                  The end user will see an approval prompt on their screen.
-                  This page will update once they respond.
-                </p>
+              {activeSession.status === "requested" && (
+                <>
+                  <p className="text-xs">
+                    A request has been sent to the device. The end user will see an approval prompt
+                    on their screen. This panel updates automatically every 5 seconds.
+                  </p>
+                  {/* Polling indicator */}
+                  <div className="flex items-center gap-1.5 text-[11px] opacity-70">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600" />
+                    </span>
+                    Checking for response…
+                  </div>
+                </>
               )}
+
+              {activeSession.status === "approved" && (
+                <p className="text-xs">Approved by the end user. Connecting…</p>
+              )}
+
+              {activeSession.status === "denied" && (
+                <p className="text-xs font-medium">The end user declined the remote access request.</p>
+              )}
+
               {activeSession.mode === "unattended" && activeSession.status === "active" && (
                 <p className="text-xs">
                   Unattended session recorded. The remote desktop engine will connect here in Phase 2.
                   Click <strong>End Session</strong> when finished.
                 </p>
               )}
+
+              {activeSession.status === "ended" && (
+                <p className="text-xs">Session ended.</p>
+              )}
             </div>
 
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={onClose}>Close</Button>
-              {(activeSession.status === "requested" || activeSession.status === "active") && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => void endSession()}
-                  data-testid="button-end-remote-session"
-                >
+              <Button type="button" variant="outline" onClick={() => { stopPolling(); onClose(); }}>Close</Button>
+              {(activeSession.status === "requested" || activeSession.status === "approved" || activeSession.status === "active") && (
+                <Button type="button" variant="destructive" onClick={() => void endSession()} data-testid="button-end-remote-session">
                   End Session
+                </Button>
+              )}
+              {(activeSession.status === "denied" || activeSession.status === "ended" || activeSession.status === "failed") && (
+                <Button type="button" onClick={() => { setActiveSession(null); setStep("choose"); }}>
+                  Start New Session
                 </Button>
               )}
             </DialogFooter>
@@ -371,11 +442,8 @@ export default function RemoteAccessModal({
                 Recent Sessions
               </p>
               <Button
-                size="sm" variant="ghost"
-                className="h-6 w-6 p-0"
-                onClick={() => void loadSessions()}
-                disabled={sessionsLoading}
-                title="Refresh"
+                size="sm" variant="ghost" className="h-6 w-6 p-0"
+                onClick={() => void loadSessions()} disabled={sessionsLoading} title="Refresh"
               >
                 <RefreshCw className={cn("h-3 w-3", sessionsLoading && "animate-spin")} />
               </Button>
@@ -385,12 +453,12 @@ export default function RemoteAccessModal({
             ) : sessions.length === 0 ? (
               <p className="text-[11px] text-muted-foreground">No sessions yet for this device.</p>
             ) : (
-              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                 {sessions.map(s => (
                   <div key={s.id} className="flex items-center justify-between text-[11px] gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={cn(
-                        "capitalize font-medium text-muted-foreground shrink-0",
+                        "capitalize font-medium shrink-0",
                         s.mode === "assisted" ? "text-sky-700" : "text-violet-700",
                       )}>
                         {s.mode}
