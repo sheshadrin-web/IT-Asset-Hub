@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
+import RemoteTransportTest from "./RemoteTransportTest";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -417,6 +418,12 @@ export default function RemoteAccessModal({
                 <p className="text-xs">Session ended.</p>
               )}
             </div>
+
+            {/* Commit-2 transport spike: prove the per-session Realtime round-trip
+                once the session is approved/active. No screen capture or input. */}
+            {(activeSession.status === "approved" || activeSession.status === "active") && (
+              <RemoteTransportTest sessionId={activeSession.id} />
+            )}
 
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { stopPolling(); onClose(); }}>Close</Button>
