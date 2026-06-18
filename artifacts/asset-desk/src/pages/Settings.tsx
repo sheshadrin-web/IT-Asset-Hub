@@ -17,7 +17,7 @@ import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import { cn } from "@/lib/utils";
 import {
   Bell, Shield, Monitor, Loader2, Plug, ChevronRight, Users, Workflow,
-  ScrollText, ShieldCheck, ArrowRight,
+  ScrollText, ShieldCheck, ArrowRight, RefreshCw,
 } from "lucide-react";
 
 interface OrgSettings {
@@ -31,8 +31,11 @@ interface OrgSettings {
   session_timeout:     number;
   timezone:            string;
   date_format:         string;
-  agent_active_poll_sec: number;
-  agent_idle_poll_sec:   number;
+  agent_active_poll_sec:  number;
+  agent_idle_poll_sec:    number;
+  restart_policy_enabled: boolean;
+  restart_reminder_days:  number;
+  restart_force_days:     number;
 }
 
 const DEFAULTS: OrgSettings = {
@@ -46,8 +49,11 @@ const DEFAULTS: OrgSettings = {
   session_timeout:     30,
   timezone:            "Asia/Kolkata",
   date_format:         "DD MMM YYYY",
-  agent_active_poll_sec: 5,
-  agent_idle_poll_sec:   30,
+  agent_active_poll_sec:  5,
+  agent_idle_poll_sec:    30,
+  restart_policy_enabled: true,
+  restart_reminder_days:  2,
+  restart_force_days:     5,
 };
 
 const TIMEZONES = [
@@ -104,6 +110,10 @@ export default function Settings() {
   const [activePoll,         setActivePoll]         = useState(String(DEFAULTS.agent_active_poll_sec));
   const [idlePoll,           setIdlePoll]           = useState(String(DEFAULTS.agent_idle_poll_sec));
 
+  const [restartPolicyEnabled, setRestartPolicyEnabled] = useState(DEFAULTS.restart_policy_enabled);
+  const [restartReminderDays,  setRestartReminderDays]  = useState(String(DEFAULTS.restart_reminder_days));
+  const [restartForceDays,     setRestartForceDays]     = useState(String(DEFAULTS.restart_force_days));
+
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const [saving,  setSaving]  = useState(false);
@@ -124,6 +134,9 @@ export default function Settings() {
     setDateFormat(row.date_format ?? DEFAULTS.date_format);
     setActivePoll(String(row.agent_active_poll_sec ?? DEFAULTS.agent_active_poll_sec));
     setIdlePoll(String(row.agent_idle_poll_sec ?? DEFAULTS.agent_idle_poll_sec));
+    setRestartPolicyEnabled(row.restart_policy_enabled ?? DEFAULTS.restart_policy_enabled);
+    setRestartReminderDays(String(row.restart_reminder_days ?? DEFAULTS.restart_reminder_days));
+    setRestartForceDays(String(row.restart_force_days ?? DEFAULTS.restart_force_days));
   };
 
   const load = useCallback(async () => {
@@ -177,6 +190,16 @@ export default function Settings() {
       toast({ title: "Invalid poll intervals", description: "Idle interval must be greater than or equal to the active interval.", variant: "destructive" });
       return;
     }
+    const reminderNum = parseInt(restartReminderDays, 10);
+    const forceNum    = parseInt(restartForceDays, 10);
+    if (isNaN(reminderNum) || reminderNum < 1 || reminderNum > 30) {
+      toast({ title: "Invalid reminder days", description: "First reminder must be between 1 and 30 days.", variant: "destructive" });
+      return;
+    }
+    if (isNaN(forceNum) || forceNum < reminderNum || forceNum > 30) {
+      toast({ title: "Invalid force restart days", description: `Force restart day must be between ${reminderNum} and 30 days.`, variant: "destructive" });
+      return;
+    }
     setSaving(true);
     const { data, error: saveError } = await supabase.rpc("save_org_settings", {
       p_org_name:            orgName,
@@ -189,8 +212,11 @@ export default function Settings() {
       p_session_timeout:     timeoutNum,
       p_timezone:            timezone,
       p_date_format:         dateFormat,
-      p_agent_active_poll_sec: activeNum,
-      p_agent_idle_poll_sec:   idleNum,
+      p_agent_active_poll_sec:  activeNum,
+      p_agent_idle_poll_sec:    idleNum,
+      p_restart_policy_enabled: restartPolicyEnabled,
+      p_restart_reminder_days:  reminderNum,
+      p_restart_force_days:     forceNum,
     });
     setSaving(false);
     if (saveError) {
@@ -241,6 +267,9 @@ export default function Settings() {
       </div>
     </div>
   );
+
+  const reminderNum = parseInt(restartReminderDays, 10);
+  const forceNum    = parseInt(restartForceDays, 10);
 
   return (
     <div className="space-y-6">
@@ -341,6 +370,82 @@ export default function Settings() {
                       <Input id="idle-poll" type="number" value={idlePoll} onChange={e => setIdlePoll(e.target.value)} disabled={disabled} className="w-32" min="2" max="3600" data-testid="input-idle-poll" />
                       <p className="text-xs text-muted-foreground">Slow cadence when idle. Default 30s. Must be ≥ active.</p>
                     </div>
+                  </div>
+                </SettingsCard>
+
+                <SettingsCard
+                  icon={RefreshCw}
+                  title="Mandatory Restart Policy"
+                  description="Automatically remind employees to restart and enforce it if ignored. Applies to all managed devices — no agent reinstall needed."
+                >
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <Label htmlFor="restart-policy-enabled" className="text-sm font-medium cursor-pointer">Enable Mandatory Restart Policy</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">When on, devices receive automatic restart reminders and a force restart if ignored.</p>
+                      </div>
+                      <Switch
+                        id="restart-policy-enabled"
+                        checked={restartPolicyEnabled}
+                        onCheckedChange={setRestartPolicyEnabled}
+                        disabled={disabled}
+                        data-testid="switch-restart-policy-enabled"
+                      />
+                    </div>
+
+                    {restartPolicyEnabled && (
+                      <>
+                        <Separator />
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="restart-reminder-days">First reminder after (days)</Label>
+                            <Input
+                              id="restart-reminder-days"
+                              type="number"
+                              value={restartReminderDays}
+                              onChange={e => setRestartReminderDays(e.target.value)}
+                              disabled={disabled}
+                              className="w-24"
+                              min="1"
+                              max="30"
+                              data-testid="input-restart-reminder-days"
+                            />
+                            <p className="text-xs text-muted-foreground">A notification popup is sent to the employee. Default: 2 days.</p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="restart-force-days">Force restart after (days)</Label>
+                            <Input
+                              id="restart-force-days"
+                              type="number"
+                              value={restartForceDays}
+                              onChange={e => setRestartForceDays(e.target.value)}
+                              disabled={disabled}
+                              className="w-24"
+                              min="1"
+                              max="30"
+                              data-testid="input-restart-force-days"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Final warning at day {!isNaN(forceNum) ? forceNum : "–"}, then auto-restart at day {!isNaN(forceNum) ? forceNum : "–"} + 16h.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-muted/40 border border-card-border/60 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
+                          <p className="font-semibold text-foreground text-sm">How it works</p>
+                          <p>
+                            📣 <span className="font-medium">Day {!isNaN(reminderNum) ? reminderNum : "–"}</span> — Popup reminder: <span className="italic">"Your computer has been running for {!isNaN(reminderNum) ? reminderNum : "–"} days. Please restart soon."</span>
+                          </p>
+                          <p>
+                            ⚠️ <span className="font-medium">Day {!isNaN(forceNum) ? forceNum : "–"}</span> — Final warning: <span className="italic">"IT will force a restart later today. Please restart now."</span>
+                          </p>
+                          <p>
+                            🔁 <span className="font-medium">Day {!isNaN(forceNum) ? forceNum : "–"} + 16 hours</span> — <span className="text-amber-700 font-medium">Automatic restart with a 10-minute on-screen countdown.</span>
+                          </p>
+                          <p className="text-muted-foreground/70 pt-0.5">Clock resets to zero after every restart.</p>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </SettingsCard>
 
