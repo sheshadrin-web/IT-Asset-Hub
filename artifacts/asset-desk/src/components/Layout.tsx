@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Monitor, Ticket, Users, BarChart2, Settings,
   LogOut, Menu, X, ChevronRight, Bell, Shield, UserCheck, User, Package,
-  Edit, Zap, ShieldAlert,
+  Edit, Zap, ShieldAlert, MapPin,
 } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
@@ -28,8 +28,9 @@ interface NavItem {
 const RECENT_LIMIT = 200;
 
 const navItems: NavItem[] = [
-  { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "it_admin", "it_agent", "end_user"] },
+  { label: "Dashboard",    icon: LayoutDashboard, href: "/",            roles: ["super_admin", "it_admin", "it_agent", "end_user", "location_gm"] },
   { label: "Assets",       icon: Monitor,         href: "/assets",      roles: ["super_admin", "it_admin", "it_agent"] },
+  { label: "Location-wise Assets", icon: MapPin,  href: "/locations",   roles: ["super_admin", "it_admin", "it_agent", "location_gm"] },
   { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user"] },
@@ -45,6 +46,7 @@ const roleIconMap: Record<UserRole, React.ElementType> = {
   hr_admin:    Shield,
   it_agent:    UserCheck,
   end_user:    User,
+  location_gm: MapPin,
 };
 
 function playBellSound() {
