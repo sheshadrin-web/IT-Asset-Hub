@@ -180,6 +180,13 @@ if (-not [string]::IsNullOrWhiteSpace($ApiBase)) {
   [Environment]::SetEnvironmentVariable('MILES_AGENT_API_BASE', $ApiBase, 'User')
   $env:MILES_AGENT_API_BASE = $ApiBase
 }
+# Persist the agent download URL so silent self-update works after install.
+# (Previously only TOKEN and API_BASE were persisted; without MILES_AGENT_URL the
+#  update check fell back to a 404 path and the device never upgraded.)
+if (-not [string]::IsNullOrWhiteSpace($AgentUrl)) {
+  [Environment]::SetEnvironmentVariable('MILES_AGENT_URL', $AgentUrl, 'User')
+  $env:MILES_AGENT_URL = $AgentUrl
+}
 Write-Log 'Agent key saved.' 'OK'
 
 # ── 5. Register (the agent prints JSON; we confirm success in the output) ────
