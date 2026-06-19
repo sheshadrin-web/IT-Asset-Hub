@@ -28,9 +28,61 @@ function json(body: unknown, status = 200) {
   });
 }
 
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+
+// Separate anon-key client used purely to exchange an admin-generated magiclink
+// token for a real user session (verifyOtp is a public auth call).
+const anonAuth = createClient(SUPABASE_URL, ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+// Mint a GENUINE, short-lived Supabase auth session for a CONTROLLED per-asset
+// agent identity. We never touch a JWT secret and never enable anonymous sign-in.
+// (DB-side HMAC minting is impossible on this project: the in-use signing key is
+// asymmetric ES256 and no HS256 secret is exposed to the database.) The identity
+// is a normal — but profile-less and powerless — auth user created by the service
+// role and signed in via an admin-generated magiclink that is verified
+// server-side (no email is ever sent). The returned token is what the device
+// agent presents to join the PRIVATE Realtime channel; RLS binds it to one
+// session via agent_realtime_uid.
+async function mintAgentRealtimeSession(assetId: string) {
+  const email = `remote-agent.${assetId}@agent.miles.local`;
+  let userId: string | null = null;
+
+  let link = await db.auth.admin.generateLink({ type: "magiclink", email });
+  if (link.error || !link.data?.properties?.hashed_token) {
+    const created = await db.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      app_metadata: { remote_agent: true, asset_id: assetId },
+    });
+    if (created.error) throw new Error(`agent identity: ${created.error.message}`);
+    userId = created.data.user?.id ?? null;
+    link = await db.auth.admin.generateLink({ type: "magiclink", email });
+    if (link.error || !link.data?.properties?.hashed_token) {
+      throw new Error(`magiclink: ${link.error?.message ?? "no token"}`);
+    }
+  }
+  userId = userId ?? link.data!.user?.id ?? null;
+
+  const verify = await anonAuth.auth.verifyOtp({
+    type: "magiclink",
+    token_hash: link.data!.properties!.hashed_token,
+  });
+  if (verify.error || !verify.data?.session) {
+    throw new Error(`verify: ${verify.error?.message ?? "no session"}`);
+  }
+  return {
+    user_id:       userId ?? verify.data.user?.id ?? null,
+    access_token:  verify.data.session.access_token,
+    refresh_token: verify.data.session.refresh_token,
+    expires_at:    verify.data.session.expires_at,
+  };
+}
 
 async function rpc(name: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(name, args);
@@ -109,6 +161,51 @@ Deno.serve(async (req) => {
         p_instance_id: body.instance_id,
       });
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
+    // POST /remote-access/realtime-token — { session_id }. The agent calls this
+    // (after claiming) to obtain a GENUINE Supabase auth token bound to the
+    // session, so it can join the PRIVATE per-session channel. We re-check the
+    // session is active & belongs to this device, then mint + bind the identity.
+    if (req.method === "POST" && path === "/remote-access/realtime-token") {
+      const sessionId = body.session_id;
+      if (!sessionId) return json({ success: false, error: "missing session_id" }, 400);
+
+      const tok = await rpc("agent_get_remote_session_token", {
+        p_token: token, p_session_id: sessionId,
+      });
+      if (!tok.ok) return json({ success: false, error: tok.error }, 400);
+      const sess = (tok.data ?? {}) as Record<string, unknown>;
+      if (sess.ready !== true) {
+        return json({ success: true, ready: false, status: sess.status ?? null, error: sess.error ?? null });
+      }
+
+      const assetId = String(sess.asset_id);
+      let minted;
+      try {
+        minted = await mintAgentRealtimeSession(assetId);
+      } catch (e) {
+        return json({ success: false, error: (e as Error).message }, 500);
+      }
+      if (!minted.user_id) return json({ success: false, error: "could not resolve agent identity" }, 500);
+
+      const bind = await rpc("agent_bind_realtime_uid", {
+        p_token: token, p_session_id: sessionId, p_uid: minted.user_id,
+      });
+      if (!bind.ok) return json({ success: false, error: bind.error }, 400);
+
+      return json({
+        success:       true,
+        ready:         true,
+        access_token:  minted.access_token,
+        refresh_token: minted.refresh_token,
+        expires_at:    minted.expires_at,
+        realtime_url:  SUPABASE_URL.replace(/^http/, "ws") + "/realtime/v1/websocket",
+        auth_url:      SUPABASE_URL + "/auth/v1",
+        anon_key:      ANON_KEY,
+        channel_name:  sess.channel_name,
+        asset_id:      assetId,
+      });
     }
 
     if (req.method === "POST" && path === "/wallpaper/status") {
