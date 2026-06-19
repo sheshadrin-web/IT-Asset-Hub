@@ -54,46 +54,53 @@ const anonAuth = createClient(SUPABASE_URL, ANON_KEY, {
 // session via agent_realtime_uid.
 async function mintAgentRealtimeSession(assetId: string) {
   const email = `remote-agent.${assetId}@agent.miles.local`;
-  // Keep under bcrypt's 72-byte limit; one UUID is ample entropy for a
-  // single-use, immediately-consumed password.
-  const password = `Ag3nt!${crypto.randomUUID()}`;
-  let userId: string | null = null;
 
-  // Ensure the controlled per-asset identity exists, then (re)set its password
-  // to the freshly generated value for this mint.
-  const created = await db.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    app_metadata: { remote_agent: true, asset_id: assetId },
-  });
-  if (created.error) {
-    // Already registered → resolve its id and rotate the password for this mint.
+  // Ensure the controlled per-asset identity exists and (re)set its password to
+  // `pw`. Returns the user id. generateLink is used ONLY to resolve an existing
+  // user's id (it returns data.user) — never for verifyOtp.
+  async function ensureUser(pw: string): Promise<string> {
+    const created = await db.auth.admin.createUser({
+      email,
+      password: pw,
+      email_confirm: true,
+      app_metadata: { remote_agent: true, asset_id: assetId },
+    });
+    if (!created.error) return created.data.user!.id;
     if (created.error.code !== "email_exists") {
       throw new Error(`agent identity: ${created.error.message}`);
     }
     const link = await db.auth.admin.generateLink({ type: "magiclink", email });
-    userId = link.data?.user?.id ?? null;
-    if (!userId) {
+    const uid = link.data?.user?.id ?? null;
+    if (!uid) {
       throw new Error(`agent identity: ${link.error?.message ?? "could not resolve user"}`);
     }
-    const upd = await db.auth.admin.updateUserById(userId, { password, email_confirm: true });
+    const upd = await db.auth.admin.updateUserById(uid, { password: pw, email_confirm: true });
     if (upd.error) throw new Error(`agent identity: ${upd.error.message}`);
-  } else {
-    userId = created.data.user?.id ?? null;
+    return uid;
   }
 
-  // Sign in with the just-set password to obtain a GENUINE short-lived session.
-  const signin = await anonAuth.auth.signInWithPassword({ email, password });
-  if (signin.error || !signin.data?.session) {
-    throw new Error(`verify: ${signin.error?.message ?? "no session"}`);
+  // Set a fresh password and sign in to obtain a GENUINE short-lived session.
+  // Retry once: a concurrent realtime-token call for the SAME asset (join +
+  // periodic renewal both mint) can rotate the password between our set and our
+  // sign-in, which would otherwise surface as a spurious "Invalid credentials".
+  let lastErr = "no session";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // Keep under bcrypt's 72-byte limit; one UUID is ample entropy for a
+    // single-use, immediately-consumed password.
+    const password = `Ag3nt!${crypto.randomUUID()}`;
+    const userId = await ensureUser(password);
+    const signin = await anonAuth.auth.signInWithPassword({ email, password });
+    if (!signin.error && signin.data?.session) {
+      return {
+        user_id:       userId ?? signin.data.user?.id ?? null,
+        access_token:  signin.data.session.access_token,
+        refresh_token: signin.data.session.refresh_token,
+        expires_at:    signin.data.session.expires_at,
+      };
+    }
+    lastErr = signin.error?.message ?? "no session";
   }
-  return {
-    user_id:       userId ?? signin.data.user?.id ?? null,
-    access_token:  signin.data.session.access_token,
-    refresh_token: signin.data.session.refresh_token,
-    expires_at:    signin.data.session.expires_at,
-  };
+  throw new Error(`verify: ${lastErr}`);
 }
 
 async function rpc(name: string, args: Record<string, unknown>) {
