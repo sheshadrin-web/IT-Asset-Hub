@@ -2111,6 +2111,53 @@ def _run_remote_session(session_id: str) -> None:
             "join_ref": join_ref,
         })
 
+        # ── Commit 4: remote input-control state ─────────────────────────────
+        # input_state["enabled"] is the agent-side gate: input is replayed ONLY
+        # while an admin holds control (a `control` broadcast) AND the session
+        # token has not locally expired. The backend is built lazily on first use.
+        input_state = {"enabled": False, "by": None}
+        _backend_box = [None]
+        _backend_tried = [False]
+
+        def _get_backend():
+            if _backend_box[0] is None and not _backend_tried[0]:
+                _backend_tried[0] = True
+                _backend_box[0] = _make_input_backend()
+                if _backend_box[0] is None:
+                    print("[remote] no input backend available; control disabled", file=sys.stderr)
+                else:
+                    print(f"[remote] input backend = {_backend_box[0].name}", file=sys.stderr)
+            return _backend_box[0]
+
+        def _banner_disconnect():
+            print("[remote] END USER disconnected via banner; ending session", file=sys.stderr)
+            try:
+                send_broadcast("end", {"reason": "enduser_disconnect"})
+            except Exception:
+                pass
+            stop_evt.set()
+
+        banner = _RemoteControlBanner(on_disconnect=_banner_disconnect)
+
+        def _set_input_enabled(want: bool, by: str = None, reason: str = None):
+            prev = input_state["enabled"]
+            input_state["enabled"] = want
+            if by:
+                input_state["by"] = by
+            who = input_state["by"] or "IT Admin"
+            if want != prev:
+                ts = int(time.time() * 1000)
+                if want:
+                    print(f"[remote][audit] INPUT-ENABLED session={session_id} by={who} ts={ts}", file=sys.stderr)
+                    _append_input_audit(session_id, "input_enabled", who)
+                    banner.show(who)
+                else:
+                    print(f"[remote][audit] INPUT-DISABLED session={session_id} reason={reason or 'released'} ts={ts}", file=sys.stderr)
+                    _append_input_audit(session_id, "input_disabled", who)
+                    banner.hide()
+            elif want and by:
+                banner.update(who)
+
         # 4. Capture + stream frames in a dedicated thread so recv() stays
         #    responsive to ping/end. Capture deps are imported lazily in-thread.
         def capture_loop() -> None:
@@ -2208,8 +2255,32 @@ def _run_remote_session(session_id: str) -> None:
             elif evt == "end":
                 print("[remote] portal ended the session", file=sys.stderr)
                 break
+            elif evt == "control":
+                # Admin took / released control. Flip the agent-side gate, surface
+                # the on-machine banner, and audit the transition.
+                p = inner.get("payload") or {}
+                _set_input_enabled(bool(p.get("enabled")), by=p.get("by"))
+            elif evt == "input":
+                # SECURITY: replay input ONLY while control is enabled AND the
+                # session token has not expired locally. The RLS channel gate
+                # already blocks terminated/expired sessions at the transport
+                # layer; these checks are defense in depth on the agent itself.
+                if not input_state["enabled"]:
+                    continue
+                if token_exp and time.time() > token_exp:
+                    _set_input_enabled(False, reason="token_expired")
+                    continue
+                be = _get_backend()
+                if be is not None:
+                    try:
+                        apply_remote_input(inner.get("payload") or {}, be)
+                    except Exception as ex:
+                        print(f"[remote] input apply error: {ex}", file=sys.stderr)
 
         stop_evt.set()
+        if input_state["enabled"]:
+            _set_input_enabled(False, reason="session_closed")
+        banner.close()
         cap_thread.join(timeout=3)
     print(f"[remote] session {session_id} transport closed", file=sys.stderr)
 
@@ -2276,6 +2347,381 @@ def _make_screen_grabber():
         return img.width, img.height, data
 
     return grab
+
+
+# ── remote input control (Commit 4 — mouse + keyboard) ───────────────────────
+# Input rides the SAME RLS-gated private channel as the frames, so the channel
+# gate (session active + token unexpired + authorized uid) governs input too.
+# The backend is pluggable: pynput on Windows/macOS (and Linux if installed),
+# else an xdotool fallback on Linux. The dispatch/mapping/gating logic is shared.
+
+# Browser KeyboardEvent.key -> X keysym name (xdotool) for named / control keys.
+_XDO_KEYSYM = {
+    "Enter": "Return", "Tab": "Tab", "Escape": "Escape", "Backspace": "BackSpace",
+    "Delete": "Delete", "Insert": "Insert", " ": "space",
+    "ArrowUp": "Up", "ArrowDown": "Down", "ArrowLeft": "Left", "ArrowRight": "Right",
+    "Home": "Home", "End": "End", "PageUp": "Prior", "PageDown": "Next",
+    "Control": "Control_L", "Alt": "Alt_L", "Shift": "Shift_L", "Meta": "Super_L",
+    "CapsLock": "Caps_Lock", "ContextMenu": "Menu",
+}
+for _i in range(1, 13):
+    _XDO_KEYSYM[f"F{_i}"] = f"F{_i}"
+# Symbol chars that can show up inside a modifier combo (down/up path).
+_XDO_SYM = {
+    "!": "exclam", "@": "at", "#": "numbersign", "$": "dollar", "%": "percent",
+    "^": "asciicircum", "&": "ampersand", "*": "asterisk", "(": "parenleft",
+    ")": "parenright", "-": "minus", "_": "underscore", "=": "equal", "+": "plus",
+    "[": "bracketleft", "]": "bracketright", "{": "braceleft", "}": "braceright",
+    ";": "semicolon", ":": "colon", "'": "apostrophe", "\"": "quotedbl",
+    ",": "comma", ".": "period", "/": "slash", "?": "question", "\\": "backslash",
+    "|": "bar", "`": "grave", "~": "asciitilde", "<": "less", ">": "greater",
+}
+
+
+def _to_xdo_keysym(key: str):
+    if key in _XDO_KEYSYM:
+        return _XDO_KEYSYM[key]
+    if len(key) == 1:
+        if key.isalpha():
+            return key.lower()
+        if key.isdigit():
+            return key
+        return _XDO_SYM.get(key)
+    return None
+
+
+class _InputBackend:
+    """Common geometry + normalized-coord handling. Subclasses drive the OS."""
+    name = "base"
+
+    def __init__(self):
+        self._geom = None
+
+    def geometry(self):
+        if self._geom is None:
+            self._geom = self._detect_geometry()
+        return self._geom
+
+    def _detect_geometry(self):
+        return (1920, 1080)
+
+    def move_norm(self, x: float, y: float):
+        w, h = self.geometry()
+        px = max(0, min(w - 1, int(round(float(x) * (w - 1)))))
+        py = max(0, min(h - 1, int(round(float(y) * (h - 1)))))
+        self.move(px, py)
+
+    # subclass API
+    def move(self, px: int, py: int): ...
+    def button(self, name: str, press: bool): ...
+    def scroll(self, dx: int, dy: int): ...
+    def key(self, browser_key: str, press: bool): ...
+    def type_text(self, text: str): ...
+
+
+class _PynputBackend(_InputBackend):
+    name = "pynput"
+
+    def __init__(self):
+        super().__init__()
+        from pynput.mouse import Controller as MC, Button     # type: ignore
+        from pynput.keyboard import Controller as KC, Key, KeyCode  # type: ignore
+        self._mouse = MC()
+        self._kb = KC()
+        self._Button = Button
+        self._Key = Key
+        self._KeyCode = KeyCode
+        self._buttons = {"left": Button.left, "right": Button.right, "middle": Button.middle}
+        self._named = {
+            "Enter": Key.enter, "Tab": Key.tab, "Escape": Key.esc, "Backspace": Key.backspace,
+            "Delete": Key.delete, "Insert": Key.insert, " ": Key.space,
+            "ArrowUp": Key.up, "ArrowDown": Key.down, "ArrowLeft": Key.left, "ArrowRight": Key.right,
+            "Home": Key.home, "End": Key.end, "PageUp": Key.page_up, "PageDown": Key.page_down,
+            "Control": Key.ctrl, "Alt": Key.alt, "Shift": Key.shift, "Meta": Key.cmd,
+            "CapsLock": Key.caps_lock,
+        }
+        for i in range(1, 13):
+            self._named[f"F{i}"] = getattr(Key, f"f{i}")
+
+    def _detect_geometry(self):
+        return _primary_screen_geometry()
+
+    def _resolve(self, browser_key: str):
+        if browser_key in self._named:
+            return self._named[browser_key]
+        if len(browser_key) == 1:
+            ch = browser_key.lower() if browser_key.isalpha() else browser_key
+            try:
+                return self._KeyCode.from_char(ch)
+            except Exception:
+                return None
+        return None
+
+    def move(self, px, py):
+        self._mouse.position = (px, py)
+
+    def button(self, name, press):
+        b = self._buttons.get(name, self._Button.left)
+        (self._mouse.press if press else self._mouse.release)(b)
+
+    def scroll(self, dx, dy):
+        # pynput: +y scrolls up; our dy>0 means scroll down → negate.
+        self._mouse.scroll(int(dx), -int(dy))
+
+    def key(self, browser_key, press):
+        k = self._resolve(browser_key)
+        if k is None:
+            return
+        (self._kb.press if press else self._kb.release)(k)
+
+    def type_text(self, text):
+        if text:
+            self._kb.type(text)
+
+
+class _XdotoolBackend(_InputBackend):
+    name = "xdotool"
+
+    def __init__(self, exe: str):
+        super().__init__()
+        self._exe = exe
+        self._buttons = {"left": "1", "middle": "2", "right": "3"}
+
+    def _run(self, *args):
+        try:
+            subprocess.run([self._exe, *args], check=False, timeout=5,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def _detect_geometry(self):
+        try:
+            out = subprocess.run([self._exe, "getdisplaygeometry"], check=True, timeout=5,
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode()
+            w, h = out.split()
+            return int(w), int(h)
+        except Exception:
+            return (1920, 1080)
+
+    def move(self, px, py):
+        self._run("mousemove", str(px), str(py))
+
+    def button(self, name, press):
+        self._run("mousedown" if press else "mouseup", self._buttons.get(name, "1"))
+
+    def scroll(self, dx, dy):
+        dy = int(dy); dx = int(dx)
+        for _ in range(abs(dy)):
+            self._run("click", "5" if dy > 0 else "4")
+        for _ in range(abs(dx)):
+            self._run("click", "7" if dx > 0 else "6")
+
+    def key(self, browser_key, press):
+        sym = _to_xdo_keysym(browser_key)
+        if not sym:
+            return
+        self._run("keydown" if press else "keyup", sym)
+
+    def type_text(self, text):
+        if text:
+            self._run("type", "--", text)
+
+
+def _primary_screen_geometry():
+    """Best-effort primary-monitor size in pixels."""
+    if IS_WIN:
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # per-monitor DPI aware
+            except Exception:
+                pass
+            return int(u.GetSystemMetrics(0)), int(u.GetSystemMetrics(1))
+        except Exception:
+            pass
+    try:
+        import mss  # type: ignore
+        with mss.mss() as sct:
+            mon = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            return int(mon["width"]), int(mon["height"])
+    except Exception:
+        return (1920, 1080)
+
+
+def _ensure_input_deps() -> bool:
+    """True if an input backend can be constructed. Tries pynput; one-time quiet
+    pip install on Windows/macOS for agents predating this feature. xdotool (Linux)
+    needs no Python package."""
+    try:
+        import pynput  # noqa: F401
+        return True
+    except Exception:
+        pass
+    if not IS_WIN and shutil.which("xdotool"):
+        return True
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+             "--quiet", "pynput"],
+            check=True, timeout=180,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import pynput  # noqa: F401
+        return True
+    except Exception as e:
+        print(f"[remote] input deps unavailable: {e}", file=sys.stderr)
+        return bool(not IS_WIN and shutil.which("xdotool"))
+
+
+def _make_input_backend():
+    """Return an input backend (pynput preferred, xdotool fallback on Linux), or
+    None if no driver is available."""
+    try:
+        import pynput  # noqa: F401
+        return _PynputBackend()
+    except Exception:
+        pass
+    exe = shutil.which("xdotool") if not IS_WIN else None
+    if exe:
+        return _XdotoolBackend(exe)
+    return None
+
+
+def apply_remote_input(evt: dict, backend: "_InputBackend") -> None:
+    """Replay one portal input event on the local machine. Pure dispatch — the
+    SECURITY gate (control enabled / not expired) is enforced by the caller."""
+    kind = evt.get("kind")
+    action = evt.get("action")
+    if kind == "mouse":
+        if action == "move":
+            backend.move_norm(evt.get("x", 0), evt.get("y", 0))
+        elif action in ("down", "up"):
+            if "x" in evt and "y" in evt:
+                backend.move_norm(evt["x"], evt["y"])
+            backend.button(evt.get("button", "left"), action == "down")
+        elif action == "wheel":
+            if "x" in evt and "y" in evt:
+                backend.move_norm(evt["x"], evt["y"])
+            backend.scroll(int(evt.get("dx", 0) or 0), int(evt.get("dy", 0) or 0))
+    elif kind == "key":
+        if action == "type":
+            backend.type_text(str(evt.get("text", "")))
+        elif action in ("down", "up"):
+            backend.key(str(evt.get("key", "")), action == "down")
+
+
+def _input_audit_path() -> str:
+    d = os.path.join(os.path.expanduser("~"), ".miles-agent")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, "remote_input_audit.log")
+
+
+def _append_input_audit(session_id: str, event: str, who: str) -> None:
+    """Durable on-machine record of input-enabled / input-disabled transitions."""
+    rec = {"ts": int(time.time() * 1000), "session_id": session_id,
+           "event": event, "actor": who, "host": socket.gethostname()}
+    try:
+        with open(_input_audit_path(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+class _RemoteControlBanner:
+    """Always-on-top on-machine banner shown to the END USER while an admin is in
+    control: names who is connected and offers an immediate Disconnect button.
+    Best-effort and fully guarded — if Tkinter is unavailable (e.g. headless) it
+    degrades to a no-op so it can never break the session."""
+
+    def __init__(self, on_disconnect):
+        self._on_disconnect = on_disconnect
+        self._thread = None
+        self._lock = threading.Lock()
+        self._want_visible = False
+        self._text = ""
+        self._closed = False
+
+    def show(self, admin: str):
+        with self._lock:
+            self._text = f"🔴  Remote control active — {admin} is connected"
+            self._want_visible = True
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="remote-banner", daemon=True)
+                self._thread.start()
+
+    def update(self, admin: str):
+        with self._lock:
+            self._text = f"🔴  Remote control active — {admin} is connected"
+
+    def hide(self):
+        with self._lock:
+            self._want_visible = False
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            self._want_visible = False
+
+    def _run(self):
+        try:
+            import tkinter as tk
+        except Exception:
+            print("[remote] banner unavailable (no Tk); end user sees no overlay", file=sys.stderr)
+            return
+        try:
+            root = tk.Tk()
+            root.overrideredirect(True)
+            root.attributes("-topmost", True)
+            try:
+                root.attributes("-alpha", 0.96)
+            except Exception:
+                pass
+            sw = root.winfo_screenwidth()
+            bw, bh = min(620, sw - 40), 44
+            root.geometry(f"{bw}x{bh}+{(sw - bw) // 2}+8")
+            root.configure(bg="#7f1d1d")
+            var = tk.StringVar(value=self._text)
+            tk.Label(root, textvariable=var, bg="#7f1d1d", fg="white",
+                     font=("Segoe UI", 11, "bold")).pack(side="left", padx=14)
+
+            def _disconnect():
+                try:
+                    threading.Thread(target=self._on_disconnect, daemon=True).start()
+                finally:
+                    self.close()
+
+            tk.Button(root, text="Disconnect", command=_disconnect, bg="white",
+                      fg="#7f1d1d", relief="flat", font=("Segoe UI", 9, "bold"),
+                      padx=10).pack(side="right", padx=10)
+
+            def _tick():
+                with self._lock:
+                    closed, visible, text = self._closed, self._want_visible, self._text
+                if closed:
+                    try: root.destroy()
+                    except Exception: pass
+                    return
+                var.set(text)
+                try:
+                    if visible:
+                        root.deiconify(); root.lift(); root.attributes("-topmost", True)
+                    else:
+                        root.withdraw()
+                except Exception:
+                    pass
+                root.after(300, _tick)
+
+            root.after(100, _tick)
+            root.mainloop()
+        except Exception as e:
+            print(f"[remote] banner error: {e}", file=sys.stderr)
 
 
 def poll_remote_access() -> None:
