@@ -427,6 +427,16 @@ export default function RemoteAccessModal({
 
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { stopPolling(); onClose(); }}>Close</Button>
+              {activeSession.status === "active" && (
+                <Button
+                  type="button"
+                  onClick={() => window.open(`${import.meta.env.BASE_URL}remote/${activeSession.id}`, "_blank", "noopener")}
+                  className="gap-2"
+                  data-testid="button-open-live-viewer"
+                >
+                  <MonitorPlay className="h-4 w-4" /> Open Live Viewer
+                </Button>
+              )}
               {(activeSession.status === "requested" || activeSession.status === "approved" || activeSession.status === "active") && (
                 <Button type="button" variant="destructive" onClick={() => void endSession()} data-testid="button-end-remote-session">
                   End Session
