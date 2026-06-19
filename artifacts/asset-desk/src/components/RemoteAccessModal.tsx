@@ -87,6 +87,12 @@ export default function RemoteAccessModal({
   const [activeSession, setActiveSession] = useState<RemoteSession | null>(null);
   const [isPolling,     setIsPolling]     = useState(false);
 
+  // ── Per-device unattended opt-in (super_admin only) ───────────────────────
+  const [unattendedEnabled,  setUnattendedEnabled]  = useState(false);
+  const [unattendedEnrolled, setUnattendedEnrolled] = useState(true);
+  const [unattendedLoading,  setUnattendedLoading]  = useState(false);
+  const [unattendedSaving,   setUnattendedSaving]   = useState(false);
+
   // ── Session history ───────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<RemoteSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -104,6 +110,44 @@ export default function RemoteAccessModal({
       setSessions(data as RemoteSession[]);
     }
   }, [assetId]);
+
+  // ── Load per-device unattended opt-in state (super_admin) ─────────────────
+  const loadUnattended = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    setUnattendedLoading(true);
+    const { data, error } = await supabase.rpc("get_device_unattended_access", {
+      p_asset_id: assetId,
+    });
+    setUnattendedLoading(false);
+    if (!error && data?.success) {
+      setUnattendedEnabled(Boolean(data.enabled));
+      setUnattendedEnrolled(Boolean(data.enrolled));
+    }
+  }, [assetId, isSuperAdmin]);
+
+  // ── Enable / disable unattended access for this device ────────────────────
+  async function toggleUnattended(next: boolean) {
+    setUnattendedSaving(true);
+    const { data, error } = await supabase.rpc("set_device_unattended_access", {
+      p_asset_id: assetId, p_enabled: next,
+    });
+    setUnattendedSaving(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Couldn't update unattended access",
+        description: error?.message ?? (data?.error as string) ?? "Unknown error",
+        variant: "destructive",
+      });
+      return;
+    }
+    setUnattendedEnabled(Boolean(data.enabled));
+    toast({
+      title: next ? "Unattended access enabled" : "Unattended access disabled",
+      description: next
+        ? "This device can now be accessed without an on-screen prompt."
+        : "Unattended sessions are now blocked for this device.",
+    });
+  }
 
   // ── Poll active session status from DB ────────────────────────────────────
   const pollSessionStatus = useCallback(async (sessionId: string) => {
@@ -155,6 +199,7 @@ export default function RemoteAccessModal({
       setActiveSession(null);
       stopPolling();
       void loadSessions();
+      void loadUnattended();
     } else {
       stopPolling();
     }
@@ -312,12 +357,49 @@ export default function RemoteAccessModal({
             )}
 
             {mode === "unattended" && isSuperAdmin && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 flex gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
-                <p>
-                  Unattended access connects directly without notifying the user.
-                  Only use this when unattended access is enabled for this device.
-                </p>
+              <div className="space-y-2">
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 flex gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                  <p>
+                    Unattended access connects directly without notifying the end user.
+                    Enable it per device only when you are authorized to do so.
+                  </p>
+                </div>
+
+                {!unattendedEnrolled ? (
+                  <div className="rounded-md border border-border px-3 py-2.5 text-xs text-muted-foreground">
+                    This device has no agent enrolled yet, so unattended access can't be enabled.
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
+                    <div className="text-xs min-w-0">
+                      <p className="font-medium">Unattended access for this device</p>
+                      <p className="text-muted-foreground">
+                        {unattendedLoading
+                          ? "Checking current setting…"
+                          : unattendedEnabled
+                            ? "Enabled — sessions start without an on-screen prompt."
+                            : "Disabled — enable it before starting an unattended session."}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={unattendedEnabled ? "outline" : "default"}
+                      disabled={unattendedSaving || unattendedLoading}
+                      onClick={() => void toggleUnattended(!unattendedEnabled)}
+                      className="gap-1.5 shrink-0"
+                      data-testid="button-toggle-unattended-enabled"
+                    >
+                      {unattendedSaving
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : unattendedEnabled
+                          ? <XCircle className="h-3.5 w-3.5" />
+                          : <CheckCircle2 className="h-3.5 w-3.5" />}
+                      {unattendedEnabled ? "Disable" : "Enable"}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -328,7 +410,7 @@ export default function RemoteAccessModal({
                   <Users className="h-4 w-4" /> Request Assisted Access
                 </Button>
               ) : (
-                <Button type="button" variant="destructive" onClick={() => setStep("confirm_unattended")} disabled={!isSuperAdmin} className="gap-2" data-testid="button-confirm-unattended-access">
+                <Button type="button" variant="destructive" onClick={() => setStep("confirm_unattended")} disabled={!isSuperAdmin || !unattendedEnabled || !unattendedEnrolled} title={!unattendedEnabled ? "Enable unattended access for this device first" : undefined} className="gap-2" data-testid="button-confirm-unattended-access">
                   <Monitor className="h-4 w-4" /> Start Unattended Access
                 </Button>
               )}
