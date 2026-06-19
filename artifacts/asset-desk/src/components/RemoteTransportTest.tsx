@@ -50,10 +50,14 @@ export default function RemoteTransportTest({ sessionId }: { sessionId: string }
       const channelName = data.channel_name as string;
       setPhase("joining");
 
-      // 2. Join the per-session broadcast channel (self:false so we never hear
-      //    our own ping echoed back).
+      // 2. Join the per-session PRIVATE broadcast channel. Realtime authorizes
+      //    the join against the realtime.messages RLS policies using the admin's
+      //    own auth JWT (session owner / super_admin). self:false so we never
+      //    hear our own ping echoed back.
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
       const channel = supabase.channel(channelName, {
-        config: { broadcast: { self: false } },
+        config: { broadcast: { self: false }, private: true },
       });
       channelRef.current = channel;
 
