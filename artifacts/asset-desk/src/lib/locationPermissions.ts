@@ -39,10 +39,17 @@ export function canRaiseRequestsForLocation(
   return access.some(a => a.location === location && a.canRaiseRequests);
 }
 
+// Some canonical location names don't share a prefix with the granular values
+// stored on profiles (e.g. canonical "Ernakulam - Kochi" vs profile
+// "Kochi - Sales"), so map those canonical names to extra match tokens.
+const LOCATION_ALIASES: Record<string, string[]> = {
+  "ernakulam - kochi": ["kochi", "ernakulam"],
+};
+
 // Match a profile's (granular) location against a canonical location name.
 // Profiles store granular values like "Ahmedabad - Sales" while assets and
 // location-access rows use canonical names like "Ahmedabad", so we match on an
-// exact value or a "<canonical> " prefix.
+// exact value or a "<token> " prefix (token = canonical name or a known alias).
 export function profileMatchesLocation(
   profileLocation: string | null | undefined,
   canonical: string,
@@ -50,7 +57,8 @@ export function profileMatchesLocation(
   if (!profileLocation) return false;
   const pl = profileLocation.trim().toLowerCase();
   const c = canonical.trim().toLowerCase();
-  return pl === c || pl.startsWith(c + " ");
+  const tokens = [c, ...(LOCATION_ALIASES[c] ?? [])];
+  return tokens.some(t => pl === t || pl.startsWith(t + " "));
 }
 
 export function profileInAnyLocation(
