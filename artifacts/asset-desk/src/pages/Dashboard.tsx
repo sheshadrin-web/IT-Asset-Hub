@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
-  TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight,
+  TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight, MapPin,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,24 @@ function EndUserDashboard({ userName }: { userName: string }) {
         ].map((c) => <StatCard key={c.label} {...c} />)}
       </div>
 
+      {/* Location GM: quick access to the Location-wise Assets module */}
+      {currentUser?.role === "location_gm" && (
+        <Link href="/locations">
+          <Card className="cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 border-primary/30 bg-primary/5">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="inline-flex rounded-xl p-2.5 bg-primary/10">
+                <MapPin className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">Location-wise Assets</p>
+                <p className="text-xs text-muted-foreground">View and manage assets across your assigned locations</p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            </CardContent>
+          </Card>
+        </Link>
+      )}
+
       {/* My assets by type */}
       {myTypeGroups.length > 0 && (
         <Card>
@@ -271,7 +289,7 @@ export default function Dashboard() {
   const { tickets }      = useTickets();
   const { users }        = useUsers();
 
-  const isAdminView = currentUser?.role !== "end_user";
+  const isAdminView = currentUser?.role !== "end_user" && currentUser?.role !== "location_gm";
   const [restartThresholdDays, setRestartThresholdDays] = useState(RESTART_PENDING_DEFAULT_DAYS);
   const {
     devices: managedDevices,
@@ -281,7 +299,7 @@ export default function Dashboard() {
   } = useManagedDevices(isAdminView);
   const restartPending = computeRestartPending(managedDevices, assets, users, restartThresholdDays);
 
-  if (currentUser?.role === "end_user") {
+  if (currentUser?.role === "end_user" || currentUser?.role === "location_gm") {
     return <EndUserDashboard userName={currentUser.name} />;
   }
 
