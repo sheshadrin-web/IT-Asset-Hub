@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
-import { Asset, AssetStatus, AssetType, AssetOwnership } from "@/data/mockData";
+import { Asset, AssetStatus, AssetType, AssetOwnership, AssetCondition } from "@/data/mockData";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
@@ -14,7 +14,8 @@ const SAFE_ASSET_COLUMNS =
   "billable_name, plan_name, plan_amount, monitor_brand, monitor_model, monitor_size, keyboard, " +
   "mouse, cpu, others, purchase_date, warranty_end_date, vendor, invoice, ownership, status, " +
   "assigned_to, assigned_to_name, assigned_email, assigned_at, ack_token, acknowledged, " +
-  "acknowledged_at, asset_photos, department, location, accessories, remarks, created_at, " +
+  "acknowledged_at, asset_photos, department, location, accessories, remarks, created_at, updated_at, " +
+  "condition, condition_notes, condition_updated_at, " +
   "profiles!assets_assigned_to_fkey(full_name, email, ecode)";
 
 function mapFromDB(row: Record<string, unknown>): Asset {
@@ -75,6 +76,10 @@ function mapFromDB(row: Record<string, unknown>): Asset {
     location:        String(row.location ?? ""),
     accessories:     String(row.accessories ?? ""),
     remarks:         String(row.remarks ?? ""),
+    condition:          row.condition ? (row.condition as AssetCondition) : undefined,
+    conditionNotes:     row.condition_notes ? String(row.condition_notes) : undefined,
+    conditionUpdatedAt: row.condition_updated_at ? String(row.condition_updated_at) : undefined,
+    updatedAt:          row.updated_at ? String(row.updated_at) : undefined,
   };
 }
 
@@ -142,6 +147,7 @@ interface AssetContextType {
   resetAcknowledgement:     (assetId: string) => Promise<void>;
   markAcknowledged:         (assetId: string) => Promise<void>;
   bulkMarkAcknowledged:     (assetIds: string[]) => Promise<void>;
+  updateAssetCondition:     (assetId: string, condition: AssetCondition, notes?: string) => Promise<void>;
 }
 
 const AssetContext = createContext<AssetContextType | null>(null);
@@ -612,12 +618,32 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     } catch (e) { console.warn("[history] failed to log bulk assignment", e); /* non-fatal */ }
   };
 
+  // Condition is written through a SECURITY DEFINER RPC (set_asset_condition) so a
+  // location_gm can update condition on their own location's assets without being
+  // granted a broad UPDATE on the assets table.
+  const updateAssetCondition = async (
+    assetId: string, condition: AssetCondition, notes?: string
+  ): Promise<void> => {
+    const target = assets.find(a => a.assetId === assetId);
+    if (!target?.id) throw new Error("Asset not found");
+    const { data, error } = await supabase.rpc("set_asset_condition", {
+      p_asset_id: target.id, p_condition: condition, p_notes: notes ?? null,
+    });
+    if (error) throw new Error(error.message);
+    const res = data as { success?: boolean; error?: string } | null;
+    if (!res?.success) throw new Error(res?.error ?? "Failed to update condition");
+    const now = new Date().toISOString();
+    setAssets(prev => prev.map(a => a.assetId === assetId
+      ? { ...a, condition, conditionNotes: notes, conditionUpdatedAt: now }
+      : a));
+  };
+
   return (
     <AssetContext.Provider value={{
       assets, loading, error, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
       updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, markAcknowledged,
-      bulkMarkAcknowledged,
+      bulkMarkAcknowledged, updateAssetCondition,
     }}>
       {children}
     </AssetContext.Provider>
