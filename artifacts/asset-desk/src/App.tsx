@@ -282,7 +282,7 @@ function Router() {
         <ProtectedRoute component={Tickets} />
       </Route>
 
-      {/* My Assets — end_user only */}
+      {/* My Assets — end_user + location_gm */}
       <Route path="/my-assets">
         <ProtectedRoute component={MyAssets} allowedRoles={["end_user", "location_gm"]} />
       </Route>
