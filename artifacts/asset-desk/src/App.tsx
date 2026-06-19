@@ -40,6 +40,7 @@ const MyAssets = lazy(() => import("@/pages/MyAssets"));
 const ReturnAsset = lazy(() => import("@/pages/ReturnAsset"));
 const BulkImport = lazy(() => import("@/pages/BulkImport"));
 const SupabaseCheck = lazy(() => import("@/pages/SupabaseCheck"));
+const RemoteSessionViewer = lazy(() => import("@/pages/RemoteSessionViewer"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 const queryClient = new QueryClient();
@@ -198,6 +199,28 @@ function ProtectedRoute({
   return <Layout><Component /></Layout>;
 }
 
+// Like ProtectedRoute but renders children full-screen with no Layout chrome —
+// used by the immersive remote-desktop viewer.
+function ProtectedFullScreen({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: UserRole[];
+}) {
+  const { currentUser, isAuthenticated, loading, configError } = useAuth();
+
+  if (configError) return <ConfigError />;
+  if (loading) return <LoadingScreen />;
+  if (!isAuthenticated) return <Redirect to="/login" />;
+
+  if (allowedRoles && currentUser && !allowedRoles.includes(currentUser.role)) {
+    return <Layout><Forbidden /></Layout>;
+  }
+
+  return <>{children}</>;
+}
+
 function Router() {
   const { isAuthenticated, loading, configError } = useAuth();
 
@@ -283,6 +306,15 @@ function Router() {
       </Route>
       <Route path="/settings">
         <ProtectedRoute component={Settings} allowedRoles={["super_admin"]} />
+      </Route>
+
+      {/* Remote session viewer — full-screen, no Layout chrome (admins/agents) */}
+      <Route path="/remote/:sessionId">
+        {(params) => (
+          <ProtectedFullScreen allowedRoles={["super_admin", "it_admin", "it_agent"]}>
+            <RemoteSessionViewer sessionId={params.sessionId} />
+          </ProtectedFullScreen>
+        )}
       </Route>
 
       {/* 404 */}
