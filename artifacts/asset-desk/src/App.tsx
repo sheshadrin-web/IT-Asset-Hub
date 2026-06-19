@@ -284,7 +284,7 @@ function Router() {
 
       {/* My Assets — end_user only */}
       <Route path="/my-assets">
-        <ProtectedRoute component={MyAssets} allowedRoles={["end_user"]} />
+        <ProtectedRoute component={MyAssets} allowedRoles={["end_user", "location_gm"]} />
       </Route>
 
       {/* Users — super_admin + it_admin */}
