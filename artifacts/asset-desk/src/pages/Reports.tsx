@@ -17,6 +17,7 @@ import {
   Boxes, Gauge, Building2, UserCheck, Layers, Zap, TrendingDown,
 } from "lucide-react";
 import { useAssets } from "@/context/AssetContext";
+import LocationReportSection from "@/components/LocationReportSection";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
 import { ROLE_LABELS, Asset, Ticket as TicketType, Profile } from "@/data/mockData";
@@ -770,6 +771,9 @@ export default function Reports() {
           )}
         </ChartContainer>
       </div>
+
+      {/* ── Location-wise asset report ───────────────────────────────────── */}
+      <LocationReportSection />
 
       {/* ── Ticket performance metrics ───────────────────────────────────── */}
       <ChartContainer
