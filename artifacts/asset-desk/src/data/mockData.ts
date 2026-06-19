@@ -1,5 +1,5 @@
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export type UserRole = "super_admin" | "it_admin" | "hr_admin" | "it_agent" | "end_user";
+export type UserRole = "super_admin" | "it_admin" | "hr_admin" | "it_agent" | "end_user" | "location_gm";
 export type UserStatus = "active" | "inactive";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -8,6 +8,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   hr_admin:    "HR Admin",
   it_agent:    "IT Agent",
   end_user:    "End User",
+  location_gm: "Location GM",
 };
 
 // ─── Supabase Profile ────────────────────────────────────────────────────────
@@ -75,6 +76,15 @@ export type AssetStatus = "In Procurement" | "Available" | "Assigned" | "Recover
 export type AssetOwnership = "Miles" | "Miles-GCC" | "Mojo" | "Rented" | "Employee Owned" | "Company Owned";
 export const ASSET_OWNERSHIP_OPTIONS: AssetOwnership[] = ["Miles", "Miles-GCC", "Mojo", "Rented", "Employee Owned", "Company Owned"];
 
+// ─── Asset condition (DB-backed) ──────────────────────────────────────────────
+export type AssetCondition =
+  | "Good" | "Needs Inspection" | "Under Repair" | "Damaged"
+  | "Lost" | "Scrapped" | "Returned" | "Recovery Pending";
+export const ASSET_CONDITION_OPTIONS: AssetCondition[] = [
+  "Good", "Needs Inspection", "Under Repair", "Damaged",
+  "Lost", "Scrapped", "Returned", "Recovery Pending",
+];
+
 export interface Asset {
   id?:              string;   // Supabase UUID
   assetId:          string;   // e.g. AST-001 — manually entered
@@ -127,6 +137,11 @@ export interface Asset {
   location:         string;
   accessories:      string;
   remarks:          string;
+  // Condition tracking (DB-backed; backfilled "Good" for existing assets)
+  condition?:          AssetCondition;
+  conditionNotes?:     string;
+  conditionUpdatedAt?: string;
+  updatedAt?:          string;
 }
 
 // ─── Ticket types ─────────────────────────────────────────────────────────────
