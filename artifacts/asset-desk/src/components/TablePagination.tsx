@@ -13,10 +13,11 @@ interface TablePaginationProps {
   onPageChange:        (page: number) => void;
   onRowsPerPageChange: (rpp: number) => void;
   noun?:               string;
+  rowsOptions?:        number[];
 }
 
 export default function TablePagination({
-  total, page, rowsPerPage, onPageChange, onRowsPerPageChange, noun = "rows",
+  total, page, rowsPerPage, onPageChange, onRowsPerPageChange, noun = "rows", rowsOptions = ROWS_OPTIONS,
 }: TablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
   const from = total === 0 ? 0 : (page - 1) * rowsPerPage + 1;
@@ -35,7 +36,7 @@ export default function TablePagination({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {ROWS_OPTIONS.map(n => (
+            {rowsOptions.map(n => (
               <SelectItem key={n} value={String(n)} className="text-xs">{n}</SelectItem>
             ))}
           </SelectContent>
