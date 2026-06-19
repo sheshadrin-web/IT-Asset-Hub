@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import TablePagination from "@/components/TablePagination";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseConfigured } from "@/lib/supabaseClient";
 import { getAuditLogs, type AuditLogRow } from "@/lib/auditService";
@@ -39,6 +40,8 @@ export default function AuditLogs() {
   const [logs, setLogs] = useState<AuditLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured) { setLoading(false); return; }
@@ -46,7 +49,8 @@ export default function AuditLogs() {
     if (!session) { setLoading(false); return; }
     setLoading(true);
     try {
-      setLogs(await getAuditLogs(100));
+      setLogs(await getAuditLogs(500));
+      setPage(1);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load audit logs");
@@ -56,6 +60,8 @@ export default function AuditLogs() {
   }, [session, authLoading]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const pagedLogs = logs.slice((page - 1) * rowsPerPage, page * rowsPerPage);
 
   return (
     <SettingsCard
@@ -100,7 +106,7 @@ export default function AuditLogs() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {logs.map(log => (
+              {pagedLogs.map(log => (
                 <TableRow key={log.id} data-testid={`audit-row-${log.id}`}>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{fmt(log.created_at)}</TableCell>
                   <TableCell className="whitespace-nowrap text-sm">
@@ -117,6 +123,15 @@ export default function AuditLogs() {
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            total={logs.length}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setPage}
+            onRowsPerPageChange={rpp => { setRowsPerPage(rpp); setPage(1); }}
+            rowsOptions={[25, 50, 100]}
+            noun="audit logs"
+          />
         </div>
       )}
     </SettingsCard>
