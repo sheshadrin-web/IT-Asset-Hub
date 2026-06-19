@@ -45,42 +45,54 @@ const anonAuth = createClient(SUPABASE_URL, ANON_KEY, {
 // (DB-side HMAC minting is impossible on this project: the in-use signing key is
 // asymmetric ES256 and no HS256 secret is exposed to the database.) The identity
 // is a normal — but profile-less and powerless — auth user created by the service
-// role and signed in via an admin-generated magiclink that is verified
-// server-side (no email is ever sent). The returned token is what the device
-// agent presents to join the PRIVATE Realtime channel; RLS binds it to one
+// role. On each mint we set a fresh random password and sign in with it to obtain
+// a real session (no email is ever sent). We deliberately do NOT use magiclink +
+// verifyOtp: that exchange proved unreliable on this project's GoTrue config
+// ("Email link is invalid or has expired" even for freshly-generated tokens),
+// which silently broke the agent's channel join. The returned token is what the
+// device agent presents to join the PRIVATE Realtime channel; RLS binds it to one
 // session via agent_realtime_uid.
 async function mintAgentRealtimeSession(assetId: string) {
   const email = `remote-agent.${assetId}@agent.miles.local`;
+  // Keep under bcrypt's 72-byte limit; one UUID is ample entropy for a
+  // single-use, immediately-consumed password.
+  const password = `Ag3nt!${crypto.randomUUID()}`;
   let userId: string | null = null;
 
-  let link = await db.auth.admin.generateLink({ type: "magiclink", email });
-  if (link.error || !link.data?.properties?.hashed_token) {
-    const created = await db.auth.admin.createUser({
-      email,
-      email_confirm: true,
-      app_metadata: { remote_agent: true, asset_id: assetId },
-    });
-    if (created.error) throw new Error(`agent identity: ${created.error.message}`);
-    userId = created.data.user?.id ?? null;
-    link = await db.auth.admin.generateLink({ type: "magiclink", email });
-    if (link.error || !link.data?.properties?.hashed_token) {
-      throw new Error(`magiclink: ${link.error?.message ?? "no token"}`);
-    }
-  }
-  userId = userId ?? link.data!.user?.id ?? null;
-
-  const verify = await anonAuth.auth.verifyOtp({
-    type: "magiclink",
-    token_hash: link.data!.properties!.hashed_token,
+  // Ensure the controlled per-asset identity exists, then (re)set its password
+  // to the freshly generated value for this mint.
+  const created = await db.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: { remote_agent: true, asset_id: assetId },
   });
-  if (verify.error || !verify.data?.session) {
-    throw new Error(`verify: ${verify.error?.message ?? "no session"}`);
+  if (created.error) {
+    // Already registered → resolve its id and rotate the password for this mint.
+    if (created.error.code !== "email_exists") {
+      throw new Error(`agent identity: ${created.error.message}`);
+    }
+    const link = await db.auth.admin.generateLink({ type: "magiclink", email });
+    userId = link.data?.user?.id ?? null;
+    if (!userId) {
+      throw new Error(`agent identity: ${link.error?.message ?? "could not resolve user"}`);
+    }
+    const upd = await db.auth.admin.updateUserById(userId, { password, email_confirm: true });
+    if (upd.error) throw new Error(`agent identity: ${upd.error.message}`);
+  } else {
+    userId = created.data.user?.id ?? null;
+  }
+
+  // Sign in with the just-set password to obtain a GENUINE short-lived session.
+  const signin = await anonAuth.auth.signInWithPassword({ email, password });
+  if (signin.error || !signin.data?.session) {
+    throw new Error(`verify: ${signin.error?.message ?? "no session"}`);
   }
   return {
-    user_id:       userId ?? verify.data.user?.id ?? null,
-    access_token:  verify.data.session.access_token,
-    refresh_token: verify.data.session.refresh_token,
-    expires_at:    verify.data.session.expires_at,
+    user_id:       userId ?? signin.data.user?.id ?? null,
+    access_token:  signin.data.session.access_token,
+    refresh_token: signin.data.session.refresh_token,
+    expires_at:    signin.data.session.expires_at,
   };
 }
 
