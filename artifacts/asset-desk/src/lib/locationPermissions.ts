@@ -39,6 +39,27 @@ export function canRaiseRequestsForLocation(
   return access.some(a => a.location === location && a.canRaiseRequests);
 }
 
+// Match a profile's (granular) location against a canonical location name.
+// Profiles store granular values like "Ahmedabad - Sales" while assets and
+// location-access rows use canonical names like "Ahmedabad", so we match on an
+// exact value or a "<canonical> " prefix.
+export function profileMatchesLocation(
+  profileLocation: string | null | undefined,
+  canonical: string,
+): boolean {
+  if (!profileLocation) return false;
+  const pl = profileLocation.trim().toLowerCase();
+  const c = canonical.trim().toLowerCase();
+  return pl === c || pl.startsWith(c + " ");
+}
+
+export function profileInAnyLocation(
+  profileLocation: string | null | undefined,
+  canonicals: string[],
+): boolean {
+  return canonicals.some(c => profileMatchesLocation(profileLocation, c));
+}
+
 // The set of locations a user may see. HQ roles see all provided locations;
 // a location_gm sees only their mapped, view-enabled locations.
 export function visibleLocations(
