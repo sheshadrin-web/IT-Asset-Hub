@@ -20,6 +20,7 @@ import {
   ScrollText, ShieldCheck, ArrowRight, RefreshCw, Layers,
 } from "lucide-react";
 import AssetTypesConfig from "@/components/settings/AssetTypesConfig";
+import AccessControlPanel from "@/components/settings/access/AccessControlPanel";
 
 interface OrgSettings {
   org_name:            string;
@@ -79,14 +80,15 @@ const ADMIN_ROLES = ["super_admin", "it_admin", "hr_admin"];
 
 type TabId =
   | "general" | "notifications" | "security" | "integrations"
-  | "users" | "automation" | "audit" | "configuration";
+  | "users" | "access" | "automation" | "audit" | "configuration";
 
-const TABS: { id: TabId; label: string; icon: typeof Monitor }[] = [
+const TABS: { id: TabId; label: string; icon: typeof Monitor; superAdminOnly?: boolean }[] = [
   { id: "general",       label: "General",        icon: Monitor },
   { id: "notifications", label: "Notifications",  icon: Bell },
   { id: "security",      label: "Security",       icon: Shield },
   { id: "integrations",  label: "Integrations",   icon: Plug },
   { id: "users",         label: "Users & Roles",  icon: Users },
+  { id: "access",        label: "Access Control", icon: ShieldCheck, superAdminOnly: true },
   { id: "automation",    label: "Automation",     icon: Workflow },
   { id: "audit",         label: "Audit Logs",     icon: ScrollText },
   { id: "configuration", label: "Configuration",  icon: Layers },
@@ -302,7 +304,7 @@ export default function Settings() {
       <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
         {/* Vertical tab nav */}
         <nav className="rounded-2xl border border-card-border/70 bg-card/85 backdrop-blur-md shadow-[0_2px_8px_-2px_rgba(30,58,138,0.10),0_14px_36px_-18px_rgba(30,58,138,0.20)] p-2 h-fit lg:sticky lg:top-4">
-          {TABS.map(tab => {
+          {TABS.filter(tab => !tab.superAdminOnly || isSuperAdmin).map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
@@ -548,6 +550,8 @@ export default function Settings() {
               </div>
             </SettingsCard>
           )}
+
+          {activeTab === "access" && isSuperAdmin && <AccessControlPanel canEdit={isSuperAdmin} />}
 
           {activeTab === "automation" && <AutomationRules />}
 
