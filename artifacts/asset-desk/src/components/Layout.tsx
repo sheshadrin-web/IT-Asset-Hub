@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { label: "Tickets",      icon: Ticket,          href: "/tickets",     roles: ["super_admin", "it_admin", "it_agent"] },
   { label: "My Tickets",   icon: Ticket,          href: "/tickets",     roles: ["end_user", "location_gm"] },
   { label: "My Assets",    icon: Package,         href: "/my-assets",   roles: ["end_user", "location_gm"] },
+  { label: "Users",        icon: Users,           href: "/location-users", roles: ["location_gm"] },
   { label: "Users",        icon: Users,           href: "/users",       roles: ["super_admin", "it_admin", "hr_admin"] },
   { label: "Asset Recovery", icon: ShieldAlert,   href: "/asset-recovery", roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
   { label: "Reports",      icon: BarChart2,       href: "/reports",     roles: ["super_admin", "it_admin", "it_agent", "hr_admin"] },
