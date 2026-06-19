@@ -344,12 +344,13 @@ export default function RemoteAccessModal({
               <div className="space-y-1 text-sm text-red-800">
                 <p className="font-semibold">Confirm Unattended Access</p>
                 <p>
-                  You are about to start a remote session on <strong>{assetTag ?? "this device"}</strong> without
-                  notifying the end user. The session will be recorded in the audit log.
+                  You are about to start a live remote session on <strong>{assetTag ?? "this device"}</strong> without
+                  notifying the end user. Screen, mouse and keyboard control begin immediately and the
+                  full session is recorded in the audit log.
                 </p>
                 <p className="text-[11px] text-red-700">
-                  Note: The live remote desktop engine is not yet active (Phase 2).
-                  This records the session for tracking purposes.
+                  The device agent must be online. After connecting, open the live viewer to see the
+                  screen and take control.
                 </p>
               </div>
             </div>
@@ -409,8 +410,8 @@ export default function RemoteAccessModal({
 
               {activeSession.mode === "unattended" && activeSession.status === "active" && (
                 <p className="text-xs">
-                  Unattended session recorded. The remote desktop engine will connect here in Phase 2.
-                  Click <strong>End Session</strong> when finished.
+                  Unattended session is live. Click <strong>Open Live Viewer</strong> to see the screen
+                  and take mouse / keyboard control, or <strong>End Session</strong> when finished.
                 </p>
               )}
 
