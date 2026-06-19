@@ -103,11 +103,11 @@ function fmtSynced(iso: string | null | undefined): string {
 function getUserColValue(u: import("@/data/mockData").Profile, col: UserColKey): string {
   switch (col) {
     case "ecode":       return u.ecode ?? "";
-    case "name":        return u.full_name;
+    case "name":        return u.full_name ?? "";
     case "role":        return ROLE_LABELS[u.role] ?? u.role;
-    case "department":  return u.department;
+    case "department":  return u.department ?? "";
     case "manager":     return u.reporting_manager ?? "";
-    case "location":    return u.location;
+    case "location":    return u.location ?? "";
     case "status":      return statusLabel[u.status] ?? u.status;
     case "hr_status":   return u.employment_status ?? "";
     case "hr_source":   return u.hr_source ?? "";
@@ -776,7 +776,7 @@ export default function Users() {
   // ── Filtered list ──────────────────────────────────────────────────────────
   const baseFiltered = users.filter(u => {
     const q = search.toLowerCase();
-    const matchSearch = !q || u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.department.toLowerCase().includes(q) || (u.ecode ?? "").toLowerCase().includes(q);
+    const matchSearch = !q || (u.full_name ?? "").toLowerCase().includes(q) || (u.email ?? "").toLowerCase().includes(q) || (u.department ?? "").toLowerCase().includes(q) || (u.ecode ?? "").toLowerCase().includes(q);
     const matchRole   = roleFilter   === "all" || u.role   === roleFilter;
     const matchStatus = statusFilter === "all" || u.status === statusFilter;
     return matchSearch && matchRole && matchStatus;
