@@ -17,7 +17,7 @@ import ManagerSearchField from "@/components/ManagerSearchField";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { UserRole, ROLE_LABELS } from "@/data/mockData";
-import { Shield, UserCheck, User, Camera, Loader2 } from "lucide-react";
+import { Shield, UserCheck, User, Camera, Loader2, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
@@ -35,9 +35,10 @@ const roleBadgeColors: Record<UserRole, string> = {
   hr_admin:    "bg-pink-100 text-pink-700 border-pink-200",
   it_agent:    "bg-cyan-100 text-cyan-700 border-cyan-200",
   end_user:    "bg-emerald-100 text-emerald-700 border-emerald-200",
+  location_gm: "bg-amber-100 text-amber-700 border-amber-200",
 };
 const roleIconMap: Record<UserRole, React.ElementType> = {
-  super_admin: Shield, it_admin: Shield, hr_admin: Shield, it_agent: UserCheck, end_user: User,
+  super_admin: Shield, it_admin: Shield, hr_admin: Shield, it_agent: UserCheck, end_user: User, location_gm: MapPin,
 };
 
 interface Props {
