@@ -15,6 +15,7 @@ import ManagerSearchField from "@/components/ManagerSearchField";
 import TransferReporteesModal from "@/components/TransferReporteesModal";
 import { LoadErrorBanner } from "@/components/LoadErrorBanner";
 import LocationSelect from "@/components/LocationSelect";
+import LocationAccessEditor from "@/components/LocationAccessEditor";
 import ManagerHierarchy from "@/components/dashboard/ManagerHierarchy";
 import HrOverview from "@/components/dashboard/HrOverview";
 import { Card, CardContent } from "@/components/ui/card";
@@ -59,6 +60,7 @@ const roleColors: Record<UserRole, string> = {
   hr_admin:    "bg-pink-500/15 text-pink-600 border-pink-500/20",
   it_agent:    "bg-cyan-500/15 text-cyan-600 border-cyan-500/20",
   end_user:    "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  location_gm: "bg-amber-500/15 text-amber-600 border-amber-500/20",
 };
 const statusColors: Record<UserStatus, string> = {
   active:   "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
@@ -124,7 +126,7 @@ function makeEmptyUserColFilters(): Record<UserColKey, Set<string>> {
 const addSchema = z.object({
   full_name:         z.string().min(2, "Full name is required"),
   email:             z.string().email("Invalid email address"),
-  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"]),
+  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "location_gm", "end_user"]),
   ecode:             z.string().optional(),
   department:        z.string().min(1, "Department is required"),
   location:          z.string().min(1, "Location is required"),
@@ -135,7 +137,7 @@ type AddFormValues = z.infer<typeof addSchema>;
 
 const editSchema = z.object({
   full_name:         z.string().min(2, "Required"),
-  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "end_user"]),
+  role:              z.enum(["super_admin", "it_admin", "hr_admin", "it_agent", "location_gm", "end_user"]),
   ecode:             z.string().optional(),
   department:        z.string().min(1, "Required"),
   location:          z.string().min(1, "Required"),
@@ -1250,6 +1252,7 @@ export default function Users() {
                 <SelectItem value="it_admin">IT Admin</SelectItem>
                 <SelectItem value="hr_admin">HR Admin</SelectItem>
                 <SelectItem value="it_agent">IT Agent</SelectItem>
+                <SelectItem value="location_gm">Location GM</SelectItem>
                 <SelectItem value="end_user">End User</SelectItem>
               </SelectContent>
             </Select>
@@ -2141,6 +2144,7 @@ export default function Users() {
                         <SelectItem value="it_admin">IT Admin</SelectItem>
                         <SelectItem value="hr_admin">HR Admin</SelectItem>
                         <SelectItem value="it_agent">IT Agent</SelectItem>
+                        <SelectItem value="location_gm">Location GM</SelectItem>
                         <SelectItem value="end_user">End User</SelectItem>
                       </SelectContent>
                     </Select>
@@ -2324,6 +2328,7 @@ export default function Users() {
                                     <SelectItem value="it_admin">IT Admin</SelectItem>
                                     <SelectItem value="hr_admin">HR Admin</SelectItem>
                                     <SelectItem value="it_agent">IT Agent</SelectItem>
+                                    <SelectItem value="location_gm">Location GM</SelectItem>
                                     <SelectItem value="end_user">End User</SelectItem>
                                   </SelectContent>
                                 </Select>
@@ -2391,6 +2396,8 @@ export default function Users() {
                                 <FormMessage />
                               </FormItem>
                             )} />
+
+                            <LocationAccessEditor userId={eu.id} role={editForm.watch("role")} />
                           </div>
                         </CardContent>
                       </Card>
