@@ -161,7 +161,7 @@ Write-Log 'Installing agent dependencies...'
 Write-NativeOutput (Invoke-Native $VenvPy @('-m','ensurepip','--upgrade'))
 $pipOk = $false
 foreach ($attempt in 1..3) {
-  $pipOut = Invoke-Native $VenvPy @('-m','pip','install','--disable-pip-version-check','requests','websockets','mss','Pillow')
+  $pipOut = Invoke-Native $VenvPy @('-m','pip','install','--disable-pip-version-check','requests','websockets','mss','Pillow','pynput')
   $pipCode = $LASTEXITCODE
   Write-NativeOutput $pipOut
   if ($pipCode -eq 0) { $pipOk = $true; break }
