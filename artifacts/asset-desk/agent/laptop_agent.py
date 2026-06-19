@@ -1139,14 +1139,22 @@ def _win_disable_lock_accounts() -> list[str]:
     return disabled
 
 
-def _win_enable_lock_accounts(users: list[str] | None = None) -> None:
+def _win_enable_lock_accounts(users: list[str] | None = None) -> list[str]:
+    """Re-enable sign-in for the given accounts. Returns the accounts we FAILED to
+    re-enable (still exist but could not be reactivated) so the caller can report
+    an honest unlock status instead of silently swallowing a permission error."""
+    failed: list[str] = []
     for u in (users or WIN_LOCK_USERS):
-        if _win_account_exists(u):
-            try:
-                subprocess.run(["net", "user", u, "/active:yes"], capture_output=True,
+        if not _win_account_exists(u):
+            continue
+        try:
+            r = subprocess.run(["net", "user", u, "/active:yes"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            except Exception:
-                pass
+            if r.returncode != 0:
+                failed.append(u)
+        except Exception:
+            failed.append(u)
+    return failed
 
 
 _WIN_POLICY_KEY = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
@@ -1162,14 +1170,18 @@ def _win_set_legalnotice(caption: str, text: str) -> None:
             pass
 
 
-def _win_clear_legalnotice() -> None:
+def _win_clear_legalnotice() -> bool:
+    ok = True
     for v in ("legalnoticecaption", "legalnoticetext"):
         try:
-            subprocess.run(["reg", "add", _WIN_POLICY_KEY, "/v", v, "/t", "REG_SZ",
-                            "/d", "", "/f"], capture_output=True, text=True,
-                           timeout=15, creationflags=_NO_WINDOW)
+            r = subprocess.run(["reg", "add", _WIN_POLICY_KEY, "/v", v, "/t", "REG_SZ",
+                                "/d", "", "/f"], capture_output=True, text=True,
+                               timeout=15, creationflags=_NO_WINDOW)
+            if r.returncode != 0:
+                ok = False
         except Exception:
-            pass
+            ok = False
+    return ok
 
 
 def _lock_screen_running() -> bool:
@@ -1599,32 +1611,43 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                 or LOCK_SCREEN_DEFAULT)
     try:
         if IS_WIN:
-            state = {"locked": True, "platform": "windows",
-                     "asset_tag": asset_tag, "lock_message": lock_msg}
+            # A durable Windows lock means BLOCKING SIGN-IN by disabling the
+            # end-user account — only then does the lock survive a reboot and a
+            # password attempt. A bare workstation lock is dismissed the instant
+            # the user types their password, so it is NOT, on its own, enforcement.
+            # Mirror the macOS/Linux contract: if we cannot disable a sign-in
+            # account we report 'requires_admin', change NOTHING, and never write a
+            # 'locked' state the server can't confirm (so reconcile won't fight us).
+            admin = _win_is_admin()
+            disabled = _win_disable_lock_accounts() if admin else []
+            if not disabled:
+                if not admin:
+                    msg = ("Cannot enforce the lock: blocking Windows sign-in requires the "
+                           "agent to run with administrator rights, but it is running as a "
+                           "normal user. Reinstall the agent as an administrator / system "
+                           "service, then retry the lock.")
+                else:
+                    msg = ("Cannot enforce the lock: none of the standard sign-in accounts "
+                           "(Miles / Miles-IT-Support) could be disabled on this PC — they are "
+                           "absent, or the only match is the account the agent itself runs "
+                           "under (skipped to prevent a permanent lockout). Install the agent "
+                           "as a system service so it can disable the end-user account, then "
+                           "retry the lock.")
+                return ("requires_admin", None, msg)
+            # At least one sign-in account was disabled → real enforcement.
+            state = {"locked": True, "platform": "windows", "asset_tag": asset_tag,
+                     "lock_message": lock_msg, "legalnotice_set": True,
+                     "disabled_users": disabled}
             if _prev.get("screen_pid"):
                 state["screen_pid"] = _prev["screen_pid"]
-            ok, err = _win_lock_now()
-            admin = _win_is_admin()
-            disabled: list[str] = []
-            if admin:
-                _win_set_legalnotice(WIN_LOCK_CAPTION, lock_msg)
-                disabled = _win_disable_lock_accounts()
-                if disabled:
-                    state["disabled_users"] = disabled
+            _win_set_legalnotice(WIN_LOCK_CAPTION, lock_msg)
+            ok, _err = _win_lock_now()
             _write_lock_state(state)
             _spawn_lock_screen()
-            users_suffix = f"|USERS={','.join(disabled)}" if disabled else ""
-            if ok or disabled:
-                bits = ["Workstation locked" if ok else "Workstation lock call failed",
-                        "branded lock screen shown"]
-                if disabled:
-                    bits.append(f"sign-in disabled for {','.join(disabled)}")
-                elif admin:
-                    bits.append("no standard lock accounts present to disable")
-                else:
-                    bits.append("running without admin — standard accounts not disabled")
-                return ("completed", "; ".join(bits) + users_suffix, None)
-            return ("failed", None, err or "Could not lock the workstation")
+            ws = "workstation locked" if ok else "workstation lock call failed (sign-in already blocked)"
+            return ("completed",
+                    f"Sign-in disabled for {','.join(disabled)}; {ws}; branded lock screen "
+                    f"shown|USERS={','.join(disabled)}", None)
 
         if IS_MAC:
             # TRUE login-window lock: bar the account from logging in and drop the
@@ -1783,12 +1806,33 @@ def _release_lock() -> tuple[str, str | None, str | None]:
                 return ("failed", None, f"Failed to unlock account '{user}': {detail}")
             _write_lock_state({"locked": False})
             return ("completed", f"Account '{user}' unlocked ({detail})", None)
-        # Windows: tear down the branded kiosk, re-enable any accounts we disabled,
-        # and clear the sign-in banner. Re-enabling is best-effort and idempotent.
+        # Windows: tear down the branded kiosk, then truthfully reverse every
+        # privileged side-effect. A lock that disabled sign-in accounts / set the
+        # legal-notice banner can ONLY be undone with admin rights, so report
+        # honestly instead of clearing the server's is_locked while the device is
+        # still effectively locked.
         _prev = _read_lock_state()
         _kill_lock_screen()
-        _win_clear_legalnotice()
-        _win_enable_lock_accounts(_prev.get("disabled_users"))
+        disabled = _prev.get("disabled_users") or []
+        notice_set = bool(_prev.get("legalnotice_set"))
+        if disabled or notice_set:
+            if not _win_is_admin():
+                return ("requires_admin", None,
+                        "Cannot unlock: this device was locked at the administrator level "
+                        "(sign-in accounts were disabled), but the agent is not running with "
+                        "admin rights now, so it cannot re-enable them. Run/reinstall the "
+                        "agent as an administrator, then retry the unlock.")
+            notice_ok = (not notice_set) or _win_clear_legalnotice()
+            failed_users = _win_enable_lock_accounts(disabled) if disabled else []
+            if failed_users or not notice_ok:
+                problems = []
+                if failed_users:
+                    problems.append(f"these accounts are still disabled: {','.join(failed_users)}")
+                if not notice_ok:
+                    problems.append("the sign-in banner could not be cleared")
+                return ("failed", None,
+                        "Could not fully restore access — " + "; ".join(problems) +
+                        ". Retry the unlock with administrator rights.")
         _write_lock_state({"locked": False})
         return ("completed", "Access restored", None)
     except Exception as e:
