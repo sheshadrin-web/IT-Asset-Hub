@@ -77,6 +77,10 @@ function computeMetrics(
   };
 }
 
+// Conditions a location_gm (local custodian) may set. Disposal / recovery
+// states (Scrapped, Lost, Returned, Recovery Pending) stay with Bangalore IT.
+const CUSTODIAN_CONDITION_OPTIONS: AssetCondition[] = ["Good", "Needs Inspection", "Under Repair", "Damaged"];
+
 const conditionTone: Record<string, string> = {
   "Good":             "bg-green-100 text-green-700",
   "Needs Inspection": "bg-amber-100 text-amber-700",
@@ -105,6 +109,7 @@ export default function LocationAssets() {
 
   const isAdmin = canViewAllLocations(currentUser);
   const canApprove = canApproveRequests(currentUser);
+  const isGm = currentUser?.role === "location_gm";
 
   const loadRequests = useCallback(async () => {
     const [s, r] = await Promise.all([fetchShortageRequests(), fetchReturnRequests()]);
@@ -216,6 +221,7 @@ export default function LocationAssets() {
               setSearch={setSearch}
               onBack={() => { setSelected(null); setSearch(""); }}
               canEditCondition={canEditCondition(selected)}
+              editableConditions={isGm ? CUSTODIAN_CONDITION_OPTIONS : ASSET_CONDITION_OPTIONS}
               canRaise={canRaiseRequestsForLocation(currentUser, selected, myAccess)}
               onCondition={handleCondition}
               onReportShortage={() => setShortageOpen(true)}
@@ -240,6 +246,7 @@ export default function LocationAssets() {
             rows={returns.filter(r => locations.includes(r.location))}
             assets={assets}
             canApprove={canApprove}
+            isGm={isGm}
             myAccess={myAccess}
             userName={userName}
             onStatus={async (id, patch) => {
@@ -341,12 +348,12 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
 
 // ─── Location detail ────────────────────────────────────────────────────────
 function LocationDetail({
-  location, assets, metrics, search, setSearch, onBack, canEditCondition, canRaise,
+  location, assets, metrics, search, setSearch, onBack, canEditCondition, editableConditions, canRaise,
   onCondition, onReportShortage, onRaiseReturn, userName,
 }: {
   location: string; assets: Asset[]; metrics: LocationMetrics;
   search: string; setSearch: (s: string) => void; onBack: () => void;
-  canEditCondition: boolean; canRaise: boolean;
+  canEditCondition: boolean; editableConditions: AssetCondition[]; canRaise: boolean;
   onCondition: (a: Asset, c: AssetCondition) => void;
   onReportShortage: () => void; onRaiseReturn: () => void;
   userName: (id: string) => string;
@@ -500,13 +507,13 @@ function LocationDetail({
                   <TableCell>{a.serialNumber || "—"}</TableCell>
                   <TableCell><Badge variant="outline">{a.status}</Badge></TableCell>
                   <TableCell>
-                    {canEditCondition ? (
+                    {canEditCondition && editableConditions.includes(a.condition ?? "Good") ? (
                       <Select value={a.condition ?? "Good"} onValueChange={(v) => onCondition(a, v as AssetCondition)}>
                         <SelectTrigger className="h-8 w-[150px]" data-testid={`select-condition-${a.assetId}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {ASSET_CONDITION_OPTIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                          {editableConditions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     ) : (
@@ -581,8 +588,8 @@ function ShortageTable({ rows, canApprove, userName, onStatus }: {
 }
 
 // ─── Return requests table ──────────────────────────────────────────────────
-function ReturnTable({ rows, assets, canApprove, myAccess, userName, onStatus }: {
-  rows: ReturnRequest[]; assets: Asset[]; canApprove: boolean;
+function ReturnTable({ rows, assets, canApprove, isGm, myAccess, userName, onStatus }: {
+  rows: ReturnRequest[]; assets: Asset[]; canApprove: boolean; isGm: boolean;
   myAccess: UserLocationAccess[]; userName: (id: string) => string;
   onStatus: (id: string, patch: { status?: ReturnStatus; markApproved?: boolean }) => void;
 }) {
@@ -619,10 +626,22 @@ function ReturnTable({ rows, assets, canApprove, myAccess, userName, onStatus }:
                       <SelectTrigger className="h-8 w-[200px] ml-auto" data-testid={`select-return-status-${r.id}`}><SelectValue /></SelectTrigger>
                       <SelectContent>{RETURN_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                     </Select>
-                  ) : canMark(r.location) && r.status !== "Closed" ? (
-                    <Button size="sm" variant="outline" onClick={() => onStatus(r.id, { status: "Received at Bangalore" })} data-testid={`button-mark-received-${r.id}`}>
-                      Mark Received
-                    </Button>
+                  ) : isGm && canMark(r.location) && r.status !== "Closed" ? (
+                    <div className="flex items-center justify-end gap-2">
+                      {(r.status === "Approved" || r.status === "Courier Pending") && (
+                        <Button size="sm" variant="outline" onClick={() => onStatus(r.id, { status: "In Transit" })} data-testid={`button-courier-dispatched-${r.id}`}>
+                          Courier Dispatched
+                        </Button>
+                      )}
+                      {r.status === "In Transit" && (
+                        <Button size="sm" variant="outline" onClick={() => onStatus(r.id, { status: "Received at Bangalore" })} data-testid={`button-mark-received-${r.id}`}>
+                          Mark Received
+                        </Button>
+                      )}
+                      {r.status !== "Approved" && r.status !== "Courier Pending" && r.status !== "In Transit" && (
+                        <span className="text-xs text-muted-foreground">Awaiting Bangalore IT</span>
+                      )}
+                    </div>
                   ) : <span className="text-xs text-muted-foreground">—</span>}
                 </TableCell>
               </TableRow>
