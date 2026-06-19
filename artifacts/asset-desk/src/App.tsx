@@ -37,6 +37,7 @@ const Settings = lazy(() => import("@/pages/Settings"));
 const Integrations = lazy(() => import("@/pages/Integrations"));
 const AssetRecovery = lazy(() => import("@/pages/AssetRecovery"));
 const LocationAssets = lazy(() => import("@/pages/LocationAssets"));
+const LocationUsers = lazy(() => import("@/pages/LocationUsers"));
 const MyAssets = lazy(() => import("@/pages/MyAssets"));
 const ReturnAsset = lazy(() => import("@/pages/ReturnAsset"));
 const BulkImport = lazy(() => import("@/pages/BulkImport"));
@@ -305,6 +306,9 @@ function Router() {
       {/* Location-wise Assets — admins, agents, and location GMs (not end users) */}
       <Route path="/locations">
         <ProtectedRoute component={LocationAssets} allowedRoles={["super_admin", "it_admin", "it_agent", "location_gm"]} />
+      </Route>
+      <Route path="/location-users">
+        <ProtectedRoute component={LocationUsers} allowedRoles={["location_gm"]} />
       </Route>
 
       <Route path="/settings/integrations">
