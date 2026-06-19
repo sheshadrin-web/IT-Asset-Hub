@@ -49,14 +49,16 @@ import subprocess
 import shutil
 import shlex
 import tempfile
+import io
 import uuid
+import base64
 import hashlib
 import threading
 from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.8.1"
+AGENT_VERSION       = "0.9.0"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
@@ -2037,13 +2039,30 @@ def _run_remote_session(session_id: str) -> None:
         return
     from websockets.sync.client import connect as ws_connect
 
-    realtime_url = cfg.get("realtime_url")
-    anon_key     = cfg.get("anon_key")
-    channel      = cfg.get("channel_name")
-    device_id    = cfg.get("asset_id")
-    if not (realtime_url and anon_key and channel):
+    # 3. Obtain a GENUINE Supabase auth token bound to THIS session so we can join
+    #    the PRIVATE per-session channel. Frames only ever flow on an RLS-gated
+    #    private channel — there is no public fallback.
+    rt = _post("/remote-access/realtime-token", {"session_id": session_id})
+    if not rt.get("success") or not rt.get("ready"):
+        print(f"[remote] realtime token not ready: {rt.get('error') or rt.get('status')}", file=sys.stderr)
+        return
+
+    realtime_url = rt.get("realtime_url")
+    anon_key     = rt.get("anon_key")
+    channel      = rt.get("channel_name")
+    device_id    = rt.get("asset_id")
+    access_token = rt.get("access_token")
+    token_exp    = rt.get("expires_at") or 0
+    if not (realtime_url and anon_key and channel and access_token):
         print("[remote] incomplete realtime config from portal", file=sys.stderr)
         return
+
+    # Streaming knobs (env-overridable). Conservative defaults keep bandwidth and
+    # CPU modest for view-only screen sharing.
+    fps       = float(os.environ.get("MILES_REMOTE_FPS", "6"))
+    max_w     = int(os.environ.get("MILES_REMOTE_MAX_W", "1280"))
+    quality   = int(os.environ.get("MILES_REMOTE_QUALITY", "55"))
+    max_bytes = int(os.environ.get("MILES_REMOTE_MAX_BYTES", "90000"))
 
     topic  = f"realtime:{channel}"
     ws_url = f"{realtime_url}?apikey={anon_key}&vsn=1.0.0"
@@ -2052,34 +2071,108 @@ def _run_remote_session(session_id: str) -> None:
         _ref[0] += 1
         return str(_ref[0])
 
-    print(f"[remote] joining channel {channel}", file=sys.stderr)
+    send_lock = threading.Lock()
+    stop_evt  = threading.Event()
+
+    print(f"[remote] joining PRIVATE channel {channel}", file=sys.stderr)
     with ws_connect(ws_url, open_timeout=20, close_timeout=5) as ws:
+        def ws_send(obj) -> bool:
+            # All sends are serialized: the capture thread and the recv loop both
+            # write to the socket.
+            try:
+                with send_lock:
+                    ws.send(json.dumps(obj))
+                return True
+            except Exception:
+                stop_evt.set()
+                return False
+
+        def send_broadcast(event: str, payload: dict) -> bool:
+            return ws_send({
+                "topic":   topic,
+                "event":   "broadcast",
+                "payload": {"type": "broadcast", "event": event, "payload": payload},
+                "ref":     next_ref(),
+            })
+
         join_ref = next_ref()
-        # Match supabase-js: topic is `realtime:<channel>`, broadcast self=false
-        # so we never receive our own pong, public channel (no RLS in the spike).
-        ws.send(json.dumps({
+        # PRIVATE channel: Realtime authorizes the join via access_token (our
+        # session-bound agent identity) against the realtime.messages RLS policies.
+        ws_send({
             "topic":   topic,
             "event":   "phx_join",
-            "payload": {"config": {"broadcast": {"self": False, "ack": False},
-                                    "presence": {"key": ""},
-                                    "private": False}},
+            "payload": {
+                "config": {"broadcast": {"self": False, "ack": False},
+                           "presence": {"key": ""},
+                           "private": True},
+                "access_token": access_token,
+            },
             "ref":      join_ref,
             "join_ref": join_ref,
-        }))
+        })
 
-        last_hb  = time.monotonic()
-        deadline = time.monotonic() + 600  # hard 10-min cap for the spike
-        while time.monotonic() < deadline:
+        # 4. Capture + stream frames in a dedicated thread so recv() stays
+        #    responsive to ping/end. Capture deps are imported lazily in-thread.
+        def capture_loop() -> None:
+            grab = _make_screen_grabber()
+            if grab is None:
+                print("[remote] screen capture unavailable; streaming disabled", file=sys.stderr)
+                return
+            seq = 0
+            interval = (1.0 / fps) if fps > 0 else 0.16
+            while not stop_evt.is_set():
+                t0 = time.monotonic()
+                try:
+                    w, h, jpeg = grab(max_w, quality, max_bytes)
+                except Exception as e:
+                    print(f"[remote] capture error: {e}", file=sys.stderr)
+                    stop_evt.wait(1.0)
+                    continue
+                if not send_broadcast("frame", {
+                    "seq": seq, "ts": int(time.time() * 1000),
+                    "w": w, "h": h, "fmt": "jpeg",
+                    "data": base64.b64encode(jpeg).decode("ascii"),
+                }):
+                    break
+                seq += 1
+                dt = time.monotonic() - t0
+                if interval - dt > 0:
+                    stop_evt.wait(interval - dt)
+
+        cap_thread = threading.Thread(target=capture_loop, name="remote-capture", daemon=True)
+        cap_thread.start()
+
+        last_hb    = time.monotonic()
+        last_check = time.monotonic()
+        deadline   = time.monotonic() + 3600  # safety cap (1 h)
+        while time.monotonic() < deadline and not stop_evt.is_set():
             now = time.monotonic()
             if now - last_hb >= 25:  # Phoenix heartbeat keeps the socket alive
-                try:
-                    ws.send(json.dumps({"topic": "phoenix", "event": "heartbeat",
-                                         "payload": {}, "ref": next_ref()}))
-                except Exception:
+                if not ws_send({"topic": "phoenix", "event": "heartbeat",
+                                "payload": {}, "ref": next_ref()}):
                     break
                 last_hb = now
+
+            # Periodic authority re-check (defense in depth on top of the RLS gate):
+            # stop the instant the portal ends / the session expires, and refresh
+            # the realtime token before it lapses so long sessions stay authorized.
+            if now - last_check >= 5:
+                last_check = now
+                st = _get(f"/remote-access/session?session_id={session_id}")
+                if not st.get("ready"):
+                    print(f"[remote] session no longer active ({st.get('status') or st.get('error')}); stopping", file=sys.stderr)
+                    break
+                if token_exp and time.time() > (token_exp - 120):
+                    nr = _post("/remote-access/realtime-token", {"session_id": session_id})
+                    if nr.get("success") and nr.get("access_token"):
+                        access_token = nr["access_token"]
+                        token_exp    = nr.get("expires_at") or token_exp
+                        ws_send({"topic": topic, "event": "access_token",
+                                 "payload": {"access_token": access_token},
+                                 "ref": next_ref()})
+
             try:
-                raw = ws.recv(timeout=5)
+                raw = ws.recv(timeout=2)
             except TimeoutError:
                 continue
             except Exception:
@@ -2088,35 +2181,101 @@ def _run_remote_session(session_id: str) -> None:
                 msg = json.loads(raw)
             except Exception:
                 continue
-            if msg.get("event") != "broadcast":
+
+            mevt = msg.get("event")
+            if mevt == "phx_reply" and msg.get("ref") == join_ref:
+                status = (msg.get("payload") or {}).get("status")
+                if status != "ok":
+                    print(f"[remote] private channel join refused: {msg.get('payload')}", file=sys.stderr)
+                    break
+                print("[remote] private channel joined; streaming frames", file=sys.stderr)
+                continue
+            if mevt != "broadcast":
                 continue
             inner = msg.get("payload") or {}
             evt   = inner.get("event")
             if evt == "ping":
                 p = inner.get("payload") or {}
                 # Echo the nonce + ts so the portal can correlate and measure RTT.
-                ws.send(json.dumps({
-                    "topic":   topic,
-                    "event":   "broadcast",
-                    "payload": {
-                        "type":  "broadcast",
-                        "event": "pong",
-                        "payload": {
-                            "nonce":     p.get("nonce"),
-                            "ts":        p.get("ts"),
-                            "agent":     socket.gethostname(),
-                            "version":   AGENT_VERSION,
-                            "user":      _current_user(),
-                            "device_id": device_id,
-                        },
-                    },
-                    "ref": next_ref(),
-                }))
-                print(f"[remote] ping->pong nonce={p.get('nonce')}", file=sys.stderr)
+                send_broadcast("pong", {
+                    "nonce":     p.get("nonce"),
+                    "ts":        p.get("ts"),
+                    "agent":     socket.gethostname(),
+                    "version":   AGENT_VERSION,
+                    "user":      _current_user(),
+                    "device_id": device_id,
+                })
             elif evt == "end":
                 print("[remote] portal ended the session", file=sys.stderr)
                 break
+
+        stop_evt.set()
+        cap_thread.join(timeout=3)
     print(f"[remote] session {session_id} transport closed", file=sys.stderr)
+
+
+def _ensure_capture_deps() -> bool:
+    """True if mss + Pillow import. Best-effort one-time pip install (quiet,
+    windowless) for agents that predate the screen-capture feature."""
+    try:
+        import mss        # noqa: F401
+        from PIL import Image  # noqa: F401
+        return True
+    except Exception:
+        pass
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+             "--quiet", "mss", "Pillow"],
+            check=True, timeout=180,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import mss        # noqa: F401
+        from PIL import Image  # noqa: F401
+        return True
+    except Exception as e:
+        print(f"[remote] capture deps unavailable: {e}", file=sys.stderr)
+        return False
+
+
+def _make_screen_grabber():
+    """Return a callable (max_w, quality, max_bytes) -> (w, h, jpeg_bytes) backed
+    by mss + Pillow, or None if the capture stack is unavailable. The mss instance
+    is created in the CALLING thread because mss is not safe to share across
+    threads."""
+    if not _ensure_capture_deps():
+        return None
+    import mss              # type: ignore
+    from PIL import Image   # type: ignore
+
+    sct = mss.mss()
+    monitors = sct.monitors
+    # monitors[1] = primary physical monitor; monitors[0] = full virtual desktop.
+    mon = monitors[1] if len(monitors) > 1 else monitors[0]
+
+    def grab(max_w: int, quality: int, max_bytes: int):
+        shot = sct.grab(mon)
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        if img.width > max_w:
+            ratio = max_w / float(img.width)
+            img = img.resize((max_w, max(1, int(img.height * ratio))))
+        # Adaptive JPEG: step quality down until under the byte ceiling so a busy
+        # screen cannot blow up bandwidth or overrun the Realtime payload cap.
+        q = quality
+        data = b""
+        for _ in range(4):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=q, optimize=False)
+            data = buf.getvalue()
+            if len(data) <= max_bytes or q <= 25:
+                break
+            q = max(25, q - 12)
+        return img.width, img.height, data
+
+    return grab
 
 
 def poll_remote_access() -> None:
