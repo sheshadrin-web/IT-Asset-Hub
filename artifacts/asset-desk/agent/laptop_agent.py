@@ -58,7 +58,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.1"
+AGENT_VERSION       = "0.9.2"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1078,6 +1078,233 @@ def _is_root() -> bool:
         return False
 
 
+# ── Branded full-screen lock kiosk + Windows account hardening ──────────────
+# On a hard-locked Windows device the re-asserted workstation lock is dismissed
+# the moment the user types their password, so we also paint an unmissable,
+# branded "DEVICE ACCESS RESTRICTED" screen carrying the device's Asset ID and
+# the IT message. It runs as its OWN process (see the __lockscreen__ subcommand)
+# so the agent loop keeps polling and can tear the kiosk down the instant an
+# unlock is confirmed. Best-effort: if tkinter is unavailable the workstation /
+# account lock still enforces — we just cannot draw the overlay.
+LOCK_SCREEN_TITLE   = "DEVICE ACCESS RESTRICTED"
+LOCK_SCREEN_DEFAULT = "This device has been locked by the IT Asset Management Team."
+LOCK_SCREEN_BRAND   = "Miles Education"
+LOCK_SCREEN_BG      = "#0a1a3f"   # deep brand blue
+LOCK_SCREEN_FG      = "#ffffff"
+LOCK_SCREEN_ACCENT  = "#9db8ff"
+WIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
+# Standard end-user accounts disabled on a Windows hard lock. The account the
+# agent itself runs as is NEVER disabled (break-glass + keeps enforcement alive).
+WIN_LOCK_USERS      = ["Miles", "Miles-IT-Support"]
+
+
+def _win_is_admin() -> bool:
+    if not IS_WIN:
+        return False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _win_account_exists(user: str) -> bool:
+    try:
+        r = subprocess.run(["net", "user", user], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _win_disable_lock_accounts() -> list[str]:
+    """Disable the standard end-user accounts so their password is rejected at the
+    Windows sign-in screen. NEVER disables the account the agent itself runs as
+    (our break-glass and the only thing keeping enforcement + unlock alive) nor an
+    account that does not exist. Returns the accounts actually disabled."""
+    disabled: list[str] = []
+    me = (os.environ.get("USERNAME") or "").strip().lower()
+    for u in WIN_LOCK_USERS:
+        if u.strip().lower() == me:
+            continue
+        if not _win_account_exists(u):
+            continue
+        try:
+            r = subprocess.run(["net", "user", u, "/active:no"], capture_output=True,
+                               text=True, timeout=15, creationflags=_NO_WINDOW)
+            if r.returncode == 0:
+                disabled.append(u)
+        except Exception:
+            pass
+    return disabled
+
+
+def _win_enable_lock_accounts(users: list[str] | None = None) -> None:
+    for u in (users or WIN_LOCK_USERS):
+        if _win_account_exists(u):
+            try:
+                subprocess.run(["net", "user", u, "/active:yes"], capture_output=True,
+                               text=True, timeout=15, creationflags=_NO_WINDOW)
+            except Exception:
+                pass
+
+
+_WIN_POLICY_KEY = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+
+
+def _win_set_legalnotice(caption: str, text: str) -> None:
+    for v, d in (("legalnoticecaption", caption), ("legalnoticetext", text)):
+        try:
+            subprocess.run(["reg", "add", _WIN_POLICY_KEY, "/v", v, "/t", "REG_SZ",
+                            "/d", d, "/f"], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        except Exception:
+            pass
+
+
+def _win_clear_legalnotice() -> None:
+    for v in ("legalnoticecaption", "legalnoticetext"):
+        try:
+            subprocess.run(["reg", "add", _WIN_POLICY_KEY, "/v", v, "/t", "REG_SZ",
+                            "/d", "", "/f"], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        except Exception:
+            pass
+
+
+def _lock_screen_running() -> bool:
+    pid = _read_lock_state().get("screen_pid")
+    if not pid:
+        return False
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}"],
+                             capture_output=True, text=True, timeout=10,
+                             creationflags=_NO_WINDOW).stdout
+        return str(int(pid)) in out
+    except Exception:
+        return False
+
+
+def _spawn_lock_screen() -> None:
+    """Launch the branded kiosk as a detached, windowless process (Windows only)."""
+    if not IS_WIN:
+        return
+    try:
+        if _lock_screen_running():
+            return
+        if getattr(sys, "frozen", False):
+            args = [os.path.abspath(sys.argv[0]), "__lockscreen__"]
+        else:
+            py_dir = os.path.dirname(os.path.abspath(sys.executable))
+            pyw = os.path.join(py_dir, "pythonw.exe")
+            exe = pyw if os.path.exists(pyw) else os.path.abspath(sys.executable)
+            args = [exe, os.path.abspath(sys.argv[0]), "__lockscreen__"]
+        p = subprocess.Popen(args, creationflags=0x08000000 | 0x00000008, close_fds=True)
+        st = _read_lock_state()
+        st["screen_pid"] = p.pid
+        _write_lock_state(st)
+    except Exception:
+        pass
+
+
+def _kill_lock_screen() -> None:
+    if not IS_WIN:
+        return
+    pid = _read_lock_state().get("screen_pid")
+    if pid:
+        try:
+            subprocess.run(["taskkill", "/PID", str(int(pid)), "/F"], capture_output=True,
+                           text=True, timeout=10, creationflags=_NO_WINDOW)
+        except Exception:
+            pass
+    try:
+        st = _read_lock_state()
+        st.pop("screen_pid", None)
+        _write_lock_state(st)
+    except Exception:
+        pass
+
+
+def _lock_screen_main() -> int:
+    """Render the branded full-screen lock kiosk. Reads the Asset ID + message
+    from the lock state, refuses to close/minimise, stays on top, and self-exits
+    the moment the device is unlocked. Never raises into the caller."""
+    try:
+        import tkinter as tk
+    except Exception:
+        return 0
+    st = _read_lock_state()
+    asset_tag = str(st.get("asset_tag") or "").strip()
+    message = (str(st.get("lock_message") or LOCK_SCREEN_DEFAULT).strip() or LOCK_SCREEN_DEFAULT)
+    try:
+        root = tk.Tk()
+    except Exception:
+        return 0
+    root.title(LOCK_SCREEN_TITLE)
+    root.configure(bg=LOCK_SCREEN_BG)
+    try:
+        root.attributes("-fullscreen", True)
+    except Exception:
+        try:
+            root.overrideredirect(True)
+            root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+        except Exception:
+            pass
+    try:
+        root.attributes("-topmost", True)
+    except Exception:
+        pass
+    root.protocol("WM_DELETE_WINDOW", lambda: None)
+    try:
+        root.config(cursor="none")
+    except Exception:
+        pass
+
+    wrap = tk.Frame(root, bg=LOCK_SCREEN_BG)
+    wrap.place(relx=0.5, rely=0.5, anchor="center")
+    tk.Label(wrap, text=LOCK_SCREEN_BRAND, fg=LOCK_SCREEN_ACCENT, bg=LOCK_SCREEN_BG,
+             font=("Segoe UI", 26, "bold")).pack(pady=(0, 24))
+    tk.Label(wrap, text="\U0001F512", fg=LOCK_SCREEN_FG, bg=LOCK_SCREEN_BG,
+             font=("Segoe UI", 64)).pack(pady=(0, 16))
+    tk.Label(wrap, text=LOCK_SCREEN_TITLE, fg=LOCK_SCREEN_FG, bg=LOCK_SCREEN_BG,
+             font=("Segoe UI", 40, "bold")).pack(pady=(0, 18))
+    tk.Label(wrap, text=message, fg=LOCK_SCREEN_FG, bg=LOCK_SCREEN_BG,
+             font=("Segoe UI", 18), wraplength=900, justify="center").pack(pady=(0, 22))
+    if asset_tag:
+        tk.Label(wrap, text=f"Asset ID: {asset_tag}", fg=LOCK_SCREEN_ACCENT,
+                 bg=LOCK_SCREEN_BG, font=("Segoe UI", 20, "bold")).pack(pady=(0, 10))
+    tk.Label(wrap, text="Please contact the IT Asset Management Team to restore access.",
+             fg=LOCK_SCREEN_ACCENT, bg=LOCK_SCREEN_BG, font=("Segoe UI", 14)).pack()
+
+    for seq in ("<Escape>", "<Alt-F4>", "<Control-w>", "<Control-W>"):
+        try:
+            root.bind(seq, lambda e: "break")
+        except Exception:
+            pass
+
+    def _tick():
+        if not _read_local_lock():
+            try:
+                root.destroy()
+            except Exception:
+                pass
+            return
+        try:
+            root.attributes("-topmost", True)
+            root.lift()
+            root.focus_force()
+        except Exception:
+            pass
+        root.after(1000, _tick)
+
+    root.after(800, _tick)
+    try:
+        root.mainloop()
+    except Exception:
+        pass
+    return 0
+
+
 # ── macOS hard-lock helpers ───────────────────────────────────────────────────
 # The login-window banner shown to a locked-out user. Set via
 # `defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText`.
@@ -1359,17 +1586,45 @@ def _win_lock_now() -> tuple[bool, str | None]:
         return (False, f"LockWorkStation unavailable ({e})")
 
 
-def _apply_hard_lock() -> tuple[str, str | None, str | None]:
+def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str | None]:
     """Lock the device at the OS level. Returns (status, result, error) where
     status is 'completed' (truly locked), 'failed', or 'requires_admin'.
-    On Linux the locked username is persisted so unlock can target it later."""
+    On Linux the locked username is persisted so unlock can target it later.
+    `payload` (the queued command's payload) may carry the Asset ID + message so
+    the branded lock screen / login banner can show them, even offline."""
+    payload = payload or {}
+    _prev = _read_lock_state()
+    asset_tag = str(payload.get("asset_tag") or _prev.get("asset_tag") or "").strip()
+    lock_msg = (str(payload.get("message") or _prev.get("lock_message") or LOCK_SCREEN_DEFAULT).strip()
+                or LOCK_SCREEN_DEFAULT)
     try:
         if IS_WIN:
+            state = {"locked": True, "platform": "windows",
+                     "asset_tag": asset_tag, "lock_message": lock_msg}
+            if _prev.get("screen_pid"):
+                state["screen_pid"] = _prev["screen_pid"]
             ok, err = _win_lock_now()
-            if ok:
-                _write_lock_state({"locked": True, "platform": "windows"})
-                return ("completed", "Workstation locked", None)
-            return ("failed", None, err)
+            admin = _win_is_admin()
+            disabled: list[str] = []
+            if admin:
+                _win_set_legalnotice(WIN_LOCK_CAPTION, lock_msg)
+                disabled = _win_disable_lock_accounts()
+                if disabled:
+                    state["disabled_users"] = disabled
+            _write_lock_state(state)
+            _spawn_lock_screen()
+            users_suffix = f"|USERS={','.join(disabled)}" if disabled else ""
+            if ok or disabled:
+                bits = ["Workstation locked" if ok else "Workstation lock call failed",
+                        "branded lock screen shown"]
+                if disabled:
+                    bits.append(f"sign-in disabled for {','.join(disabled)}")
+                elif admin:
+                    bits.append("no standard lock accounts present to disable")
+                else:
+                    bits.append("running without admin — standard accounts not disabled")
+                return ("completed", "; ".join(bits) + users_suffix, None)
+            return ("failed", None, err or "Could not lock the workstation")
 
         if IS_MAC:
             # TRUE login-window lock: bar the account from logging in and drop the
@@ -1390,8 +1645,14 @@ def _apply_hard_lock() -> tuple[str, str | None, str | None]:
                 return ("failed", None,
                         "Could not determine which macOS account to lock (no user at "
                         "the console and the account is ambiguous).")
-            # 1) Show the login-window banner (verified by read-back).
-            banner_ok = _mac_set_login_message(MAC_LOCK_MESSAGE)
+            # 1) Show the login-window banner (verified by read-back). Build a
+            # branded banner that carries the Asset ID so the locked-out user sees
+            # exactly which device and who to contact.
+            _banner = f"{LOCK_SCREEN_TITLE}\n{lock_msg}"
+            if asset_tag:
+                _banner += f"\nAsset ID: {asset_tag}"
+            _banner += f"\nContact the IT Asset Management Team to restore access. — {LOCK_SCREEN_BRAND}"
+            banner_ok = _mac_set_login_message(_banner)
             # 2) Disable the account so the password is rejected at the login window.
             ok, detail = _mac_disable_account(user)
             if not ok:
@@ -1410,7 +1671,8 @@ def _apply_hard_lock() -> tuple[str, str | None, str | None]:
                         f"Account '{user}' was disabled but the active session could "
                         f"not be ended, so the user can still use the Mac. The lock was "
                         f"rolled back — please retry.")
-            _write_lock_state({"locked": True, "platform": "macos", "user": user})
+            _write_lock_state({"locked": True, "platform": "macos", "user": user,
+                               "asset_tag": asset_tag, "lock_message": lock_msg})
             # The password rejection (account disable) is the actual lock; the banner
             # is informational. Report success honestly but flag if the banner could
             # not be confirmed so IT knows the message may not be visible.
@@ -1468,7 +1730,8 @@ def _apply_hard_lock() -> tuple[str, str | None, str | None]:
                         f"Account '{user}' could not be fully locked: the active session "
                         f"could not be terminated, so the user can still use the device. "
                         f"The partial lock was rolled back. Please retry.")
-            _write_lock_state({"locked": True, "platform": "linux", "user": user})
+            _write_lock_state({"locked": True, "platform": "linux", "user": user,
+                               "asset_tag": asset_tag, "lock_message": lock_msg})
             return ("completed", f"Account '{user}' locked and session terminated", None)
 
         return ("failed", None, f"unsupported platform: {sys.platform}")
@@ -1520,7 +1783,12 @@ def _release_lock() -> tuple[str, str | None, str | None]:
                 return ("failed", None, f"Failed to unlock account '{user}': {detail}")
             _write_lock_state({"locked": False})
             return ("completed", f"Account '{user}' unlocked ({detail})", None)
-        # Windows workstation lock leaves nothing persistent to undo.
+        # Windows: tear down the branded kiosk, re-enable any accounts we disabled,
+        # and clear the sign-in banner. Re-enabling is best-effort and idempotent.
+        _prev = _read_lock_state()
+        _kill_lock_screen()
+        _win_clear_legalnotice()
+        _win_enable_lock_accounts(_prev.get("disabled_users"))
         _write_lock_state({"locked": False})
         return ("completed", "Access restored", None)
     except Exception as e:
@@ -1556,6 +1824,12 @@ def reassert_lock() -> None:
             if not _read_local_lock():
                 return
             _win_lock_now()
+            # Keep the standard accounts disabled and the branded kiosk on screen
+            # in case either was tampered with since the last cycle.
+            if _win_is_admin():
+                _win_disable_lock_accounts()
+            if not _lock_screen_running():
+                _spawn_lock_screen()
     except Exception:
         pass
 
@@ -1671,7 +1945,7 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         return ("failed", None, err)
     if ctype == "lock_screen":
         with _lock_mutex:
-            return _apply_hard_lock()
+            return _apply_hard_lock(cmd.get("payload") or {})
     if ctype == "unlock":
         with _lock_mutex:
             return _release_lock()
@@ -3472,6 +3746,7 @@ def uninstall_service() -> int:
 
 def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    if cmd == "__lockscreen__": return _lock_screen_main()
     if cmd == "register": return register()
     if cmd == "sync":
         print(json.dumps(_post("/sync", {"payload": collect_system_info()}), indent=2)); return 0

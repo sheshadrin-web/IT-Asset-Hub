@@ -651,6 +651,9 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     {device.locked_at ? <> since {new Date(device.locked_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
                     {" "}Files are preserved. Unlock below to restore access.
                   </p>
+                  {device.lock_reason ? (
+                    <p className="text-[11px] text-red-700 mt-0.5">Reason: {device.lock_reason}</p>
+                  ) : null}
                 </div>
               </div>
             )}

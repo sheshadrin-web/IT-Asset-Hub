@@ -1046,7 +1046,7 @@ export default function Users() {
       for (const a of (userAssets ?? []) as { id: string }[]) {
         const { data: lr } = await supabase.rpc("lock_device", {
           p_asset_id: a.id,
-          p_reason: "Employee offboarded",
+          p_reason: "HR Exit — employee offboarded",
         });
         if (lr?.success) lockedCount++;
       }
