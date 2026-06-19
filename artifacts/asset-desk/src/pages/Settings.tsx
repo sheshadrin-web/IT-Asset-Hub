@@ -80,14 +80,13 @@ const ADMIN_ROLES = ["super_admin", "it_admin", "hr_admin"];
 
 type TabId =
   | "general" | "notifications" | "security" | "integrations"
-  | "users" | "access" | "automation" | "audit" | "configuration";
+  | "access" | "automation" | "audit" | "configuration";
 
 const TABS: { id: TabId; label: string; icon: typeof Monitor; superAdminOnly?: boolean }[] = [
   { id: "general",       label: "General",        icon: Monitor },
   { id: "notifications", label: "Notifications",  icon: Bell },
   { id: "security",      label: "Security",       icon: Shield },
   { id: "integrations",  label: "Integrations",   icon: Plug },
-  { id: "users",         label: "Users & Roles",  icon: Users },
   { id: "access",        label: "Access Control", icon: ShieldCheck, superAdminOnly: true },
   { id: "automation",    label: "Automation",     icon: Workflow },
   { id: "audit",         label: "Audit Logs",     icon: ScrollText },
@@ -527,28 +526,6 @@ export default function Settings() {
                 <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 transition-transform group-hover:translate-x-0.5" />
               </div>
             </Link>
-          )}
-
-          {activeTab === "users" && (
-            <SettingsCard icon={Users} title="Users & Roles" description="Directory overview and management">
-              <div className="space-y-5">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-xl border border-card-border/70 bg-muted/30 px-5 py-4">
-                    <p className="text-sm text-muted-foreground">Total Users</p>
-                    <p className="text-3xl font-bold text-foreground mt-1" data-testid="text-total-users-tab">{totalUsers ?? "—"}</p>
-                  </div>
-                  <div className="rounded-xl border border-card-border/70 bg-muted/30 px-5 py-4">
-                    <p className="text-sm text-muted-foreground">Admin Users</p>
-                    <p className="text-3xl font-bold text-foreground mt-1" data-testid="text-admin-users-tab">{adminUsers ?? "—"}</p>
-                  </div>
-                </div>
-                <Link href="/users">
-                  <Button variant="outline" data-testid="button-manage-users-tab">
-                    Manage Users &amp; Roles <ArrowRight className="h-4 w-4 ml-2" />
-                  </Button>
-                </Link>
-              </div>
-            </SettingsCard>
           )}
 
           {activeTab === "access" && isSuperAdmin && <AccessControlPanel canEdit={isSuperAdmin} />}
