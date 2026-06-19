@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   MapPin, ArrowLeft, Package, CheckCircle2, Wrench, AlertTriangle,
-  RotateCcw, ShieldAlert, Plus, Search, RefreshCw,
+  RotateCcw, ShieldAlert, Plus, Search, RefreshCw, Download,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
@@ -9,6 +9,7 @@ import { useUsers } from "@/context/UsersContext";
 import { Asset, ASSET_CONDITION_OPTIONS, AssetCondition } from "@/data/mockData";
 import { LOCATION_OPTIONS } from "@/lib/locationOptions";
 import { responsibleFor } from "@/lib/locationResponsibles";
+import { exportCsv } from "@/lib/exportCsv";
 import {
   canViewAllLocations, canApproveRequests, canRaiseRequestsForLocation,
   visibleLocations,
@@ -350,16 +351,59 @@ function LocationDetail({
   onReportShortage: () => void; onRaiseReturn: () => void;
   userName: (id: string) => string;
 }) {
+  const [fType, setFType] = useState("all");
+  const [fStatus, setFStatus] = useState("all");
+  const [fCondition, setFCondition] = useState("all");
+
+  const typeOptions = useMemo(
+    () => Array.from(new Set(assets.map(a => a.assetType).filter(Boolean))).sort(),
+    [assets],
+  );
+  const statusOptions = useMemo(
+    () => Array.from(new Set(assets.map(a => a.status).filter(Boolean))).sort(),
+    [assets],
+  );
+  const conditionOptions = useMemo(
+    () => Array.from(new Set(assets.map(a => a.condition ?? "Good").filter(Boolean))).sort(),
+    [assets],
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return assets;
-    return assets.filter(a =>
-      a.assetId.toLowerCase().includes(q) ||
-      a.assetType.toLowerCase().includes(q) ||
-      `${a.brand} ${a.model}`.toLowerCase().includes(q) ||
-      (a.serialNumber ?? "").toLowerCase().includes(q) ||
-      (a.assignedTo ?? a.assignedEmail ?? "").toLowerCase().includes(q));
-  }, [assets, search]);
+    return assets.filter(a => {
+      if (fType !== "all" && a.assetType !== fType) return false;
+      if (fStatus !== "all" && a.status !== fStatus) return false;
+      if (fCondition !== "all" && (a.condition ?? "Good") !== fCondition) return false;
+      if (!q) return true;
+      return (
+        a.assetId.toLowerCase().includes(q) ||
+        a.assetType.toLowerCase().includes(q) ||
+        `${a.brand} ${a.model}`.toLowerCase().includes(q) ||
+        (a.serialNumber ?? "").toLowerCase().includes(q) ||
+        (a.assignedTo ?? a.assignedEmail ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [assets, search, fType, fStatus, fCondition]);
+
+  const handleExport = () => {
+    exportCsv(
+      `${location}-assets-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Asset ID", "Type", "Brand", "Model", "Serial No", "Status", "Condition", "Assigned To", "Responsible", "Location", "Last Updated"],
+      filtered.map(a => [
+        a.assetId,
+        a.assetType,
+        a.brand,
+        a.model,
+        a.serialNumber ?? "",
+        a.status,
+        a.condition ?? "Good",
+        a.assignedTo ?? a.assignedEmail ?? "",
+        responsibleFor(a.location),
+        a.location || UNASSIGNED,
+        fmtDate(a.conditionUpdatedAt ?? a.updatedAt),
+      ]),
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -396,9 +440,36 @@ function LocationDetail({
         <StatTile icon={RotateCcw}    label="Returns"    value={metrics.returnPending} />
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Search assets…" value={search} onChange={e => setSearch(e.target.value)} data-testid="input-search-location-assets" />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input className="pl-9" placeholder="Search assets…" value={search} onChange={e => setSearch(e.target.value)} data-testid="input-search-location-assets" />
+        </div>
+        <Select value={fType} onValueChange={setFType}>
+          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-type"><SelectValue placeholder="Type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            {typeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fStatus} onValueChange={setFStatus}>
+          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-status"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {statusOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fCondition} onValueChange={setFCondition}>
+          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-condition"><SelectValue placeholder="Condition" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Conditions</SelectItem>
+            {conditionOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground">{filtered.length} of {assets.length}</span>
+        <Button variant="outline" size="sm" className="ml-auto" onClick={handleExport} disabled={filtered.length === 0} data-testid="button-export-location-assets">
+          <Download className="h-4 w-4 mr-1" /> Export CSV
+        </Button>
       </div>
 
       <Card>
