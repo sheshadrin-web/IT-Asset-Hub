@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
+import AssetsByLocationCard from "@/components/AssetsByLocationCard";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
 import { cn } from "@/lib/utils";
@@ -352,6 +353,9 @@ export default function Dashboard() {
           <StatCard key={card.label} {...card} />
         ))}
       </div>
+
+      {/* Assets by location */}
+      <AssetsByLocationCard />
 
       {/* Assets by type */}
       <Card>
