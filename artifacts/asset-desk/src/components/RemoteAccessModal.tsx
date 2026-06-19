@@ -50,8 +50,10 @@ const STATUS_META: Record<SessionStatus, { label: string; cls: string; icon: Rea
   failed:    { label: "Failed",              cls: "text-red-700    bg-red-50    border-red-200",      icon: XCircle      },
 };
 
-// Statuses where we should keep polling for an update from the agent
-const PENDING_STATUSES: SessionStatus[] = ["requested", "approved"];
+// Statuses we keep polling on while waiting for the end user to respond.
+// 'approved' is NOT pending: the user has responded, so polling stops and the
+// admin is shown the "Open Live Viewer" action (which flips approved -> active).
+const PENDING_STATUSES: SessionStatus[] = ["requested"];
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -169,6 +171,8 @@ export default function RemoteAccessModal({
 
       if (updated.status === "denied") {
         toast({ title: "Remote access denied", description: "The end user declined the request.", variant: "destructive" });
+      } else if (updated.status === "approved") {
+        toast({ title: "Approved by the end user", description: "Click Open Live Viewer to connect to the screen." });
       } else if (updated.status === "active") {
         toast({ title: "Remote access approved", description: "The session is now active." });
       }
@@ -483,7 +487,10 @@ export default function RemoteAccessModal({
               )}
 
               {activeSession.status === "approved" && (
-                <p className="text-xs">Approved by the end user. Connecting…</p>
+                <p className="text-xs">
+                  Approved by the end user. Click <strong>Open Live Viewer</strong> to connect
+                  to the screen and take mouse / keyboard control.
+                </p>
               )}
 
               {activeSession.status === "denied" && (
@@ -510,7 +517,7 @@ export default function RemoteAccessModal({
 
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { stopPolling(); onClose(); }}>Close</Button>
-              {activeSession.status === "active" && (
+              {(activeSession.status === "approved" || activeSession.status === "active") && (
                 <Button
                   type="button"
                   onClick={() => window.open(`${import.meta.env.BASE_URL}remote/${activeSession.id}`, "_blank", "noopener")}
