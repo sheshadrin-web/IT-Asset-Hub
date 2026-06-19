@@ -58,9 +58,15 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.0"
+AGENT_VERSION       = "0.9.1"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
+# Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
+# self-update works even when the install-time MILES_AGENT_URL env var is missing
+# from the service context (e.g. a root/SYSTEM service that did not inherit a
+# user-scope env var). Without a working default the update check 404s silently
+# and the device stays pinned to whatever version it was installed with.
+DEFAULT_AGENT_URL   = "https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py"
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
 # Self-update: check once every 24 h. Set to 0 to disable.
 SELF_UPDATE_INTERVAL_SEC = int(os.environ.get("MILES_AGENT_UPDATE_INTERVAL", "86400"))
@@ -210,20 +216,19 @@ def _agent_script_url() -> str:
     """Return the URL where the latest laptop_agent.py is served.
 
     install.ps1 / install.sh saves MILES_AGENT_URL as a user-level env var
-    during enrollment — that's the canonical source.  We fall back to deriving
-    a URL from MILES_AGENT_API_BASE so the function always returns something
-    sensible even if the var was accidentally cleared.
+    during enrollment — that's the preferred source (lets a differently-hosted
+    portal override the default). When it is empty we fall back to the hardcoded
+    DEFAULT_AGENT_URL so the updater always has a reachable source.
     """
     url = os.environ.get("MILES_AGENT_URL", "").strip()
     if url:
         return url
-    # Derive from API base: strip the Supabase edge-function suffix and append
-    # the Render-hosted asset path.  Example:
-    #   API_BASE = "https://abc.supabase.co/functions/v1/agent-api"
-    # This fallback may not always work (it depends on the portal hosting layout)
-    # but it is better than returning nothing.
-    base = API_BASE.split("/functions/")[0]  # https://abc.supabase.co
-    return base + "/agent/laptop_agent.py"
+    # No env var (common when a root/SYSTEM service does not inherit a user-scope
+    # var). Fall back to the hardcoded portal URL so self-update ALWAYS has a
+    # reachable source. The old behaviour derived a URL from the Supabase API base
+    # (https://<ref>.supabase.co/agent/laptop_agent.py) — a path Supabase does not
+    # serve, so every update 404'd silently and the device never upgraded.
+    return DEFAULT_AGENT_URL
 
 
 def _parse_version(src: str) -> tuple[int, ...]:
@@ -1651,9 +1656,11 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     if ctype == "update_agent":
         # Force an immediate self-update check regardless of the daily timer.
         # If a newer version is on the server, the agent replaces itself and
-        # restarts (os.execv) — this return is only reached when already current.
-        _self_update(force=True)
-        return ("completed", f"agent is already up to date (v{AGENT_VERSION})", None)
+        # restarts (os.execv) — this return is only reached when NO update was
+        # applied. Report the REAL reason so a stuck device is diagnosable from
+        # the portal (e.g. "download failed: HTTP 404", "no agent URL configured").
+        _updated, detail = _self_update(force=True)
+        return ("completed", f"update check (v{AGENT_VERSION}): {detail}", None)
     if ctype == "update_wallpaper":
         # Always pull the current active wallpaper from the portal (force re-apply)
         status, err = apply_active_wallpaper(force=True)
