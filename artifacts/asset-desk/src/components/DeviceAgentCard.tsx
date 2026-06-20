@@ -51,7 +51,7 @@ interface AgentToken {
 interface DeviceCommand {
   id:                string;
   command_type:      string;
-  command_payload:   { reason?: string | null } | null;
+  command_payload:   { reason?: string | null; asset_tag?: string | null } | null;
   status:            "pending" | "running" | "completed" | "failed" | "cancelled" | "requires_admin";
   requested_at:      string | null;
   executed_at:       string | null;
@@ -525,6 +525,20 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const latestLockCmd = commands.find(
     (c) => c.command_type === "lock_screen" || c.command_type === "unlock",
   );
+
+  // Derive "Locked By" and "Last Confirmation" from the command history.
+  // The most recently completed lock_screen command tells us who initiated
+  // the lock and when the agent confirmed it. Falls back to managed_devices
+  // timestamps when no matching command is found (e.g. commands truncated).
+  const latestLockSuccess = commands.find(
+    (c) => c.command_type === "lock_screen" && c.status === "completed",
+  );
+  const lockedByName: string | null = latestLockSuccess?.requested_by_name ?? null;
+  const lastConfirmedAt: string | null = (() => {
+    const ts = latestLockSuccess?.completed_at ?? device?.locked_at ?? null;
+    if (!ts) return null;
+    return new Date(ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  })();
   const lockPending =
     latestLockCmd?.command_type === "lock_screen" &&
     (latestLockCmd.status === "pending" || latestLockCmd.status === "running");
@@ -643,17 +657,28 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
             )}
 
             {device?.is_locked && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 flex items-center gap-2">
-                <Lock className="h-4 w-4 text-red-600 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-red-800">Device locked (confirmed)</p>
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
+                <Lock className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0 space-y-0.5">
+                  <p className="text-xs font-medium text-red-800">Device locked (confirmed by agent)</p>
                   <p className="text-[11px] text-red-700">
-                    The agent confirmed the OS lock took effect — end-user access is blocked
-                    {device.locked_at ? <> since {new Date(device.locked_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</> : null}.
-                    {" "}Files are preserved. Unlock below to restore access.
+                    End-user access is blocked. Files are preserved.
+                    {" "}Unlock below to restore access.
                   </p>
                   {device.lock_reason ? (
-                    <p className="text-[11px] text-red-700 mt-0.5">Reason: {device.lock_reason}</p>
+                    <p className="text-[11px] text-red-700">
+                      <span className="font-medium">Lock Reason:</span> {device.lock_reason}
+                    </p>
+                  ) : null}
+                  {lockedByName ? (
+                    <p className="text-[11px] text-red-700">
+                      <span className="font-medium">Locked By:</span> {lockedByName}
+                    </p>
+                  ) : null}
+                  {lastConfirmedAt ? (
+                    <p className="text-[11px] text-red-700">
+                      <span className="font-medium">Last Confirmed:</span> {lastConfirmedAt}
+                    </p>
                   ) : null}
                 </div>
               </div>
