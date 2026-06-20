@@ -515,22 +515,26 @@ export default function AssetForm({
         {/* ── Type-specific sections ─────────────────────────────────────────── */}
         {hasDynamicConfig
           ? (
-            // DB config loaded: render sections and fields exactly as configured
-            sectionOrder.map(sectionName => (
-              <Section key={sectionName} title={sectionName}>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {fieldsBySection[sectionName].map(field => (
-                    <DynamicField
-                      key={field.id}
-                      field={field}
-                      form={form}
-                      disabled={disabled}
-                      assetType={assetType}
-                    />
-                  ))}
-                </div>
-              </Section>
-            ))
+            // DB config loaded: render sections and fields exactly as configured.
+            // Skip "Device Identification" — it is always rendered by the static
+            // block above and must not be duplicated from the DB config.
+            sectionOrder
+              .filter(sectionName => sectionName !== "Device Identification")
+              .map(sectionName => (
+                <Section key={sectionName} title={sectionName}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {fieldsBySection[sectionName].map(field => (
+                      <DynamicField
+                        key={field.id}
+                        field={field}
+                        form={form}
+                        disabled={disabled}
+                        assetType={assetType}
+                      />
+                    ))}
+                  </div>
+                </Section>
+              ))
           )
           : (
             // Fallback: hardcoded sections shown before the migration is run
