@@ -681,7 +681,7 @@ function LocationBoard({ locations, assets, shortages, returns, search, onSelect
 // ─── Location detail ────────────────────────────────────────────────────────
 type DetailCol =
   | "assetId" | "assetType" | "brand" | "serialNumber" | "status"
-  | "condition" | "assignedTo" | "responsible" | "location" | "lastUpdated";
+  | "condition" | "assignedTo" | "location" | "lastUpdated";
 
 const DETAIL_COLS: { label: string; key: DetailCol }[] = [
   { label: "Asset ID",      key: "assetId" },
@@ -691,7 +691,6 @@ const DETAIL_COLS: { label: string; key: DetailCol }[] = [
   { label: "Status",        key: "status" },
   { label: "Condition",     key: "condition" },
   { label: "Assigned To",   key: "assignedTo" },
-  { label: "Responsible",   key: "responsible" },
   { label: "Location",      key: "location" },
   { label: "Last Updated",  key: "lastUpdated" },
 ];
@@ -705,7 +704,6 @@ function detailColValue(a: Asset, col: DetailCol): string {
     case "status":       return a.status || "";
     case "condition":    return a.condition ?? "Good";
     case "assignedTo":   return a.assignedTo ?? a.assignedEmail ?? "";
-    case "responsible":  return responsibleFor(a.location) || "";
     case "location":     return a.location || UNASSIGNED;
     case "lastUpdated":  return a.conditionUpdatedAt ?? a.updatedAt ?? "";
   }
@@ -1015,7 +1013,7 @@ function LocationDetail({
             </TableHeader>
             <TableBody>
               {paged.length === 0 ? (
-                <TableRow><TableCell colSpan={10} className="text-center py-10 text-muted-foreground">No assets match your filters.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={9} className="text-center py-10 text-muted-foreground">No assets match your filters.</TableCell></TableRow>
               ) : paged.map(a => (
                 <TableRow key={a.id ?? a.assetId} data-testid={`row-asset-${a.assetId}`}>
                   <TableCell className="font-medium">{a.assetId}</TableCell>
@@ -1038,7 +1036,6 @@ function LocationDetail({
                     )}
                   </TableCell>
                   <TableCell>{a.assignedTo ?? a.assignedEmail ?? "—"}</TableCell>
-                  <TableCell>{responsibleFor(a.location)}</TableCell>
                   <TableCell>{a.location || UNASSIGNED}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{fmtDate(a.conditionUpdatedAt ?? a.updatedAt)}</TableCell>
                 </TableRow>
