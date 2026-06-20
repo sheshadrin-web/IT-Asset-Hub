@@ -823,6 +823,11 @@ function LocationDetail({
 
   useEffect(() => { setPage(1); }, [search, fType, fStatus, fCondition, fDept, fAck, fDevice, rowsPerPage]);
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / rowsPerPage));
+  // Clamp if the underlying assets list shrinks externally (e.g. offboard / condition change)
+  // while sitting on a now-out-of-range page.
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+
   const paged = sorted.slice((page - 1) * rowsPerPage, (page - 1) * rowsPerPage + rowsPerPage);
 
   const handleSort = (col: DetailCol) => {
