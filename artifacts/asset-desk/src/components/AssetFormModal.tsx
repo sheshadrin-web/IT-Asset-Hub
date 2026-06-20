@@ -56,9 +56,10 @@ interface Props {
   onSave: (asset: Asset) => void;
   asset: Asset | null;
   existingIds: string[];
+  defaultLocation?: string;
 }
 
-export default function AssetFormModal({ open, onClose, onSave, asset, existingIds }: Props) {
+export default function AssetFormModal({ open, onClose, onSave, asset, existingIds, defaultLocation }: Props) {
   const isEditing = !!asset;
 
   const form = useForm<FormValues>({
@@ -116,7 +117,7 @@ export default function AssetFormModal({ open, onClose, onSave, asset, existingI
         ownership: "Miles",
         assignedTo: "",
         department: "",
-        location: "",
+        location: defaultLocation ?? "",
         accessories: "",
         remarks: "",
       });

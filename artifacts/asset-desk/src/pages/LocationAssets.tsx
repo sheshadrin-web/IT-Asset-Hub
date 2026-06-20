@@ -2,10 +2,18 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   MapPin, ArrowLeft, Package, CheckCircle2, Wrench, AlertTriangle,
   RotateCcw, ShieldAlert, Plus, Search, RefreshCw, Download,
+  Eye, Building2, Truck, Bell, TrendingUp, LayoutGrid, Table2,
+  ArrowUpDown, ArrowUp, ArrowDown, Users as UsersIcon,
 } from "lucide-react";
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip, Legend,
+} from "recharts";
 import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
 import { useUsers } from "@/context/UsersContext";
+import { cn } from "@/lib/utils";
+import TablePagination from "@/components/TablePagination";
+import AssetFormModal from "@/components/AssetFormModal";
 import { Asset, ASSET_CONDITION_OPTIONS, AssetCondition } from "@/data/mockData";
 import { LOCATION_OPTIONS } from "@/lib/locationOptions";
 import { responsibleFor } from "@/lib/locationResponsibles";
@@ -25,7 +33,7 @@ import {
   fetchReturnRequests, createReturnRequest, updateReturnRequest,
   ReturnRequest, ReturnStatus, RETURN_TYPES, RETURN_STATUSES, ReturnType,
 } from "@/lib/returnRequests";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -94,7 +102,7 @@ const conditionTone: Record<string, string> = {
 
 export default function LocationAssets() {
   const { currentUser } = useAuth();
-  const { assets, updateAssetCondition, refresh: refreshAssets } = useAssets();
+  const { assets, updateAssetCondition, addAsset, refresh: refreshAssets } = useAssets();
   const { users } = useUsers();
   const { toast } = useToast();
 
@@ -104,6 +112,7 @@ export default function LocationAssets() {
   const [loading,   setLoading]   = useState(true);
   const [selected,  setSelected]  = useState<string | null>(null);
   const [search,    setSearch]    = useState("");
+  const [tab,       setTab]       = useState("locations");
   const [shortageOpen, setShortageOpen] = useState(false);
   const [returnOpen,   setReturnOpen]   = useState(false);
 
@@ -177,21 +186,35 @@ export default function LocationAssets() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <MapPin className="h-6 w-6 text-primary" /> Location-wise Assets
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Asset distribution, condition, and replenishment requests across Miles locations.
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Real-time overview of asset distribution, availability, and requests across all Miles locations.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => { refreshAssets(); loadRequests(); }} data-testid="button-refresh-locations">
-          <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {selected === null && tab === "locations" && (
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder="Search locations or managers…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                data-testid="input-search-locations"
+              />
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={() => { refreshAssets(); loadRequests(); toast({ title: "Refreshed" }); }} data-testid="button-refresh-locations">
+            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="locations">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="locations" data-testid="tab-locations">Locations</TabsTrigger>
           <TabsTrigger value="requests" data-testid="tab-requests">
@@ -205,12 +228,14 @@ export default function LocationAssets() {
         {/* ── Locations ─────────────────────────────────────────────────────── */}
         <TabsContent value="locations" className="mt-4">
           {selected === null ? (
-            <LocationGrid
+            <LocationBoard
               locations={locations}
               assets={assets}
               shortages={shortages}
               returns={returns}
-              onSelect={setSelected}
+              search={search}
+              onSelect={(loc) => { setSelected(loc); setSearch(""); }}
+              onViewRequests={() => setTab("requests")}
             />
           ) : (
             <LocationDetail
@@ -223,6 +248,9 @@ export default function LocationAssets() {
               canEditCondition={canEditCondition(selected)}
               editableConditions={isGm ? CUSTODIAN_CONDITION_OPTIONS : ASSET_CONDITION_OPTIONS}
               canRaise={canRaiseRequestsForLocation(currentUser, selected, myAccess)}
+              canAddAsset={isAdmin}
+              existingAssetIds={assets.map(a => a.assetId)}
+              onAddAsset={async (data) => { await addAsset(data); await refreshAssets(); }}
               onCondition={handleCondition}
               onReportShortage={() => setShortageOpen(true)}
               onRaiseReturn={() => setReturnOpen(true)}
@@ -346,21 +374,326 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
   );
 }
 
+// ─── Location board (overview) ──────────────────────────────────────────────
+type LocStatus = "Healthy" | "Low Stock" | "Critical";
+
+function locationStatus(m: LocationMetrics): LocStatus {
+  if (m.total > 0 && (m.available === 0 || m.shortageOpen >= 3)) return "Critical";
+  const availPct = m.total > 0 ? (m.available / m.total) * 100 : 0;
+  if (availPct < 10 || m.shortageOpen > 0) return "Low Stock";
+  return "Healthy";
+}
+
+type BoardSortKey =
+  | "location" | "gm" | "total" | "assigned" | "available"
+  | "underRepair" | "shortageOpen" | "returnPending" | "status";
+
+function StatusBadge({ status }: { status: LocStatus }) {
+  const tone =
+    status === "Healthy"   ? "bg-green-100 text-green-700"  :
+    status === "Low Stock" ? "bg-orange-100 text-orange-700" :
+                             "bg-red-100 text-red-700";
+  return <span className={cn("inline-block rounded-full px-2.5 py-0.5 text-xs font-medium", tone)} data-testid={`status-${status}`}>{status}</span>;
+}
+
+function KpiCard({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: number; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-card-border bg-card p-4" data-testid={`kpi-${label}`}>
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Icon className="h-4 w-4" />
+        <span className="text-xs uppercase tracking-wide">{label}</span>
+      </div>
+      <p className={cn("text-2xl font-bold mt-2", tone ?? "text-foreground")}>{value}</p>
+    </div>
+  );
+}
+
+function WidgetCard({ icon: Icon, label, value, onClick }: { icon: React.ElementType; label: string; value: number; onClick?: () => void }) {
+  const Comp: React.ElementType = onClick ? "button" : "div";
+  return (
+    <Comp
+      onClick={onClick}
+      className={cn(
+        "w-full text-left rounded-xl border border-card-border bg-card p-4 flex items-center gap-3",
+        onClick && "hover:shadow-md hover:border-primary/40 transition-all",
+      )}
+      data-testid={`widget-${label}`}
+    >
+      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+        <Icon className="h-5 w-5 text-primary" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold leading-none">{value}</p>
+        <p className="text-xs text-muted-foreground mt-1 truncate">{label}</p>
+      </div>
+    </Comp>
+  );
+}
+
+function LocationBoard({ locations, assets, shortages, returns, search, onSelect, onViewRequests }: {
+  locations: string[]; assets: Asset[]; shortages: ShortageRequest[]; returns: ReturnRequest[];
+  search: string; onSelect: (loc: string) => void; onViewRequests: () => void;
+}) {
+  const [view, setView] = useState<"table" | "card">("table");
+  const [sortKey, setSortKey] = useState<BoardSortKey>("location");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  const rows = useMemo(() => locations.map(loc => {
+    const m = computeMetrics(assetsInLocation(assets, loc), loc, shortages, returns);
+    return { loc, gm: responsibleFor(loc), m, status: locationStatus(m) };
+  }), [locations, assets, shortages, returns]);
+
+  const kpi = useMemo(() => {
+    const agg = rows.reduce((acc, r) => {
+      acc.total += r.m.total; acc.assigned += r.m.assigned;
+      acc.available += r.m.available; acc.underRepair += r.m.underRepair;
+      acc.recoveryPending += r.m.recoveryPending;
+      return acc;
+    }, { total: 0, assigned: 0, available: 0, underRepair: 0, recoveryPending: 0 });
+    return { ...agg, locations: rows.length };
+  }, [rows]);
+
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(
+    () => !q ? rows : rows.filter(r => r.loc.toLowerCase().includes(q) || r.gm.toLowerCase().includes(q)),
+    [rows, q],
+  );
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const val = (r: typeof rows[number]): string | number => {
+      switch (sortKey) {
+        case "location":      return r.loc;
+        case "gm":            return r.gm;
+        case "status":        return r.status;
+        case "total":         return r.m.total;
+        case "assigned":      return r.m.assigned;
+        case "available":     return r.m.available;
+        case "underRepair":   return r.m.underRepair;
+        case "shortageOpen":  return r.m.shortageOpen;
+        case "returnPending": return r.m.returnPending;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+      return ((av as number) - (bv as number)) * dir;
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  useEffect(() => { setPage(1); }, [q, sortKey, sortDir, rowsPerPage]);
+
+  const paged = sorted.slice((page - 1) * rowsPerPage, (page - 1) * rowsPerPage + rowsPerPage);
+
+  const toggleSort = (key: BoardSortKey) => {
+    if (sortKey === key) setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const SortHead = ({ label, k, className }: { label: string; k: BoardSortKey; className?: string }) => (
+    <TableHead className={className}>
+      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-foreground" data-testid={`sort-${k}`}>
+        {label}
+        {sortKey === k ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-50" />}
+      </button>
+    </TableHead>
+  );
+
+  const donut = [
+    { name: "Assigned",     value: kpi.assigned,        color: "#2563eb" },
+    { name: "Available",    value: kpi.available,       color: "#16a34a" },
+    { name: "Under Repair", value: kpi.underRepair,     color: "#f59e0b" },
+    { name: "In Recovery",  value: kpi.recoveryPending, color: "#a855f7" },
+  ].filter(d => d.value > 0);
+
+  const topAvail = useMemo(() => rows
+    .map(r => ({ loc: r.loc, pct: r.m.total > 0 ? Math.round((r.m.available / r.m.total) * 100) : 0 }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5), [rows]);
+
+  const alerts = useMemo(() => rows
+    .filter(r => r.status !== "Healthy")
+    .sort((a, b) => (a.status === "Critical" ? 0 : 1) - (b.status === "Critical" ? 0 : 1)), [rows]);
+
+  const inScope          = useMemo(() => new Set(locations), [locations]);
+  const pendingShortages = shortages.filter(s => inScope.has(s.location) && s.status === "Pending");
+  const pendingReturns   = returns.filter(r => inScope.has(r.location) && r.status !== "Closed");
+  const underRepairCount = assets.filter(a => inScope.has(a.location) && a.status === "Under Repair").length;
+  const inTransitCount   = returns.filter(r => inScope.has(r.location) && r.status === "In Transit").length;
+
+  if (locations.length === 0) {
+    return (
+      <Card><CardContent className="py-16 text-center text-muted-foreground">
+        No locations are assigned to your account yet. Contact a Super Admin to map your locations.
+      </CardContent></Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <KpiCard icon={Package}      label="Total Assets"       value={kpi.total} />
+        <KpiCard icon={CheckCircle2} label="Assigned"           value={kpi.assigned}        tone="text-blue-600" />
+        <KpiCard icon={Package}      label="Available"          value={kpi.available}       tone="text-green-600" />
+        <KpiCard icon={Wrench}       label="Under Repair"       value={kpi.underRepair}     tone="text-orange-600" />
+        <KpiCard icon={ShieldAlert}  label="In Asset Recovery"  value={kpi.recoveryPending} tone="text-purple-600" />
+        <KpiCard icon={Building2}    label="Total Locations"    value={kpi.locations} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Location Summary</CardTitle>
+              <div className="flex items-center gap-1 rounded-md border p-0.5">
+                <Button variant={view === "table" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setView("table")} data-testid="button-view-table"><Table2 className="h-4 w-4" /></Button>
+                <Button variant={view === "card" ? "secondary" : "ghost"} size="sm" className="h-7 px-2" onClick={() => setView("card")} data-testid="button-view-card"><LayoutGrid className="h-4 w-4" /></Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {view === "card" ? (
+                <LocationGrid locations={filtered.map(r => r.loc)} assets={assets} shortages={shortages} returns={returns} onSelect={onSelect} />
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <SortHead label="Location" k="location" />
+                          <SortHead label="General Manager" k="gm" />
+                          <SortHead label="Total" k="total" className="text-right" />
+                          <SortHead label="Assigned" k="assigned" className="text-right" />
+                          <SortHead label="Available" k="available" className="text-right" />
+                          <SortHead label="Repair" k="underRepair" className="text-right" />
+                          <SortHead label="Shortage" k="shortageOpen" className="text-right" />
+                          <SortHead label="Returns" k="returnPending" className="text-right" />
+                          <SortHead label="Status" k="status" />
+                          <TableHead className="text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paged.map(r => (
+                          <TableRow key={r.loc} data-testid={`row-location-${r.loc}`}>
+                            <TableCell className="font-medium">{r.loc}</TableCell>
+                            <TableCell>{r.gm}</TableCell>
+                            <TableCell className="text-right">{r.m.total}</TableCell>
+                            <TableCell className="text-right">{r.m.assigned}</TableCell>
+                            <TableCell className="text-right">{r.m.available}</TableCell>
+                            <TableCell className="text-right">{r.m.underRepair}</TableCell>
+                            <TableCell className="text-right">{r.m.shortageOpen}</TableCell>
+                            <TableCell className="text-right">{r.m.returnPending}</TableCell>
+                            <TableCell><StatusBadge status={r.status} /></TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" onClick={() => onSelect(r.loc)} data-testid={`button-view-${r.loc}`}>
+                                <Eye className="h-4 w-4 mr-1" /> View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {paged.length === 0 && (
+                          <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No locations match your search.</TableCell></TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <TablePagination
+                    total={sorted.length}
+                    page={page}
+                    rowsPerPage={rowsPerPage}
+                    onPageChange={setPage}
+                    onRowsPerPageChange={setRowsPerPage}
+                    noun="location"
+                    rowsOptions={[10, 25, 50, 100]}
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle className="text-base">Assets by Status</CardTitle></CardHeader>
+            <CardContent>
+              {donut.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No asset data.</p>
+              ) : (
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={donut} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
+                        {donut.map(d => <Cell key={d.name} fill={d.color} />)}
+                      </Pie>
+                      <RTooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4" /> Quick Alerts</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {alerts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">All locations healthy.</p>
+              ) : (
+                alerts.slice(0, 6).map(r => (
+                  <button key={r.loc} onClick={() => onSelect(r.loc)} className="w-full flex items-center justify-between rounded-md border p-2 text-left hover:bg-muted/50" data-testid={`alert-${r.loc}`}>
+                    <span className="text-sm font-medium truncate">{r.loc}</span>
+                    <StatusBadge status={r.status} />
+                  </button>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Top Locations by Availability %</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {topAvail.map(t => (
+                <div key={t.loc} data-testid={`avail-${t.loc}`}>
+                  <div className="flex justify-between text-xs mb-1"><span className="truncate">{t.loc}</span><span className="font-medium">{t.pct}%</span></div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${t.pct}%` }} /></div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <WidgetCard icon={Plus}      label="Pending Shortage Requests" value={pendingShortages.length} onClick={onViewRequests} />
+        <WidgetCard icon={RotateCcw} label="Pending Returns"           value={pendingReturns.length}   onClick={onViewRequests} />
+        <WidgetCard icon={Wrench}    label="Assets Under Repair"       value={underRepairCount} />
+        <WidgetCard icon={Truck}     label="Assets In Transit"         value={inTransitCount}          onClick={onViewRequests} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Location detail ────────────────────────────────────────────────────────
 function LocationDetail({
   location, assets, metrics, search, setSearch, onBack, canEditCondition, editableConditions, canRaise,
-  onCondition, onReportShortage, onRaiseReturn, userName,
+  canAddAsset, existingAssetIds, onAddAsset, onCondition, onReportShortage, onRaiseReturn, userName,
 }: {
   location: string; assets: Asset[]; metrics: LocationMetrics;
   search: string; setSearch: (s: string) => void; onBack: () => void;
   canEditCondition: boolean; editableConditions: AssetCondition[]; canRaise: boolean;
+  canAddAsset: boolean; existingAssetIds: string[];
+  onAddAsset: (data: Omit<Asset, "id">) => Promise<void>;
   onCondition: (a: Asset, c: AssetCondition) => void;
   onReportShortage: () => void; onRaiseReturn: () => void;
   userName: (id: string) => string;
 }) {
+  const { toast } = useToast();
   const [fType, setFType] = useState("all");
   const [fStatus, setFStatus] = useState("all");
   const [fCondition, setFCondition] = useState("all");
+  const [addOpen, setAddOpen] = useState(false);
 
   const typeOptions = useMemo(
     () => Array.from(new Set(assets.map(a => a.assetType).filter(Boolean))).sort(),
@@ -424,14 +757,23 @@ function LocationDetail({
             <p className="text-xs text-muted-foreground">Responsible: {responsibleFor(location)}</p>
           </div>
         </div>
-        {canRaise && (
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={onReportShortage} data-testid="button-report-shortage">
-              <Plus className="h-4 w-4 mr-1" /> Report Shortage
-            </Button>
-            <Button size="sm" onClick={onRaiseReturn} data-testid="button-raise-return">
-              <RotateCcw className="h-4 w-4 mr-1" /> Return / Repair / Replace
-            </Button>
+        {(canRaise || (canAddAsset && location !== UNASSIGNED)) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {canAddAsset && location !== UNASSIGNED && (
+              <Button size="sm" onClick={() => setAddOpen(true)} data-testid="button-add-asset-location">
+                <Plus className="h-4 w-4 mr-1" /> Add Asset
+              </Button>
+            )}
+            {canRaise && (
+              <>
+                <Button size="sm" variant="outline" onClick={onReportShortage} data-testid="button-report-shortage">
+                  <Plus className="h-4 w-4 mr-1" /> Report Shortage
+                </Button>
+                <Button size="sm" variant="outline" onClick={onRaiseReturn} data-testid="button-raise-return">
+                  <RotateCcw className="h-4 w-4 mr-1" /> Return / Repair / Replace
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -530,6 +872,21 @@ function LocationDetail({
           </Table>
         </CardContent>
       </Card>
+
+      {canAddAsset && (
+        <AssetFormModal
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          asset={null}
+          existingIds={existingAssetIds}
+          defaultLocation={location}
+          onSave={async (data) => {
+            await onAddAsset(data);
+            setAddOpen(false);
+            toast({ title: "Asset added", description: `${data.assetId} added to ${location}.` });
+          }}
+        />
+      )}
     </div>
   );
 }
