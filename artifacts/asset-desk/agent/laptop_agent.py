@@ -58,7 +58,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.2"
+AGENT_VERSION       = "0.9.3"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1184,6 +1184,39 @@ def _win_clear_legalnotice() -> bool:
     return ok
 
 
+def _win_force_logoff(disabled: list[str]) -> None:
+    """From a SYSTEM/admin context, log off the interactive sessions of the accounts
+    we just disabled so the user is dropped to the (now-blocked) sign-in screen
+    immediately instead of keeping their current session. Best-effort and silent —
+    only touches sessions belonging to a disabled account, never other users."""
+    if not disabled:
+        return
+    targets = {u.strip().lower() for u in disabled}
+    try:
+        out = subprocess.run(["quser"], capture_output=True, text=True, timeout=15,
+                             creationflags=_NO_WINDOW).stdout
+    except Exception:
+        return
+    for line in out.splitlines()[1:]:
+        # quser rows: ">miles  console  1  Active ..." — the active session is
+        # prefixed with '>'. Columns are whitespace-separated; the session ID is
+        # the first standalone integer on the row.
+        parts = line.replace(">", " ").split()
+        if not parts:
+            continue
+        uname = parts[0].strip().lower()
+        if uname not in targets:
+            continue
+        sid = next((t for t in parts if t.isdigit()), None)
+        if not sid:
+            continue
+        try:
+            subprocess.run(["logoff", sid], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        except Exception:
+            pass
+
+
 def _lock_screen_running() -> bool:
     pid = _read_lock_state().get("screen_pid")
     if not pid:
@@ -1641,13 +1674,17 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             if _prev.get("screen_pid"):
                 state["screen_pid"] = _prev["screen_pid"]
             _win_set_legalnotice(WIN_LOCK_CAPTION, lock_msg)
-            ok, _err = _win_lock_now()
             _write_lock_state(state)
+            ok, _err = _win_lock_now()
             _spawn_lock_screen()
+            # Drop the just-disabled user(s) to the sign-in screen so the lock takes
+            # effect now, not only after the next reboot. Their account is disabled,
+            # so the login attempt is rejected and the legal-notice banner shows.
+            _win_force_logoff(disabled)
             ws = "workstation locked" if ok else "workstation lock call failed (sign-in already blocked)"
             return ("completed",
-                    f"Sign-in disabled for {','.join(disabled)}; {ws}; branded lock screen "
-                    f"shown|USERS={','.join(disabled)}", None)
+                    f"Sign-in disabled for {','.join(disabled)}; {ws}; active session signed "
+                    f"out; branded notice shown|USERS={','.join(disabled)}", None)
 
         if IS_MAC:
             # TRUE login-window lock: bar the account from logging in and drop the
@@ -3680,11 +3717,17 @@ def uninstall_service_linux() -> int:
     return 0
 
 
-# ── Windows logon auto-start (Startup folder — no admin required) ────────────
-# A per-user scheduled task (schtasks /SC ONLOGON) requires elevation and fails
-# with "Access is denied" from a normal Command Prompt. The Startup folder runs
-# at every logon for the current user with no admin rights, so we drop a hidden
-# VBScript launcher there that starts the agent via pythonw (no console window).
+# ── Windows auto-start ───────────────────────────────────────────────────────
+# Two install modes:
+#   • ADMIN (preferred): a SYSTEM scheduled task started at boot. The agent runs
+#     as LocalSystem, so it CAN disable sign-in accounts / set the HKLM login
+#     banner — i.e. it can actually enforce a device lock that survives reboot and
+#     a password attempt. install.ps1 auto-elevates to reach this path.
+#   • NON-ADMIN (fallback): a hidden Startup-folder VBS launcher that starts the
+#     agent as the logged-in user. Inventory/sync work, but lock ENFORCEMENT does
+#     not (a normal user cannot block Windows sign-in) — lock reports requires_admin.
+WIN_TASK_NAME   = "MilesAgent"
+WIN_SYS_DIR     = os.path.expandvars(r"%ProgramData%\MilesAgent") if IS_WIN else ""
 WIN_INSTALL_DIR = os.path.expandvars(r"%LOCALAPPDATA%\MilesAgent") if IS_WIN else ""
 WIN_STARTUP_DIR = (os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
                    if IS_WIN else "")
@@ -3692,11 +3735,120 @@ WIN_VBS_PATH    = os.path.join(WIN_STARTUP_DIR, "MilesAgent.vbs") if IS_WIN else
 WIN_RUN_CMD     = os.path.join(WIN_INSTALL_DIR, "run.cmd") if IS_WIN else ""
 
 
+def _win_remove_peruser_launchers() -> None:
+    """Remove any old per-user Startup-folder launchers across every profile so a
+    leftover non-admin agent doesn't run alongside the new SYSTEM task. Best-effort."""
+    try:
+        users_root = os.path.expandvars(r"%SystemDrive%\Users")
+        rel = r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\MilesAgent.vbs"
+        for prof in os.listdir(users_root):
+            vbs = os.path.join(users_root, prof, rel)
+            if os.path.exists(vbs):
+                try:
+                    os.remove(vbs)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _win_stop_other_agents() -> None:
+    """Stop any OTHER running agent processes (e.g. a leftover per-user `run` agent
+    from a prior non-admin install) so they can't keep polling commands with the
+    same token and grab a lock command in a context that can't enforce it. Never
+    kills the current process. Best-effort and silent."""
+    try:
+        me = os.getpid()
+        ps = (
+            f"$me={me}; "
+            "Get-CimInstance Win32_Process | Where-Object { "
+            "$_.ProcessId -ne $me -and $_.CommandLine -and ("
+            "($_.CommandLine -match 'laptop_agent\\.py' -and $_.CommandLine -match '\\brun\\b') "
+            "-or ($_.Name -ieq 'miles-agent.exe' -and $_.CommandLine -match '\\brun\\b')"
+            ") } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                       capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+    except Exception:
+        pass
+
+
+def _install_service_windows_system() -> int:
+    """Admin path: install the agent as a SYSTEM scheduled task that starts at boot.
+    Files live under %ProgramData%\\MilesAgent (readable by LocalSystem)."""
+    os.makedirs(WIN_SYS_DIR, exist_ok=True)
+
+    if getattr(sys, "frozen", False):
+        exe = os.path.abspath(sys.argv[0])
+        dst = os.path.join(WIN_SYS_DIR, "miles-agent.exe")
+        if os.path.abspath(exe) != os.path.abspath(dst):
+            shutil.copy2(exe, dst)
+        tr = f'"{dst}" run'
+    else:
+        src = os.path.abspath(sys.argv[0])
+        dst = os.path.join(WIN_SYS_DIR, "laptop_agent.py")
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copy2(src, dst)
+        py_dir = os.path.dirname(os.path.abspath(sys.executable))
+        pythonw = os.path.join(py_dir, "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = os.path.abspath(sys.executable)
+        tr = f'"{pythonw}" "{dst}" run'
+
+    # Create (or replace) the SYSTEM task. /RU SYSTEM needs no password; /RL HIGHEST
+    # gives it the rights to disable accounts; /SC ONSTART runs it at every boot so
+    # the lock is re-asserted before anyone can sign in.
+    r = subprocess.run(["schtasks", "/Create", "/TN", WIN_TASK_NAME, "/TR", tr,
+                        "/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F"],
+                       capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+    if r.returncode != 0:
+        print("ERROR: could not create the SYSTEM scheduled task: "
+              + (r.stderr or r.stdout or "unknown error").strip(), file=sys.stderr)
+        return 1
+
+    # Remove the old non-admin launcher(s) AND stop any leftover per-user agent so
+    # only the SYSTEM instance polls commands (a non-admin instance would consume a
+    # lock command and report requires_admin), then start the SYSTEM task now.
+    _win_remove_peruser_launchers()
+    _win_stop_other_agents()
+    try:
+        subprocess.run(["schtasks", "/Run", "/TN", WIN_TASK_NAME], capture_output=True,
+                       text=True, timeout=30, creationflags=_NO_WINDOW)
+    except Exception:
+        pass
+    print("\u2713 Service installed as a SYSTEM task — runs at boot with the rights "
+          "needed to enforce device lock.")
+    print(f"  Agent: {dst}")
+    print(f"  Task:  {WIN_TASK_NAME} (SYSTEM, ONSTART)")
+    # Verify the task is actually registered to run as SYSTEM (surfaced in install.log).
+    try:
+        q = subprocess.run(["schtasks", "/Query", "/TN", WIN_TASK_NAME, "/V", "/FO", "LIST"],
+                           capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW)
+        if "SYSTEM" in (q.stdout or "").upper():
+            print("  Verified: task is registered to run as SYSTEM.")
+        else:
+            print("  WARNING: could not verify SYSTEM run-as; check Task Scheduler > MilesAgent.",
+                  file=sys.stderr)
+    except Exception:
+        pass
+    return 0
+
+
 def install_service_windows() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN must be set so the background service can authenticate.",
               file=sys.stderr)
         return 2
+
+    # Preferred: SYSTEM task (real lock enforcement). Requires admin — install.ps1
+    # auto-elevates so this is the normal path.
+    if _win_is_admin():
+        return _install_service_windows_system()
+
+    print("warning: installing WITHOUT administrator rights — inventory/sync will "
+          "work, but DEVICE LOCK CANNOT BE ENFORCED (a normal user cannot block "
+          "Windows sign-in). Re-run the installer as administrator to enable locking.",
+          file=sys.stderr)
 
     os.makedirs(WIN_INSTALL_DIR, exist_ok=True)
     os.makedirs(WIN_STARTUP_DIR, exist_ok=True)
@@ -3763,13 +3915,22 @@ def install_service_windows() -> int:
 
 
 def uninstall_service_windows() -> int:
+    # Remove the SYSTEM task (admin) if present.
+    try:
+        subprocess.run(["schtasks", "/Delete", "/TN", WIN_TASK_NAME, "/F"],
+                       capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+    except Exception:
+        pass
+    # Remove any per-user Startup launchers across profiles.
+    _win_remove_peruser_launchers()
     try:
         if WIN_VBS_PATH and os.path.exists(WIN_VBS_PATH):
             os.remove(WIN_VBS_PATH)
     except Exception:
         pass
-    if WIN_INSTALL_DIR and os.path.isdir(WIN_INSTALL_DIR):
-        shutil.rmtree(WIN_INSTALL_DIR, ignore_errors=True)
+    for d in (WIN_INSTALL_DIR, WIN_SYS_DIR):
+        if d and os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
     print("\u2713 Service uninstalled.")
     return 0
 

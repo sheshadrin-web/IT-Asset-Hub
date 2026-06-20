@@ -465,9 +465,10 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   // ── Windows installer (bootstrap) ──────────────────────────────────────────
   // Both the Command Prompt and PowerShell commands run the same robust
   // installer script (public/agent/install.ps1). It validates every step,
-  // auto-installs Python if missing, registers + syncs + installs the
-  // background service, renames the PC (skipping if the name already matches),
-  // and writes a full log to %USERPROFILE%\.miles-agent\install.log — instead
+  // auto-ELEVATES (UAC) so the agent installs as a SYSTEM task that can enforce
+  // device lock, auto-installs Python if missing, registers + syncs + installs
+  // the background service, renames the PC (skipping if the name already matches),
+  // and writes a full log to %ProgramData%\MilesAgent\install.log — instead
   // of a brittle one-liner where one failed step cascades into confusing
   // "path not found" errors. Config is passed via env vars the script reads.
   const installPsUrl =
@@ -1244,13 +1245,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 rows={5}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                If Python is missing it is installed automatically (one-time, no admin). Then it registers, runs a
-                test <span className="font-mono">sync</span>, and adds a <b>Startup-folder</b> launcher so the agent
-                auto-starts at logon — <b>no administrator rights needed</b>. Refresh this page after ~10 seconds to
-                see the device. To remove later:
-                <span className="font-mono"> {`%USERPROFILE%\\.miles-agent\\venv\\Scripts\\python.exe %USERPROFILE%\\.miles-agent\\laptop_agent.py uninstall-service`}</span>.
-                {hostName ? <> The optional rename to the asset tag (<span className="font-mono">{hostName}</span>) is
-                the only step that needs the terminal run <b>as Administrator</b> plus a <b>reboot</b>.</> : null}
+                The installer <b>auto-elevates</b> — approve the Windows security (UAC) prompt. Administrator rights are
+                required so the agent runs as <b>SYSTEM</b> and can actually enforce a device lock (a normal-user agent
+                cannot block Windows sign-in). It installs Python if missing (one-time), registers, runs a test
+                <span className="font-mono"> sync</span>, and adds a <b>SYSTEM scheduled task</b> that starts at boot.
+                Refresh this page after ~10 seconds to see the device. To remove later (run as Administrator):
+                <span className="font-mono"> {`%ProgramData%\\MilesAgent\\venv\\Scripts\\python.exe %ProgramData%\\MilesAgent\\laptop_agent.py uninstall-service`}</span>.
+                {hostName ? <> The PC is also renamed to the asset tag (<span className="font-mono">{hostName}</span>),
+                which takes effect after the next <b>reboot</b>.</> : null}
               </p>
             </div>
           </div>

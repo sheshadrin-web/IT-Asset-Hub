@@ -9,9 +9,11 @@
 #
 # Why a script instead of a chained one-liner: each step is validated, failures
 # stop cleanly with a plain-English message, and everything is logged to
-# %USERPROFILE%\.miles-agent\install.log for IT to review. No admin required for
-# the agent itself (a missing-Python install and the rename are the only steps
-# that may need elevation, and they degrade gracefully).
+# %ProgramData%\MilesAgent\install.log for IT to review.
+#
+# ADMIN REQUIRED: device-lock enforcement only works when the agent runs as
+# LocalSystem, so this installer auto-elevates (UAC prompt). Without admin a
+# normal user cannot block Windows sign-in, so the lock could not be enforced.
 # ============================================================================
 $ErrorActionPreference = 'Stop'
 $ProgressPreference     = 'SilentlyContinue'
@@ -19,7 +21,7 @@ $ProgressPreference     = 'SilentlyContinue'
 # we check $LASTEXITCODE explicitly where it matters.
 $PSNativeCommandUseErrorActionPreference = $false
 
-$InstallDir  = Join-Path $env:USERPROFILE '.miles-agent'
+$InstallDir  = Join-Path $env:ProgramData 'MilesAgent'
 $VenvDir     = Join-Path $InstallDir 'venv'
 $VenvPy      = Join-Path $VenvDir 'Scripts\python.exe'
 $AgentScript = Join-Path $InstallDir 'laptop_agent.py'
@@ -116,6 +118,32 @@ if ([string]::IsNullOrWhiteSpace($AgentUrl)) {
   exit 2
 }
 
+# ── Auto-elevate ────────────────────────────────────────────────────────────
+# The agent must run as LocalSystem to enforce device lock, which requires admin
+# to install. If we're not elevated, relaunch this installer through UAC with the
+# same settings, then exit this (non-admin) instance.
+$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+           ).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+if (-not $IsAdmin) {
+  Write-Host 'Administrator rights are required to enable device-lock enforcement.' -ForegroundColor Yellow
+  Write-Host 'Please approve the Windows security (UAC) prompt that appears...' -ForegroundColor Yellow
+  $installerUrl = $AgentUrl -replace 'laptop_agent\.py$', 'install.ps1'
+  if ($installerUrl -eq $AgentUrl) { $installerUrl = $AgentUrl -replace '[^/]+$', 'install.ps1' }
+  $inner = "`$env:MILES_AGENT_TOKEN='$Token'; `$env:MILES_AGENT_URL='$AgentUrl';"
+  if (-not [string]::IsNullOrWhiteSpace($TargetName)) { $inner += " `$env:MILES_ASSET_HOSTNAME='$TargetName';" }
+  if (-not [string]::IsNullOrWhiteSpace($ApiBase))    { $inner += " `$env:MILES_AGENT_API_BASE='$ApiBase';" }
+  $inner += " irm '$installerUrl' | iex"
+  $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+  try {
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $b64)
+  } catch {
+    Write-Host 'ERROR: Administrator approval was declined. Re-run the command and approve the UAC prompt.' -ForegroundColor Red
+    exit 3
+  }
+  exit 0
+}
+
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Write-Log '=== Miles agent installation started ==='
 Write-Log ("Install folder: " + $InstallDir)
@@ -174,17 +202,20 @@ if (-not $pipOk) {
 Write-Log 'Dependencies installed.' 'OK'
 
 # ── 4. Save the agent key ───────────────────────────────────────────────────
-[Environment]::SetEnvironmentVariable('MILES_AGENT_TOKEN', $Token, 'User')
+# Persist at MACHINE scope so the LocalSystem service can read the token/url/api
+# (a User-scope var is invisible to SYSTEM). We also set the current process env
+# so register/sync below work in this same elevated session.
+[Environment]::SetEnvironmentVariable('MILES_AGENT_TOKEN', $Token, 'Machine')
 $env:MILES_AGENT_TOKEN = $Token
 if (-not [string]::IsNullOrWhiteSpace($ApiBase)) {
-  [Environment]::SetEnvironmentVariable('MILES_AGENT_API_BASE', $ApiBase, 'User')
+  [Environment]::SetEnvironmentVariable('MILES_AGENT_API_BASE', $ApiBase, 'Machine')
   $env:MILES_AGENT_API_BASE = $ApiBase
 }
 # Persist the agent download URL so silent self-update works after install.
-# (Previously only TOKEN and API_BASE were persisted; without MILES_AGENT_URL the
-#  update check fell back to a 404 path and the device never upgraded.)
+# (Without MILES_AGENT_URL the update check falls back to a 404 path and the
+#  device never upgrades.)
 if (-not [string]::IsNullOrWhiteSpace($AgentUrl)) {
-  [Environment]::SetEnvironmentVariable('MILES_AGENT_URL', $AgentUrl, 'User')
+  [Environment]::SetEnvironmentVariable('MILES_AGENT_URL', $AgentUrl, 'Machine')
   $env:MILES_AGENT_URL = $AgentUrl
 }
 Write-Log 'Agent key saved.' 'OK'
