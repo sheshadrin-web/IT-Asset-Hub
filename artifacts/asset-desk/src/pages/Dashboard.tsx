@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Package,
@@ -11,6 +12,9 @@ import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
 import { getAssetEmoji, ASSET_TYPE_CATEGORIES } from "@/lib/assetEmoji";
 import AssetsInRecovery from "@/components/dashboard/AssetsInRecovery";
+import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
+import { useManagedDevices } from "@/hooks/useManagedDevices";
+import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
 import { useDashboardFeeds } from "@/hooks/useDashboardFeeds";
 import AdminKpiRow from "@/components/dashboard/AdminKpiRow";
 import AssetsByLocationBars from "@/components/dashboard/AssetsByLocationBars";
@@ -283,6 +287,14 @@ export default function Dashboard() {
 
   const isAdminView = currentUser?.role !== "end_user" && currentUser?.role !== "location_gm";
   const feeds = useDashboardFeeds(isAdminView);
+  const [restartThresholdDays, setRestartThresholdDays] = useState(RESTART_PENDING_DEFAULT_DAYS);
+  const {
+    devices: managedDevices,
+    loading: devicesLoading,
+    error:   devicesError,
+    refresh: refreshDevices,
+  } = useManagedDevices(isAdminView);
+  const restartPending = computeRestartPending(managedDevices, assets, users, restartThresholdDays);
 
   if (currentUser?.role === "end_user" || currentUser?.role === "location_gm") {
     return <EndUserDashboard userName={currentUser.name} />;
@@ -368,6 +380,27 @@ export default function Dashboard() {
 
       {/* Recent shortage requests */}
       <ShortageRequestsTable shortages={feeds.shortages} users={users} loading={feeds.loading} />
+
+      {/* Pending acknowledgement alert */}
+      {pendingAck > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+          <Clock className="h-4 w-4 text-orange-500 flex-shrink-0" />
+          <p className="text-sm text-orange-700">
+            <strong>{pendingAck} asset{pendingAck > 1 ? "s" : ""}</strong> {pendingAck > 1 ? "are" : "is"} awaiting acknowledgement from assigned users.
+          </p>
+          <Link href="/assets" className="ml-auto text-xs font-semibold text-orange-600 hover:underline whitespace-nowrap">View assets →</Link>
+        </div>
+      )}
+
+      {/* Devices pending restart */}
+      <DevicesPendingRestart
+        devices={restartPending}
+        loading={devicesLoading}
+        error={devicesError}
+        refresh={refreshDevices}
+        thresholdDays={restartThresholdDays}
+        onThresholdChange={setRestartThresholdDays}
+      />
 
       {/* Assets in recovery */}
       <AssetsInRecovery />
