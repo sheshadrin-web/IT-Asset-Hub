@@ -491,7 +491,26 @@ Every status transition writes to `audit_logs` via `_log_remote_access_audit()`.
 
 ## 📸 Screenshots
 
-*Screenshots will be added here once production UI is stable.*
+> Live portal: **[it-asset-hub-a7rf.onrender.com](https://it-asset-hub-a7rf.onrender.com)**
+
+<table>
+  <tr>
+    <td width="50%"><strong>Sign In</strong><br/><img src="docs/screenshots/01-login.png" alt="Sign in" /></td>
+    <td width="50%"><strong>Dashboard</strong><br/><img src="docs/screenshots/02-dashboard.png" alt="Dashboard" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Asset Inventory</strong><br/><img src="docs/screenshots/03-assets-list.png" alt="Asset inventory" /></td>
+    <td width="50%"><strong>Add Asset</strong><br/><img src="docs/screenshots/04-add-asset.png" alt="Add asset" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Bulk Import</strong><br/><img src="docs/screenshots/05-bulk-import.png" alt="Bulk import" /></td>
+    <td width="50%"><strong>Reports &amp; Analytics</strong><br/><img src="docs/screenshots/06-reports.png" alt="Reports and analytics" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Helpdesk Tickets</strong><br/><img src="docs/screenshots/07-tickets.png" alt="Helpdesk tickets" /></td>
+    <td width="50%"><strong>Users &amp; Roles</strong><br/><img src="docs/screenshots/08-users.png" alt="Users and roles" /></td>
+  </tr>
+</table>
 
 ---
 
