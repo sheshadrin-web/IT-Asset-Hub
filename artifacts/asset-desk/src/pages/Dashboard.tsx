@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   Monitor, Ticket, CheckCircle, AlertTriangle, Package,
-  Clock, Plus, ArrowRight, MapPin, Search, Bell,
+  Clock, Plus, ArrowRight, MapPin, Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -284,6 +284,8 @@ export default function Dashboard() {
   const { assets }       = useAssets();
   const { tickets }      = useTickets();
   const { users }        = useUsers();
+  const [, navigate]     = useLocation();
+  const [dashSearch, setDashSearch] = useState("");
 
   const isAdminView = currentUser?.role !== "end_user" && currentUser?.role !== "location_gm";
   const feeds = useDashboardFeeds(isAdminView);
@@ -315,28 +317,23 @@ export default function Dashboard() {
           <h1 className="text-xl font-bold text-foreground mt-0.5">{greeting()}, {currentUser?.name.split(" ")[0]} 👋</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Here's your IT asset management overview</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative hidden md:block">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search assets, users…"
-              className="h-9 w-60 rounded-xl border border-border bg-card pl-9 pr-3 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition"
-            />
-          </div>
-          <Link
-            href="/tickets"
-            className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card hover:bg-muted transition"
-            aria-label="Open tickets"
-          >
-            <Bell className="h-4 w-4 text-muted-foreground" />
-            {openTickets > 0 && (
-              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                {openTickets > 99 ? "99+" : openTickets}
-              </span>
-            )}
-          </Link>
-        </div>
+        <form
+          className="relative hidden md:block"
+          onSubmit={e => {
+            e.preventDefault();
+            const q = dashSearch.trim();
+            navigate(q ? `/assets?q=${encodeURIComponent(q)}` : "/assets");
+          }}
+        >
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search assets… (Enter)"
+            value={dashSearch}
+            onChange={e => setDashSearch(e.target.value)}
+            className="h-9 w-64 rounded-xl border border-border bg-card pl-9 pr-3 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition"
+          />
+        </form>
       </div>
 
       {feeds.error && (

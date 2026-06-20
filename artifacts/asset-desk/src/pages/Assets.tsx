@@ -193,7 +193,10 @@ export default function Assets() {
   const { currentUser } = useAuth();
   const { toast } = useToast();
 
-  const [search, setSearch]           = useState("");
+  const [search, setSearch]           = useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("q") || "";
+  });
   const [typeFilter, setTypeFilter]     = useState(() => {
     if (typeof window === "undefined") return "all";
     return new URLSearchParams(window.location.search).get("type") || "all";
