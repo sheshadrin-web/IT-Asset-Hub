@@ -1,26 +1,28 @@
 import { Link } from "wouter";
 import {
-  Monitor, Ticket, CheckCircle, AlertTriangle, Wrench, Package,
-  TrendingUp, Clock, Plus, PieChart as PieChartIcon, BarChart2 as BarChartIcon, ArrowRight, MapPin,
+  Monitor, Ticket, CheckCircle, AlertTriangle, Package,
+  Clock, Plus, ArrowRight, MapPin, Search, Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Legend,
-} from "recharts";
 import { useAuth } from "@/context/AuthContext";
 import { useAssets } from "@/context/AssetContext";
-import AssetsByLocationCard from "@/components/AssetsByLocationCard";
 import { useTickets } from "@/context/TicketContext";
 import { useUsers } from "@/context/UsersContext";
-import { cn } from "@/lib/utils";
-import { useManagedDevices } from "@/hooks/useManagedDevices";
-import { computeRestartPending, RESTART_PENDING_DEFAULT_DAYS } from "@/lib/restartPending";
-import DevicesPendingRestart from "@/components/dashboard/DevicesPendingRestart";
-import AssetsInRecovery from "@/components/dashboard/AssetsInRecovery";
 import { getAssetEmoji, ASSET_TYPE_CATEGORIES } from "@/lib/assetEmoji";
-import { useState } from "react";
+import AssetsInRecovery from "@/components/dashboard/AssetsInRecovery";
+import { useDashboardFeeds } from "@/hooks/useDashboardFeeds";
+import AdminKpiRow from "@/components/dashboard/AdminKpiRow";
+import AssetsByLocationBars from "@/components/dashboard/AssetsByLocationBars";
+import AssetHealthOverview from "@/components/dashboard/AssetHealthOverview";
+import PendingActionsPanel from "@/components/dashboard/PendingActionsPanel";
+import RecentActivitiesPanel from "@/components/dashboard/RecentActivitiesPanel";
+import AlertCards from "@/components/dashboard/AlertCards";
+import TopLocationsAvailability from "@/components/dashboard/TopLocationsAvailability";
+import AssetsByTypeDonut from "@/components/dashboard/AssetsByTypeDonut";
+import WarrantyPanel from "@/components/dashboard/WarrantyPanel";
+import QuickActions from "@/components/dashboard/QuickActions";
+import ShortageRequestsTable from "@/components/dashboard/ShortageRequestsTable";
 
 const PRIORITY_COLORS: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-500 border-red-500/20",
@@ -47,16 +49,6 @@ function greeting(): string {
 
 function todayLabel(): string {
   return new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-}
-
-function EmptyChart({ icon: Icon, message, sub }: { icon: React.ElementType; message: string; sub?: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-[220px] gap-2 text-center">
-      <Icon className="h-10 w-10 text-muted-foreground/20" />
-      <p className="text-sm text-muted-foreground">{message}</p>
-      {sub && <p className="text-xs text-muted-foreground/60">{sub}</p>}
-    </div>
-  );
 }
 
 function StatCard({
@@ -290,254 +282,95 @@ export default function Dashboard() {
   const { users }        = useUsers();
 
   const isAdminView = currentUser?.role !== "end_user" && currentUser?.role !== "location_gm";
-  const [restartThresholdDays, setRestartThresholdDays] = useState(RESTART_PENDING_DEFAULT_DAYS);
-  const {
-    devices: managedDevices,
-    loading: devicesLoading,
-    error: devicesError,
-    refresh: refreshDevices,
-  } = useManagedDevices(isAdminView);
-  const restartPending = computeRestartPending(managedDevices, assets, users, restartThresholdDays);
+  const feeds = useDashboardFeeds(isAdminView);
 
   if (currentUser?.role === "end_user" || currentUser?.role === "location_gm") {
     return <EndUserDashboard userName={currentUser.name} />;
   }
 
-  const assetStatusData = [
-    { name: "In Procurement", value: assets.filter((a) => a.status === "In Procurement").length, color: "#f97316" },
-    { name: "Available",      value: assets.filter((a) => a.status === "Available").length,      color: "#22c55e" },
-    { name: "Assigned",       value: assets.filter((a) => a.status === "Assigned").length,       color: "#3b82f6" },
-    { name: "Under Repair",   value: assets.filter((a) => a.status === "Under Repair").length,   color: "#f59e0b" },
-    { name: "Lost",           value: assets.filter((a) => a.status === "Lost").length,           color: "#ef4444" },
-    { name: "Retired",        value: assets.filter((a) => a.status === "Retired").length,        color: "#6b7280" },
-  ];
-  const assetChartData = assetStatusData.filter((d) => d.value > 0);
-
-  const ticketCategoryMap = tickets.reduce<Record<string, number>>((acc, t) => {
-    acc[t.category] = (acc[t.category] || 0) + 1;
-    return acc;
-  }, {});
-  const ticketCategoryData = Object.entries(ticketCategoryMap).map(([name, count]) => ({
-    name: name.replace(" Issue", "").replace(" Request", " Req"),
-    count,
-  }));
-
-  const recentTickets = [...tickets]
-    .filter((t) => !["Resolved", "Closed"].includes(t.status))
-    .slice(0, 5);
-
-  const pendingAck = assets.filter(a => a.status === "Assigned" && !a.acknowledged).length;
-
-  const assetTypeCounts = assets.reduce<Record<string, number>>((acc, a) => {
-    const t = a.assetType || "Generic Asset";
-    acc[t] = (acc[t] || 0) + 1;
-    return acc;
-  }, {});
-  const assetTypeGroups = ASSET_TYPE_CATEGORIES
-    .map(cat => ({
-      label: cat.label,
-      items: cat.types
-        .map(t => ({ type: t, count: assetTypeCounts[t] || 0 }))
-        .filter(i => i.count > 0),
-    }))
-    .filter(g => g.items.length > 0);
-  const hasTypeCounts = assetTypeGroups.length > 0;
-
-  const statCards = [
-    { label: "Total Assets",        value: assets.length,                                                                                                          icon: Package,       color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/assets" },
-    { label: "Assigned",            value: assets.filter((a) => a.status === "Assigned").length,                                                                   icon: Monitor,       color: "text-indigo-600",  bg: "bg-indigo-50",  border: "bg-indigo-500",  href: "/assets" },
-    { label: "Available",           value: assets.filter((a) => a.status === "Available").length,                                                                  icon: CheckCircle,   color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/assets" },
-    { label: "Under Repair",        value: assets.filter((a) => a.status === "Under Repair").length,                                                               icon: Wrench,        color: "text-amber-600",   bg: "bg-amber-50",   border: "bg-amber-500",   href: "/assets" },
-    { label: "Open Tickets",        value: tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length,                                   icon: Ticket,        color: "text-blue-600",    bg: "bg-blue-50",    border: "bg-blue-500",    href: "/tickets" },
-    { label: "Critical Tickets",    value: tickets.filter((t) => t.priority === "Critical" && !["Resolved", "Closed", "Rejected"].includes(t.status)).length,      icon: AlertTriangle, color: "text-red-600",     bg: "bg-red-50",     border: "bg-red-500",     href: "/tickets" },
-    { label: "Resolved This Month", value: tickets.filter((t) => t.status === "Resolved").length,                                                                  icon: TrendingUp,    color: "text-emerald-600", bg: "bg-emerald-50", border: "bg-emerald-500", href: "/tickets" },
-    { label: "Pending Ack.",        value: pendingAck,                                                                                                             icon: Clock,         color: "text-orange-600",  bg: "bg-orange-50",  border: "bg-orange-500",  href: "/assets" },
-  ];
+  const openTickets      = tickets.filter((t) => !["Resolved", "Closed", "Rejected"].includes(t.status)).length;
+  const underRepair      = assets.filter((a) => a.status === "Under Repair").length;
+  const pendingAck       = assets.filter((a) => a.status === "Assigned" && !a.acknowledged).length;
+  const shortagesPending = feeds.shortages.filter((s) => s.status === "Pending").length;
+  const returnsActive    = feeds.returns.filter((r) => !/completed|closed|rejected|cancelled/i.test(r.status)).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <p className="text-xs text-muted-foreground font-medium">{todayLabel()}</p>
           <h1 className="text-xl font-bold text-foreground mt-0.5">{greeting()}, {currentUser?.name.split(" ")[0]} 👋</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">IT Asset Management Overview</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Here's your IT asset management overview</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="relative hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search assets, users…"
+              className="h-9 w-60 rounded-xl border border-border bg-card pl-9 pr-3 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition"
+            />
+          </div>
+          <Link
+            href="/tickets"
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card hover:bg-muted transition"
+            aria-label="Open tickets"
+          >
+            <Bell className="h-4 w-4 text-muted-foreground" />
+            {openTickets > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                {openTickets > 99 ? "99+" : openTickets}
+              </span>
+            )}
+          </Link>
         </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-        {statCards.map((card) => (
-          <StatCard key={card.label} {...card} />
-        ))}
-      </div>
-
-      {/* Assets by location */}
-      <AssetsByLocationCard />
-
-      {/* Assets by type */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            Assets by Type
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!hasTypeCounts ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">No assets added yet.</p>
-          ) : (
-            <div className="space-y-5">
-              {assetTypeGroups.map(group => (
-                <div key={group.label}>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{group.label}</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
-                    {group.items.map(item => (
-                      <Link
-                        key={item.type}
-                        href={`/assets?type=${encodeURIComponent(item.type)}`}
-                        className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 hover:border-primary/40 hover:shadow-sm transition-all"
-                        data-testid={`asset-type-count-${item.type}`}
-                      >
-                        <span className="text-xl leading-none">{getAssetEmoji(item.type)}</span>
-                        <div className="min-w-0">
-                          <p className="text-lg font-bold text-foreground leading-tight">{item.count}</p>
-                          <p className="text-xs text-muted-foreground truncate">{item.type}</p>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pending acknowledgement alert */}
-      {pendingAck > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
-          <Clock className="h-4 w-4 text-orange-500 flex-shrink-0" />
-          <p className="text-sm text-orange-700">
-            <strong>{pendingAck} asset{pendingAck > 1 ? "s" : ""}</strong> {pendingAck > 1 ? "are" : "is"} awaiting acknowledgement from assigned users.
-          </p>
-          <Link href="/assets" className="ml-auto text-xs font-semibold text-orange-600 hover:underline whitespace-nowrap">View assets →</Link>
+      {feeds.error && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          Some dashboard data could not be loaded. Showing what's available.
         </div>
       )}
 
-      {/* Devices Pending Restart */}
-      <DevicesPendingRestart
-        devices={restartPending}
-        loading={devicesLoading}
-        error={devicesError}
-        refresh={refreshDevices}
-        thresholdDays={restartThresholdDays}
-        onThresholdChange={setRestartThresholdDays}
-      />
+      {/* KPI row */}
+      <AdminKpiRow assets={assets} openTickets={openTickets} />
 
-      {/* Assets in Recovery Mode */}
-      <AssetsInRecovery />
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <PieChartIcon className="h-4 w-4 text-muted-foreground" />
-              Asset Status Distribution
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {assetChartData.length === 0 ? (
-              <EmptyChart icon={PieChartIcon} message="No assets added yet" sub="Assets will appear here once added" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={assetChartData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                    {assetChartData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
-                  <Legend iconType="circle" iconSize={8} formatter={(v) => <span style={{ fontSize: "12px", color: "hsl(var(--foreground))" }}>{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <BarChartIcon className="h-4 w-4 text-muted-foreground" />
-              Tickets by Category
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {ticketCategoryData.length === 0 ? (
-              <EmptyChart icon={BarChartIcon} message="No tickets raised yet" sub="Ticket categories will appear here once tickets are created" />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={ticketCategoryData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
-                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Tickets" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+      {/* Location / Health / Pending actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <AssetsByLocationBars assets={assets} />
+        <AssetHealthOverview assets={assets} />
+        <PendingActionsPanel
+          shortagesPending={shortagesPending}
+          underRepair={underRepair}
+          returnsActive={returnsActive}
+          pendingAck={pendingAck}
+          loading={feeds.loading}
+        />
       </div>
 
-      {/* Active Tickets Table */}
-      <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />Active Tickets
-          </CardTitle>
-          <Link href="/tickets" className="text-xs text-primary hover:underline font-medium">View all →</Link>
-        </CardHeader>
-        <CardContent className="p-0">
-          {recentTickets.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <Clock className="h-8 w-8 mx-auto text-muted-foreground/25 mb-3" />
-              <p className="text-sm text-muted-foreground">No active tickets.</p>
-              <p className="text-xs text-muted-foreground/60 mt-1">Open and in-progress tickets will appear here.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {["Ticket ID","Raised By","Category","Priority","Status","Date"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentTickets.map((ticket) => (
-                    <tr key={ticket.ticketId} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
-                      <td className="px-4 py-3">
-                        <Link href={`/tickets/${ticket.ticketId}`} className="text-primary font-semibold hover:underline">{ticket.ticketId}</Link>
-                      </td>
-                      <td className="px-4 py-3 text-foreground font-medium">{ticket.raisedBy}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{ticket.category}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${PRIORITY_COLORS[ticket.priority]}`}>{ticket.priority}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[ticket.status]}`}>{ticket.status}</span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">{ticket.createdDate}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Alert cards */}
+      <AlertCards assets={assets} shortages={feeds.shortages} />
+
+      {/* Recent activity / Top locations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <RecentActivitiesPanel audits={feeds.audits} loading={feeds.loading} />
+        <TopLocationsAvailability assets={assets} />
+      </div>
+
+      {/* Assets by type / Warranty / Quick actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <AssetsByTypeDonut assets={assets} />
+        <WarrantyPanel assets={assets} />
+        <QuickActions />
+      </div>
+
+      {/* Recent shortage requests */}
+      <ShortageRequestsTable shortages={feeds.shortages} users={users} loading={feeds.loading} />
+
+      {/* Assets in recovery */}
+      <AssetsInRecovery />
     </div>
   );
 }
