@@ -4,7 +4,10 @@ import {
   RotateCcw, ShieldAlert, Plus, Search, RefreshCw, Download,
   Eye, Building2, Truck, Bell, TrendingUp, LayoutGrid, Table2,
   ArrowUpDown, ArrowUp, ArrowDown, Users as UsersIcon,
+  ChevronUp, ChevronDown, ChevronsUpDown, X,
 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
+import { isOnline, isManaged, type DeviceLike } from "@/lib/deviceHealth";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip, Legend,
 } from "recharts";
@@ -676,6 +679,38 @@ function LocationBoard({ locations, assets, shortages, returns, search, onSelect
 }
 
 // ─── Location detail ────────────────────────────────────────────────────────
+type DetailCol =
+  | "assetId" | "assetType" | "brand" | "serialNumber" | "status"
+  | "condition" | "assignedTo" | "responsible" | "location" | "lastUpdated";
+
+const DETAIL_COLS: { label: string; key: DetailCol }[] = [
+  { label: "Asset ID",      key: "assetId" },
+  { label: "Type",          key: "assetType" },
+  { label: "Brand & Model", key: "brand" },
+  { label: "Serial No",     key: "serialNumber" },
+  { label: "Status",        key: "status" },
+  { label: "Condition",     key: "condition" },
+  { label: "Assigned To",   key: "assignedTo" },
+  { label: "Responsible",   key: "responsible" },
+  { label: "Location",      key: "location" },
+  { label: "Last Updated",  key: "lastUpdated" },
+];
+
+function detailColValue(a: Asset, col: DetailCol): string {
+  switch (col) {
+    case "assetId":      return a.assetId || "";
+    case "assetType":    return a.assetType || "";
+    case "brand":        return [a.brand, a.model].filter(Boolean).join(" ");
+    case "serialNumber": return a.serialNumber || "";
+    case "status":       return a.status || "";
+    case "condition":    return a.condition ?? "Good";
+    case "assignedTo":   return a.assignedTo ?? a.assignedEmail ?? "";
+    case "responsible":  return responsibleFor(a.location) || "";
+    case "location":     return a.location || UNASSIGNED;
+    case "lastUpdated":  return a.conditionUpdatedAt ?? a.updatedAt ?? "";
+  }
+}
+
 function LocationDetail({
   location, assets, metrics, search, setSearch, onBack, canEditCondition, editableConditions, canRaise,
   canAddAsset, existingAssetIds, onAddAsset, onCondition, onReportShortage, onRaiseReturn, userName,
@@ -693,6 +728,15 @@ function LocationDetail({
   const [fType, setFType] = useState("all");
   const [fStatus, setFStatus] = useState("all");
   const [fCondition, setFCondition] = useState("all");
+  const [fDept, setFDept] = useState("all");
+  const [fAck, setFAck] = useState<"all" | "acknowledged" | "pending">("all");
+  const [fDevice, setFDevice] = useState<"all" | "online" | "offline" | "managed" | "unmanaged" | "agent_installed" | "agent_missing">("all");
+  const [deviceMap, setDeviceMap] = useState<Map<string, DeviceLike>>(new Map());
+  const [deviceMapLoaded, setDeviceMapLoaded] = useState(false);
+  const [sortCol, setSortCol] = useState<DetailCol>("assetId");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [addOpen, setAddOpen] = useState(false);
 
   const typeOptions = useMemo(
@@ -707,6 +751,29 @@ function LocationDetail({
     () => Array.from(new Set(assets.map(a => a.condition ?? "Good").filter(Boolean))).sort(),
     [assets],
   );
+  const deptOptions = useMemo(
+    () => Array.from(new Set(assets.map(a => a.department).filter((d): d is string => !!d))).sort((a, b) => a.localeCompare(b)),
+    [assets],
+  );
+
+  // Managed-device status (for the Device filter). Failure is non-fatal: the map
+  // stays empty and the device filters simply match nothing rather than crashing.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("managed_devices")
+        .select("laptop_asset_id, status, is_managed, last_seen_at, agent_removed_at, uptime_seconds");
+      if (cancelled || error || !data) return;
+      const m = new Map<string, DeviceLike>();
+      for (const d of data as Array<DeviceLike & { laptop_asset_id?: string | null }>) {
+        if (d.laptop_asset_id) m.set(String(d.laptop_asset_id), d);
+      }
+      setDeviceMap(m);
+      setDeviceMapLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -714,6 +781,28 @@ function LocationDetail({
       if (fType !== "all" && a.assetType !== fType) return false;
       if (fStatus !== "all" && a.status !== fStatus) return false;
       if (fCondition !== "all" && (a.condition ?? "Good") !== fCondition) return false;
+      if (fDept !== "all" && (a.department ?? "") !== fDept) return false;
+      // Ack filter only applies to Assigned assets.
+      if (fAck !== "all") {
+        const ok = fAck === "acknowledged"
+          ? (a.status === "Assigned" && !!a.acknowledged)
+          : (a.status === "Assigned" && !a.acknowledged);
+        if (!ok) return false;
+      }
+      // Device filters only apply to laptops (the only asset type the agent manages).
+      if (fDevice !== "all") {
+        const dev = a.id ? deviceMap.get(a.id) : undefined;
+        const isLaptop = a.assetType === "Laptop";
+        const ok =
+          fDevice === "online"          ? isOnline(dev) :
+          fDevice === "managed"         ? isManaged(dev) :
+          fDevice === "agent_installed" ? !!dev :
+          !deviceMapLoaded              ? false :
+          fDevice === "offline"         ? (isLaptop && isManaged(dev) && !isOnline(dev)) :
+          fDevice === "unmanaged"       ? (isLaptop && !isManaged(dev)) :
+          /* agent_missing */             (isLaptop && !dev);
+        if (!ok) return false;
+      }
       if (!q) return true;
       return (
         a.assetId.toLowerCase().includes(q) ||
@@ -723,13 +812,35 @@ function LocationDetail({
         (a.assignedTo ?? a.assignedEmail ?? "").toLowerCase().includes(q)
       );
     });
-  }, [assets, search, fType, fStatus, fCondition]);
+  }, [assets, search, fType, fStatus, fCondition, fDept, fAck, fDevice, deviceMap, deviceMapLoaded]);
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) =>
+      detailColValue(a, sortCol).localeCompare(detailColValue(b, sortCol), undefined, { numeric: true, sensitivity: "base" }) * dir
+    );
+  }, [filtered, sortCol, sortDir]);
+
+  useEffect(() => { setPage(1); }, [search, fType, fStatus, fCondition, fDept, fAck, fDevice, rowsPerPage]);
+
+  const paged = sorted.slice((page - 1) * rowsPerPage, (page - 1) * rowsPerPage + rowsPerPage);
+
+  const handleSort = (col: DetailCol) => {
+    if (sortCol === col) setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+
+  const hasFilters = !!search || fType !== "all" || fStatus !== "all" || fCondition !== "all" || fDept !== "all" || fAck !== "all" || fDevice !== "all";
+  const clearFilters = () => {
+    setSearch(""); setFType("all"); setFStatus("all"); setFCondition("all");
+    setFDept("all"); setFAck("all"); setFDevice("all");
+  };
 
   const handleExport = () => {
     exportCsv(
       `${location}-assets-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Asset ID", "Type", "Brand", "Model", "Serial No", "Status", "Condition", "Assigned To", "Responsible", "Location", "Last Updated"],
-      filtered.map(a => [
+      sorted.map(a => [
         a.assetId,
         a.assetType,
         a.brand,
@@ -789,59 +900,118 @@ function LocationDetail({
         <StatTile icon={RotateCcw}    label="Returns"    value={metrics.returnPending} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search assets…" value={search} onChange={e => setSearch(e.target.value)} data-testid="input-search-location-assets" />
-        </div>
-        <Select value={fType} onValueChange={setFType}>
-          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-type"><SelectValue placeholder="Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            {typeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={fStatus} onValueChange={setFStatus}>
-          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-status"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {statusOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={fCondition} onValueChange={setFCondition}>
-          <SelectTrigger className="h-9 w-[150px]" data-testid="select-filter-condition"><SelectValue placeholder="Condition" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Conditions</SelectItem>
-            {conditionOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-muted-foreground">{filtered.length} of {assets.length}</span>
-        <Button variant="outline" size="sm" className="ml-auto" onClick={handleExport} disabled={filtered.length === 0} data-testid="button-export-location-assets">
-          <Download className="h-4 w-4 mr-1" /> Export CSV
-        </Button>
-      </div>
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <div className="relative flex-1 min-w-[260px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9 h-10 text-sm"
+                placeholder="Search by Asset ID, serial, model, assigned user…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                data-testid="input-search-location-assets"
+              />
+              {search && (
+                <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <Select value={fType} onValueChange={setFType}>
+              <SelectTrigger className="w-[160px] h-10 text-sm" data-testid="select-filter-type"><SelectValue placeholder="Type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {typeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={fStatus} onValueChange={setFStatus}>
+              <SelectTrigger className="w-[170px] h-10 text-sm" data-testid="select-filter-status"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                {statusOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={fCondition} onValueChange={setFCondition}>
+              <SelectTrigger className="w-[170px] h-10 text-sm" data-testid="select-filter-condition"><SelectValue placeholder="Condition" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Conditions</SelectItem>
+                {conditionOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={fDept} onValueChange={setFDept}>
+              <SelectTrigger className="w-[190px] h-10 text-sm" data-testid="select-filter-dept"><SelectValue placeholder="Department" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {deptOptions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={fAck} onValueChange={(v) => setFAck(v as typeof fAck)}>
+              <SelectTrigger className="w-[220px] h-10 text-sm" data-testid="select-filter-ack"><SelectValue placeholder="Acknowledgement" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Acknowledgement</SelectItem>
+                <SelectItem value="acknowledged"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Acknowledged</span></SelectItem>
+                <SelectItem value="pending"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-orange-500" /> Pending Acknowledgement</span></SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={fDevice} onValueChange={(v) => setFDevice(v as typeof fDevice)}>
+              <SelectTrigger className="w-[200px] h-10 text-sm" data-testid="select-filter-device"><SelectValue placeholder="Device" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Devices</SelectItem>
+                <SelectItem value="online"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Online</span></SelectItem>
+                <SelectItem value="offline"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-slate-400" /> Offline</span></SelectItem>
+                <SelectItem value="managed">Managed</SelectItem>
+                <SelectItem value="unmanaged">Unmanaged</SelectItem>
+                <SelectItem value="agent_installed">Agent Installed</SelectItem>
+                <SelectItem value="agent_missing">Agent Missing</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <span className="text-xs text-muted-foreground">
+              {filtered.length} of {assets.length} assets at {location}
+            </span>
+            {hasFilters && (
+              <button type="button" onClick={clearFilters} className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium underline-offset-2 hover:underline" data-testid="button-clear-location-filters">
+                <X className="h-3 w-3" /> Clear all filters
+              </button>
+            )}
+            <Button variant="outline" size="sm" className="ml-auto" onClick={handleExport} disabled={sorted.length === 0} data-testid="button-export-location-assets">
+              <Download className="h-4 w-4 mr-1" /> Export CSV
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Asset ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Brand &amp; Model</TableHead>
-                <TableHead>Serial No</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Condition</TableHead>
-                <TableHead>Assigned To</TableHead>
-                <TableHead>Responsible</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead>Last Updated</TableHead>
+                {DETAIL_COLS.map(col => (
+                  <TableHead key={col.key}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort(col.key)}
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                      title={`Sort by ${col.label}`}
+                      data-testid={`sort-${col.key}`}
+                    >
+                      {col.label}
+                      <span className={cn("rounded p-0.5 transition-colors", sortCol === col.key ? "text-primary" : "text-muted-foreground/40")}>
+                        {sortCol === col.key
+                          ? (sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)
+                          : <ChevronsUpDown className="h-3 w-3" />}
+                      </span>
+                    </button>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={10} className="text-center py-10 text-muted-foreground">No assets found at this location.</TableCell></TableRow>
-              ) : filtered.map(a => (
+              {paged.length === 0 ? (
+                <TableRow><TableCell colSpan={10} className="text-center py-10 text-muted-foreground">No assets match your filters.</TableCell></TableRow>
+              ) : paged.map(a => (
                 <TableRow key={a.id ?? a.assetId} data-testid={`row-asset-${a.assetId}`}>
                   <TableCell className="font-medium">{a.assetId}</TableCell>
                   <TableCell>{a.assetType}</TableCell>
@@ -870,6 +1040,14 @@ function LocationDetail({
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            total={sorted.length}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setPage}
+            onRowsPerPageChange={setRowsPerPage}
+            noun="assets"
+          />
         </CardContent>
       </Card>
 
