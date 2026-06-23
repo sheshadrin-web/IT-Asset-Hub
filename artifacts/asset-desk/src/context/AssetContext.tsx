@@ -168,19 +168,57 @@ export function AssetProvider({ children }: { children: ReactNode }) {
     const columns = isPrivileged
       ? "*, profiles!assets_assigned_to_fkey(full_name, email, ecode)"
       : SAFE_ASSET_COLUMNS;
-    const { data, error: fetchError } = await supabase
-      .from("assets")
-      .select(columns)
-      .order("created_at", { ascending: false });
-    if (fetchError) {
-      // Surface the failure loudly instead of silently rendering an empty list,
-      // which is indistinguishable from "no assets" and hides real outages.
-      setError(fetchError.message);
-      toast({ title: "Failed to load assets", description: fetchError.message, variant: "destructive" });
-    } else if (data) {
-      setError(null);
-      setAssets((data as unknown as Record<string, unknown>[]).map(mapFromDB));
+
+    let count = 0;
+    try {
+      const { error: countError, count: supabaseCount } = await supabase
+        .from("assets")
+        .select("id", { head: true, count: "exact" });
+      if (!countError && typeof supabaseCount === "number") count = supabaseCount;
+      console.log("[AssetContext] SUPABASE COUNT", supabaseCount, { countError: countError?.message });
+    } catch (countError) {
+      console.log("[AssetContext] SUPABASE COUNT query failed", countError);
+      // non-fatal; let page fetch continue even if count fails.
     }
+
+    const PAGE_SIZE = 1000;
+    const rows: Record<string, unknown>[] = [];
+    let page = 0;
+
+    while (true) {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, error: fetchError } = await supabase
+        .from("assets")
+        .select(columns)
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (fetchError) {
+        // Surface the failure loudly instead of silently rendering an empty list,
+        // which is indistinguishable from "no assets" and hides real outages.
+        setError(fetchError.message);
+        toast({ title: "Failed to load assets", description: fetchError.message, variant: "destructive" });
+        setLoading(false);
+        return;
+      }
+
+      const pageRows = Array.isArray(data) ? data as unknown as Record<string, unknown>[] : [];
+      rows.push(...pageRows);
+      console.log("[AssetContext] fetchAssets page", page, "pageRows", pageRows.length, "rowsSoFar", rows.length);
+      if (pageRows.length === 0 || pageRows.length < PAGE_SIZE) {
+        break;
+      }
+      page += 1;
+    }
+
+    const allAssets = rows.map(mapFromDB);
+    console.log("PAGE FETCH", rows.length);
+    console.log("TOTAL LOADED", allAssets.length);
+    console.log("SUPABASE COUNT", count);
+    setError(null);
+    setAssets(allAssets);
+    console.log("AFTER setAssets", allAssets.length);
     setLoading(false);
   }, [isPrivileged]);
 
