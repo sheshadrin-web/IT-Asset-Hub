@@ -111,6 +111,7 @@ function mapToDB(data: Omit<Asset, "id">): Record<string, unknown> {
 
 interface AssetContextType {
   assets:             Asset[];
+  totalAssetCount:    number;
   loading:            boolean;
   getAsset:           (id: string) => Asset | undefined;
   refresh:            () => Promise<void>;
@@ -127,20 +128,49 @@ interface AssetContextType {
   markAcknowledged:         (assetId: string) => Promise<void>;
 }
 
+const ASSET_FETCH_PAGE_SIZE = 1000;
+
 const AssetContext = createContext<AssetContextType | null>(null);
 
 export function AssetProvider({ children }: { children: ReactNode }) {
-  const [assets,  setAssets]  = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [assets,          setAssets]          = useState<Asset[]>([]);
+  const [totalAssetCount, setTotalAssetCount] = useState(0);
+  const [loading,         setLoading]         = useState(true);
 
   const fetchAssets = useCallback(async () => {
-    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!supabaseConfigured) {
+      setAssets([]);
+      setTotalAssetCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("assets")
-      .select("*, profiles!assets_assigned_to_fkey(full_name, email, ecode)")
-      .order("created_at", { ascending: false });
-    if (!error && data) setAssets(data.map(mapFromDB));
+    const rows: Record<string, unknown>[] = [];
+    let totalCount = 0;
+    let from = 0;
+
+    while (true) {
+      const { data, error, count } = await supabase
+        .from("assets")
+        .select("*, profiles!assets_assigned_to_fkey(full_name, email, ecode)", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range(from, from + ASSET_FETCH_PAGE_SIZE - 1);
+
+      if (error) {
+        setLoading(false);
+        return;
+      }
+
+      if (count !== null) totalCount = count;
+      const pageRows = (data ?? []) as Record<string, unknown>[];
+      rows.push(...pageRows);
+
+      if (pageRows.length < ASSET_FETCH_PAGE_SIZE || (count !== null && rows.length >= count)) break;
+      from += ASSET_FETCH_PAGE_SIZE;
+    }
+
+    setAssets(rows.map(mapFromDB));
+    setTotalAssetCount(totalCount);
     setLoading(false);
   }, []);
 
@@ -164,7 +194,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
       .from("assets").insert(row).select().single();
     if (error || !inserted) throw new Error(error?.message ?? "Failed to add asset");
     const newAsset = mapFromDB(inserted as Record<string, unknown>);
-    setAssets(prev => [newAsset, ...prev]);
+    await fetchAssets();
     return newAsset;
   };
 
@@ -489,7 +519,7 @@ export function AssetProvider({ children }: { children: ReactNode }) {
 
   return (
     <AssetContext.Provider value={{
-      assets, loading, getAsset, refresh: fetchAssets,
+      assets, totalAssetCount, loading, getAsset, refresh: fetchAssets,
       addAsset, addAssets, updateAsset, assignAsset, bulkAssignAssets, returnAsset,
       updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, markAcknowledged,
     }}>

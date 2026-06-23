@@ -186,7 +186,7 @@ function downloadTemplate() {
 }
 
 export default function Assets() {
-  const { assets, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
+  const { assets, totalAssetCount, addAssets, assignAsset, bulkAssignAssets, updateStatus, unassignAsset, deleteAssets, resetAcknowledgement, updateAsset } = useAssets();
   const { users } = useUsers();
   const { currentUser } = useAuth();
   const { toast } = useToast();
@@ -582,7 +582,7 @@ export default function Assets() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-foreground">Asset Management</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{assets.length} total assets</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{totalAssetCount} total assets</p>
         </div>
         {isAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
@@ -714,7 +714,7 @@ export default function Assets() {
           {hasAnyFilter && (
             <div className="mt-3 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
-                {filtered.length} of {assets.length} assets match active filters
+                {filtered.length} of {totalAssetCount} assets match active filters
               </span>
               <button
                 type="button"
@@ -791,7 +791,7 @@ export default function Assets() {
                         <Monitor className="h-10 w-10 text-muted-foreground/40" />
                         <p className="text-muted-foreground font-medium">No assets found</p>
                         <p className="text-xs text-muted-foreground">
-                          {assets.length === 0 ? "Add your first asset to get started." : "Try adjusting your search or filters."}
+                          {totalAssetCount === 0 ? "Add your first asset to get started." : "Try adjusting your search or filters."}
                         </p>
                       </div>
                     </td>
