@@ -25,7 +25,27 @@ app.use(
     },
   }),
 );
-app.use(cors());
+const allowedOrigins = [
+  // Replit dev domain
+  "https://ef9a07a0-06cb-4cde-99db-48e1dc0761ff-00-2hhrqybccfd10.sisko.replit.dev",
+  // Future production domain
+  "https://assets.mileseducation.com",
+  // Local dev
+  "http://localhost:22104",
+  "http://localhost:3000",
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, Postman, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin '${origin}' not allowed`));
+    },
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

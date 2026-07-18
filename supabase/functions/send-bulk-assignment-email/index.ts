@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const FIXED_CC = ["sheshadri.n@mileseducation.com", "bharat.raj@mileseducation.com"];
-const APP_URL  = "https://it-asset-hub-a7rf.onrender.com";
+const APP_URL  = Deno.env.get("APP_URL") ?? "https://it-asset-hub-a7rf.onrender.com";
 
 type Reason = "New Joiner" | "Replacement" | "Additional Asset" | "";
 
