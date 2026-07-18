@@ -1,0 +1,245 @@
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import { Ticket, TicketComment, TicketPriority, TicketStatus } from "@/data/mockData";
+import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
+
+// ─── Case normalizers (DB stores lowercase, app uses title-case) ──────────────
+const PRIORITY_MAP: Record<string, TicketPriority> = {
+  low: "Low", medium: "Medium", high: "High", critical: "Critical",
+};
+const STATUS_MAP: Record<string, TicketStatus> = {
+  open: "Open", assigned: "Assigned", "in progress": "In Progress",
+  "waiting for user": "Waiting for User", resolved: "Resolved",
+  closed: "Closed", rejected: "Rejected",
+};
+function normPriority(v: unknown): TicketPriority {
+  return PRIORITY_MAP[String(v ?? "").toLowerCase()] ?? "Medium";
+}
+function normStatus(v: unknown): TicketStatus {
+  return STATUS_MAP[String(v ?? "").toLowerCase()] ?? "Open";
+}
+
+// ─── DB row → App model ───────────────────────────────────────────────────────
+// RLS policies on the "tickets" table control who can read/write rows.
+function mapFromDB(row: Record<string, unknown>): Ticket {
+  const createdAt = String(row.created_at ?? "");
+  const updatedAt = String(row.updated_at ?? "");
+  // raised_by is a UUID FK — join profiles!tickets_raised_by_fkey to get name.
+  const raisedByProfile = row.profiles as Record<string, unknown> | null;
+  return {
+    id:             String(row.id ?? ""),
+    ticketId:       String(row.ticket_id ?? ""),
+    raisedBy:       raisedByProfile?.full_name
+                      ? String(raisedByProfile.full_name)
+                      : String(row.raised_by ?? ""),
+    employeeEmail:  row.employee_email ? String(row.employee_email) : undefined,
+    // assets(asset_id) join resolves the UUID FK back to the human-readable
+    // string ID (e.g. "MILES-LAP-627") so display code needs no changes.
+    assetId: (() => {
+      const joined = row.assets as Record<string, unknown> | null;
+      if (joined?.asset_id) return String(joined.asset_id);
+      return "N/A";
+    })(),
+    category:       String(row.category ?? ""),
+    subcategory:    String(row.subcategory ?? ""),
+    priority:       normPriority(row.priority),
+    status:         normStatus(row.status),
+    assignedAgentId: String(row.assigned_agent ?? "") || undefined,
+    assignedAgent:  (() => {
+      const p = row.agent_profile as Record<string, unknown> | null;
+      return p?.full_name ? String(p.full_name) : "";
+    })(),
+    description:    String(row.description ?? ""),
+    createdDate:    createdAt ? createdAt.split("T")[0] : new Date().toISOString().split("T")[0],
+    updatedDate:    updatedAt ? updatedAt.split("T")[0] : new Date().toISOString().split("T")[0],
+    resolutionNote: String(row.resolution_note ?? ""),
+    comments:       Array.isArray(row.comments) ? (row.comments as TicketComment[]) : [],
+  };
+}
+
+// Generates the next ticket ID by calling a SECURITY DEFINER RPC function
+// that bypasses RLS, so every user always gets the true global max — not
+// just the max of the tickets they are allowed to see.
+async function nextTicketIdFromDB(): Promise<string> {
+  const { data, error } = await supabase.rpc("get_next_ticket_id");
+  if (!error && typeof data === "string" && data.startsWith("TKT-")) return data;
+  // Fallback: timestamp-based ID to guarantee uniqueness if RPC fails
+  return `TKT-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+}
+
+// ─── Context shape ────────────────────────────────────────────────────────────
+interface AddTicketInput {
+  raisedBy:        string;   // display name (stored client-side only)
+  raisedByUserId:  string;   // Supabase auth UUID — sent to raised_by UUID FK column
+  employeeEmail?:  string;
+  assetId:         string;
+  category:        string;
+  subcategory:     string;
+  priority:        TicketPriority;
+  description:     string;
+  assignedAgentId?: string;  // UUID to pre-assign (e.g. Superadmin) at creation
+}
+
+interface TicketContextType {
+  tickets:      Ticket[];
+  loading:      boolean;
+  error:        string | null;
+  getTicket:    (id: string) => Ticket | undefined;
+  refresh:      () => Promise<void>;
+  addTicket:    (data: AddTicketInput) => Promise<Ticket>;
+  updateTicket: (ticketId: string, updates: Partial<Ticket>) => Promise<void>;
+  addComment:   (ticketId: string, comment: TicketComment) => Promise<void>;
+  deleteTicket: (ticketId: string) => Promise<void>;
+  deleteTickets:(ids: string[]) => Promise<void>;
+}
+
+const TicketContext = createContext<TicketContextType | null>(null);
+
+export function TicketProvider({ children }: { children: ReactNode }) {
+  const [tickets,  setTickets]  = useState<Ticket[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
+  const { isAuthenticated } = useAuth();
+
+  const fetchTickets = useCallback(async () => {
+    if (!supabaseConfigured) { setLoading(false); return; }
+    setLoading(true);
+    const { data, error: fetchError } = await supabase
+      .from("tickets")
+      .select("*, assets(asset_id), profiles!tickets_raised_by_fkey(full_name), agent_profile:profiles!tickets_assigned_agent_fkey(full_name)")
+      .order("created_at", { ascending: false });
+    if (fetchError) {
+      // Surface the failure instead of silently showing an empty ticket list.
+      setError(fetchError.message);
+      toast({ title: "Failed to load tickets", description: fetchError.message, variant: "destructive" });
+    } else if (data) {
+      setError(null);
+      setTickets(data.map(mapFromDB));
+    }
+    setLoading(false);
+  }, []);
+
+  // Only fetch when authenticated — public pages (e.g. the acknowledgement link)
+  // must not trigger a tickets read. `isAuthenticated` flips true once session
+  // and profile resolve, then flips false on sign-out: one fetch, no race.
+  useEffect(() => {
+    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
+    fetchTickets();
+  }, [isAuthenticated, fetchTickets]);
+
+  const getTicket = (id: string) => tickets.find(t => t.ticketId === id);
+
+  const addTicket = async (data: AddTicketInput): Promise<Ticket> => {
+    const now = new Date().toISOString();
+
+    // Retry up to 5 times in case of a concurrent collision on ticket_id
+    let inserted: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const ticketId = await nextTicketIdFromDB();
+      const row = {
+        ticket_id:      ticketId,
+        raised_by:      data.raisedByUserId,
+        employee_email: data.employeeEmail ?? null,
+        asset_id:       (data.assetId === "N/A" || !data.assetId) ? null : data.assetId,
+        category:       data.category,
+        subcategory:    data.subcategory,
+        priority:       data.priority.toLowerCase(),
+        status:         data.assignedAgentId ? "assigned" : "open",
+        assigned_agent: data.assignedAgentId ?? null,
+        description:    data.description,
+        created_at:     now,
+        updated_at:     now,
+      };
+      const { data: result, error } = await supabase
+        .from("tickets")
+        .insert(row)
+        .select()
+        .single();
+      if (result && !error) { inserted = result as Record<string, unknown>; break; }
+      // Only retry on unique constraint violations; surface all other errors immediately
+      if (!error?.message?.includes("unique constraint")) {
+        throw new Error(error?.message ?? "Failed to raise ticket");
+      }
+    }
+    if (!inserted) throw new Error("Failed to raise ticket after retries. Please try again.");
+    const newTicket = mapFromDB(inserted);
+    setTickets(prev => [newTicket, ...prev]);
+    return newTicket;
+  };
+
+  const updateTicket = async (ticketId: string, updates: Partial<Ticket>): Promise<void> => {
+    const dbUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (updates.status          !== undefined) dbUpdates.status          = updates.status.toLowerCase().replace(/ /g, " ");
+    if (updates.priority        !== undefined) dbUpdates.priority        = updates.priority.toLowerCase();
+    if (updates.assignedAgentId !== undefined) dbUpdates.assigned_agent  = updates.assignedAgentId || null;
+    if (updates.resolutionNote !== undefined) dbUpdates.resolution_note = updates.resolutionNote;
+
+    const { error } = await supabase
+      .from("tickets")
+      .update(dbUpdates)
+      .eq("ticket_id", ticketId);
+    if (error) throw new Error(error.message);
+    const today = new Date().toISOString().split("T")[0];
+    setTickets(prev =>
+      prev.map(t => t.ticketId === ticketId ? { ...t, ...updates, updatedDate: today } : t)
+    );
+  };
+
+  const addComment = async (ticketId: string, comment: TicketComment): Promise<void> => {
+    const ticket = tickets.find(t => t.ticketId === ticketId);
+    if (!ticket) return;
+    const updatedComments = [...ticket.comments, comment];
+    // Persist comments as JSONB (the `comments` column exists in the DB). If the
+    // write fails we throw so the caller can surface it — never keep a local-only
+    // "phantom" comment that vanishes on refresh and breaks the audit trail.
+    const { error } = await supabase
+      .from("tickets")
+      .update({ comments: updatedComments, updated_at: new Date().toISOString() })
+      .eq("ticket_id", ticketId);
+    if (error) throw new Error(error.message);
+    const today = new Date().toISOString().split("T")[0];
+    setTickets(prev =>
+      prev.map(t =>
+        t.ticketId === ticketId
+          ? { ...t, comments: updatedComments, updatedDate: today }
+          : t
+      )
+    );
+  };
+
+  const deleteTicket = async (ticketId: string): Promise<void> => {
+    const { error } = await supabase
+      .from("tickets")
+      .delete()
+      .eq("ticket_id", ticketId);
+    if (error) throw new Error(error.message);
+    setTickets(prev => prev.filter(t => t.ticketId !== ticketId));
+  };
+
+  const deleteTickets = async (ids: string[]): Promise<void> => {
+    const { error } = await supabase
+      .from("tickets")
+      .delete()
+      .in("ticket_id", ids);
+    if (error) throw new Error(error.message);
+    setTickets(prev => prev.filter(t => !ids.includes(t.ticketId)));
+  };
+
+  return (
+    <TicketContext.Provider value={{
+      error,
+      tickets, loading, getTicket, refresh: fetchTickets,
+      addTicket, updateTicket, addComment, deleteTicket, deleteTickets,
+    }}>
+      {children}
+    </TicketContext.Provider>
+  );
+}
+
+export function useTickets() {
+  const ctx = useContext(TicketContext);
+  if (!ctx) throw new Error("useTickets must be used inside TicketProvider");
+  return ctx;
+}

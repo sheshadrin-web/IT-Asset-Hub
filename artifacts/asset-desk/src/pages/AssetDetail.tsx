@@ -1,0 +1,1061 @@
+import { useParams, Link } from "wouter";
+import { getAssetEmoji } from "@/lib/assetEmoji";
+import {
+  ArrowLeft, Monitor, Smartphone, Tablet, Calendar, MapPin,
+  User, Building, Tag, Package, Edit, AlertTriangle,
+  Wrench, Archive, UserPlus, RotateCcw, CheckCircle2,
+  ShoppingCart, PackageCheck, ClipboardCheck, Search, X,
+  RefreshCw, Clock, MailCheck, Wifi, WifiOff,
+} from "lucide-react";
+import { useState, useEffect, ElementType } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAssets } from "@/context/AssetContext";
+import { useTickets } from "@/context/TicketContext";
+import { useUsers } from "@/context/UsersContext";
+import { useAuth } from "@/context/AuthContext";
+import { AssetStatus } from "@/data/mockData";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import DeviceAgentCard from "@/components/DeviceAgentCard";
+import RecoveryCard from "@/components/asset/RecoveryCard";
+import AssetKpiCards from "@/components/asset/AssetKpiCards";
+import AssetActivityTimeline, {
+  type TimelineCommand,
+} from "@/components/asset/AssetActivityTimeline";
+import { isOnline, type DeviceLike } from "@/lib/deviceHealth";
+
+type ManagedDevice = DeviceLike & Record<string, unknown>;
+
+interface HistoryRow {
+  id:           string;
+  user_name:    string | null;
+  user_email:   string | null;
+  user_ecode:   string | null;
+  department:   string | null;
+  event_type:   "assigned" | "returned" | "unassigned";
+  event_by_name:string | null;
+  notes:        string | null;
+  created_at:   string;
+}
+
+const STATUS_COLORS: Record<AssetStatus, string> = {
+  "In Procurement": "bg-orange-500/15 text-orange-600 border-orange-500/20",
+  Available:        "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Assigned:         "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  "Recovery Stage": "bg-red-500/15 text-red-600 border-red-500/30 font-semibold",
+  "Under Repair":   "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  Lost:             "bg-red-500/15 text-red-500 border-red-500/20",
+  Retired:          "bg-gray-500/15 text-gray-500 border-gray-500/20",
+};
+
+// ─── Lifecycle stages ─────────────────────────────────────────────────────────
+const LIFECYCLE_STAGES: { key: string; label: string; sublabel: string; Icon: ElementType }[] = [
+  { key: "procurement", label: "Procurement",   sublabel: "Ordered & received",    Icon: ShoppingCart },
+  { key: "inventory",   label: "In Inventory",  sublabel: "Ready to assign",       Icon: Package },
+  { key: "allocated",   label: "Allocated",     sublabel: "Assigned to user",      Icon: UserPlus },
+  { key: "repair",      label: "Under Repair",  sublabel: "Sent for servicing",    Icon: Wrench },
+  { key: "retired",     label: "Retired",       sublabel: "End of life",           Icon: Archive },
+];
+
+function getLifecycleStageIdx(status: AssetStatus): number {
+  if (status === "In Procurement") return 0;
+  if (status === "Available")      return 1;
+  if (status === "Assigned")       return 2;
+  if (status === "Recovery Stage") return 2;
+  if (status === "Under Repair")   return 3;
+  if (status === "Retired")        return 4;
+  return 1;
+}
+const PRIORITY_COLORS: Record<string, string> = {
+  Critical: "bg-red-500/15 text-red-500 border-red-500/20",
+  High:     "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  Medium:   "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  Low:      "bg-gray-500/15 text-gray-500 border-gray-500/20",
+};
+const TICKET_STATUS_COLORS: Record<string, string> = {
+  Open:               "bg-blue-500/15 text-blue-600 border-blue-500/20",
+  Assigned:           "bg-purple-500/15 text-purple-600 border-purple-500/20",
+  "In Progress":      "bg-amber-500/15 text-amber-600 border-amber-500/20",
+  "Waiting for User": "bg-orange-500/15 text-orange-600 border-orange-500/20",
+  Resolved:           "bg-emerald-500/15 text-emerald-600 border-emerald-500/20",
+  Closed:             "bg-gray-500/15 text-gray-500 border-gray-500/20",
+  Rejected:           "bg-red-500/15 text-red-500 border-red-500/20",
+};
+
+export default function AssetDetail() {
+  const { id } = useParams<{ id: string }>();
+  const { getAsset, assignAsset, updateStatus, unassignAsset, markAcknowledged } = useAssets();
+  const [ackState, setAckState] = useState<"idle" | "saving">("idle");
+  const handleMarkAcknowledged = async () => {
+    if (!asset) return;
+    setAckState("saving");
+    try {
+      await markAcknowledged(asset.assetId);
+      toast({ title: "Marked as acknowledged", description: `${asset.assetId} acknowledged on behalf of ${asset.assignedTo ?? "user"}.` });
+    } catch (err) {
+      toast({ title: "Failed to mark acknowledged", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setAckState("idle");
+    }
+  };
+  const { tickets } = useTickets();
+  const { users }   = useUsers();
+  const { currentUser } = useAuth();
+  const { toast } = useToast();
+
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assignUserId,     setAssignUserId]      = useState("");
+  const [assignSearch,     setAssignSearch]      = useState("");
+  const [assignReason,     setAssignReason]      = useState("");
+  const [history,          setHistory]           = useState<HistoryRow[]>([]);
+  const [historyLoading,   setHistoryLoading]    = useState(false);
+  const [device,           setDevice]            = useState<ManagedDevice | null>(null);
+  const [commands,         setCommands]          = useState<TimelineCommand[]>([]);
+  const [deviceLoading,    setDeviceLoading]     = useState(false);
+  const [resendState,      setResendState]       = useState<"idle" | "sending" | "sent" | "error">("idle");
+  // Single-flight guard for assign/status/unassign mutations — prevents
+  // double-submit and freezes the relevant buttons while a write is in flight.
+  const [actionBusy,       setActionBusy]        = useState(false);
+
+  useEffect(() => {
+    if (!id || !supabaseConfigured) return;
+    setHistoryLoading(true);
+    supabase
+      .from("asset_assignment_history")
+      .select("id,user_name,user_email,user_ecode,department,event_type,event_by_name,notes,created_at")
+      .eq("asset_id", id)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        setHistory((data ?? []) as HistoryRow[]);
+        setHistoryLoading(false);
+      });
+  }, [id]);
+
+  // Managed-device telemetry + command history (laptops only) — powers the KPI
+  // cards, online indicator and activity timeline. Read-only; the agent card
+  // owns all device mutations.
+  // The route param `id` is the human asset tag (e.g. AST-001), but the agent
+  // keys everything by the asset UUID (managed_devices.laptop_asset_id /
+  // device_command_history.p_asset_id both expect the UUID). Resolve it here.
+  const lookupAsset = getAsset(id);
+  const assetType = lookupAsset?.assetType;
+  const assetUuid = lookupAsset?.id;
+  useEffect(() => {
+    if (!assetUuid || !supabaseConfigured || (assetType !== "Laptop" && assetType !== "Desktop")) {
+      setDevice(null);
+      setCommands([]);
+      return;
+    }
+    let cancelled = false;
+    setDeviceLoading(true);
+    (async () => {
+      const [dRes, cRes] = await Promise.all([
+        supabase.from("managed_devices").select("*").eq("laptop_asset_id", assetUuid).maybeSingle(),
+        supabase.rpc("device_command_history", { p_asset_id: assetUuid, p_limit: 20 }),
+      ]);
+      if (cancelled) return;
+      setDevice((dRes.data as ManagedDevice | null) ?? null);
+      setCommands((cRes.data ?? []) as TimelineCommand[]);
+      setDeviceLoading(false);
+    })().catch(() => {
+      if (!cancelled) setDeviceLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [assetUuid, assetType]);
+
+  const asset          = getAsset(id);
+  const relatedTickets = tickets.filter(t => t.assetId === id);
+  const isAdmin        = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+
+  const resendAckEmail = async () => {
+    if (!asset || !asset.assignedEmail || !asset.ackToken) return;
+    setResendState("sending");
+    try {
+      const { data, error } = await supabase.functions.invoke("send-assignment-email", {
+        body: {
+          toEmail:        asset.assignedEmail,
+          toName:         asset.assignedTo ?? asset.assignedEmail,
+          brand:          asset.brand,
+          model:          asset.model,
+          assetType:      asset.assetType,
+          assetId:        asset.assetId,
+          serialNumber:   asset.serialNumber,
+          processor:      asset.processor,
+          ram:            asset.ram,
+          storage:        asset.storage,
+          operatingSystem:asset.operatingSystem,
+          imei1:          asset.imeiNumber,
+          imei2:          asset.imei2,
+          phoneNumber:    asset.phoneNumber,
+          monitorBrand:   asset.monitorBrand,
+          monitorModel:   asset.monitorModel,
+          monitorSize:    asset.monitorSize,
+          keyboard:       asset.keyboard,
+          mouse:          asset.mouse,
+          accessories:    asset.accessories,
+          reason:         "",
+          ackToken:       asset.ackToken,
+          isReminder:     "true",
+        },
+      });
+      if (error) throw new Error(error.message);
+      const d = data as { success?: boolean; error?: string };
+      if (d.error) throw new Error(d.error);
+      setResendState("sent");
+      toast({ title: "Email re-sent", description: `Acknowledgement email sent to ${asset.assignedEmail}` });
+      setTimeout(() => setResendState("idle"), 5000);
+    } catch (err) {
+      setResendState("error");
+      const msg = err instanceof Error ? err.message : "Failed to send email";
+      toast({ title: "Failed to send", description: msg, variant: "destructive" });
+      setTimeout(() => setResendState("idle"), 4000);
+    }
+  };
+  const canEdit        = isAdmin || currentUser?.role === "it_agent";
+  const activeUsers    = users.filter(u => u.status === "active");
+  const selectedUser   = users.find(u => u.id === assignUserId);
+
+  const closeAssignDialog = () => {
+    setAssignDialogOpen(false);
+    setAssignUserId("");
+    setAssignSearch("");
+    setAssignReason("");
+  };
+
+  const handleAssignConfirm = async () => {
+    if (!asset || !selectedUser || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await assignAsset(asset.assetId, selectedUser.id, selectedUser.full_name, selectedUser.email, selectedUser.department ?? "", undefined, assignReason);
+      toast({ title: "Asset assigned", description: `Assigned to ${selectedUser.full_name}` });
+      closeAssignDialog();
+    } catch (err) {
+      toast({ title: "Failed to assign asset", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  // Search-filtered users: match ecode prefix OR name contains query
+  const nk = (s: string) => s.toLowerCase().trim();
+  const searchedUsers = assignSearch.trim().length === 0
+    ? activeUsers
+    : activeUsers.filter(u => {
+        const q = nk(assignSearch);
+        return nk(u.ecode ?? "").startsWith(q) || nk(u.full_name).includes(q);
+      });
+
+  const handleUpdateStatus = async (status: AssetStatus) => {
+    if (!asset || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await updateStatus(asset.assetId, status);
+      toast({ title: `Marked as ${status}` });
+    } catch (err) {
+      toast({ title: "Update failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleUnassign = async () => {
+    if (!asset || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await unassignAsset(asset.assetId);
+      toast({ title: "Asset unassigned" });
+    } catch (err) {
+      toast({ title: "Update failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  if (!asset) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <AlertTriangle className="h-10 w-10 text-muted-foreground" />
+        <p className="text-muted-foreground">Asset not found.</p>
+        <Link href="/assets">
+          <Button variant="outline" className="gap-2"><ArrowLeft className="h-4 w-4" /> Back to Assets</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-3">
+          <Link href="/assets">
+            <Button variant="ghost" size="icon" data-testid="button-back"><ArrowLeft className="h-4 w-4" /></Button>
+          </Link>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+                <span className="text-xl leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-xl font-bold text-foreground">{asset.assetId}</h1>
+                  <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>
+                    {asset.status}
+                  </span>
+                  {(asset.assetType === "Laptop" || asset.assetType === "Desktop") && device && (
+                    isOnline(device) ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                        </span>
+                        Online
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        <WifiOff className="h-3 w-3" /> Offline
+                      </span>
+                    )
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">{asset.brand} {asset.model}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Move to Inventory — for In Procurement only */}
+          {isAdmin && asset.status === "In Procurement" && (
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-move-inventory">
+              <PackageCheck className="h-4 w-4" /> Move to Inventory
+            </Button>
+          )}
+          {/* Receive back into inventory — for Recovery Stage (clears assigned user) */}
+          {isAdmin && asset.status === "Recovery Stage" && (
+            <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-receive-available">
+              <PackageCheck className="h-4 w-4" /> Receive — Mark Available
+            </Button>
+          )}
+          {/* Mark Available — for Under Repair, Retired, Lost */}
+          {isAdmin && (asset.status === "Under Repair" || asset.status === "Retired" || asset.status === "Lost") && (
+            <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" onClick={() => handleUpdateStatus("Available")} disabled={actionBusy} data-testid="button-mark-available">
+              <CheckCircle2 className="h-4 w-4" /> Mark Available
+            </Button>
+          )}
+          {/* Assign — for Available or Under Repair (not Assigned, not Retired) */}
+          {isAdmin && (asset.status === "Available" || asset.status === "Under Repair") && (
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => { setAssignDialogOpen(true); setAssignUserId(""); }} disabled={actionBusy} data-testid="button-assign">
+              <UserPlus className="h-4 w-4" /> Assign
+            </Button>
+          )}
+          {/* Return / Unassign — only for Assigned */}
+          {isAdmin && asset.status === "Assigned" && (
+            <>
+              <Link href={`/assets/${asset.assetId}/return`}>
+                <Button variant="outline" size="sm" className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50" data-testid="button-return-asset">
+                  <RotateCcw className="h-4 w-4" /> Return Asset
+                </Button>
+              </Link>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleUnassign} disabled={actionBusy}>
+                <UserPlus className="h-4 w-4" /> Unassign
+              </Button>
+            </>
+          )}
+          {/* Mark Repair — for Available or Assigned */}
+          {isAdmin && (asset.status === "Available" || asset.status === "Assigned") && (
+            <Button variant="outline" size="sm" className="gap-2 text-amber-600 border-amber-300 hover:bg-amber-50" onClick={() => handleUpdateStatus("Under Repair")} disabled={actionBusy} data-testid="button-mark-repair">
+              <Wrench className="h-4 w-4" /> Mark Repair
+            </Button>
+          )}
+          {/* Retire — for anything except already Retired */}
+          {isAdmin && asset.status !== "Retired" && (
+            <Button variant="outline" size="sm" className="gap-2 text-muted-foreground" onClick={() => handleUpdateStatus("Retired")} disabled={actionBusy} data-testid="button-retire">
+              <Archive className="h-4 w-4" /> Retire
+            </Button>
+          )}
+          {canEdit && (
+            <Link href={`/assets/${asset.assetId}/edit`}>
+              <Button size="sm" className="gap-2" data-testid="button-edit-asset">
+                <Edit className="h-4 w-4" /> Edit
+              </Button>
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* ── KPI dashboard cards ────────────────────────────────────────────── */}
+      <AssetKpiCards asset={asset} device={device} />
+
+      {/* ── Lifecycle tracker ──────────────────────────────────────────────── */}
+      {asset.status !== "Lost" && (() => {
+        const currentIdx = getLifecycleStageIdx(asset.status);
+        const total      = LIFECYCLE_STAGES.length;
+        const fillPct    = currentIdx === 0 ? 0 : (currentIdx / (total - 1)) * 100;
+        return (
+          <Card>
+            <CardContent className="px-6 pt-5 pb-6">
+              <div className="flex items-center justify-between mb-6">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                  Asset Lifecycle
+                </p>
+                <span className={cn(
+                  "text-[11px] font-semibold px-2.5 py-0.5 rounded-full border",
+                  currentIdx === 0 ? "bg-orange-50 text-orange-600 border-orange-200" :
+                  currentIdx === 1 ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                  currentIdx === 2 ? "bg-blue-50 text-blue-600 border-blue-200" :
+                  currentIdx === 3 ? "bg-amber-50 text-amber-600 border-amber-200" :
+                                     "bg-gray-100 text-gray-500 border-gray-200"
+                )}>
+                  {LIFECYCLE_STAGES[currentIdx].label}
+                </span>
+              </div>
+
+              {/* Step circles + connector track */}
+              <div className="relative">
+                {/* Gray baseline track — spans between centers of first and last circles (10%→90%) */}
+                <div className="absolute top-[17px] h-[2px] bg-border rounded-full" style={{ left: "10%", right: "10%" }} />
+                {/* Filled progress track */}
+                {currentIdx > 0 && (
+                  <div
+                    className="absolute top-[17px] h-[2px] rounded-full transition-all duration-500"
+                    style={{
+                      left: "10%",
+                      width: `${fillPct * 0.8}%`,
+                      background: "linear-gradient(to right, #10b981, #3b82f6)",
+                    }}
+                  />
+                )}
+
+                <div className="flex justify-between">
+                  {LIFECYCLE_STAGES.map((stage, idx) => {
+                    const isActive = idx === currentIdx;
+                    const isDone   = idx < currentIdx;
+                    const { Icon } = stage;
+                    return (
+                      <div key={stage.key} className="flex flex-col items-center gap-2.5" style={{ width: `${100 / total}%` }}>
+                        {/* Circle */}
+                        <div className={cn(
+                          "relative z-10 h-[34px] w-[34px] rounded-full border-2 flex items-center justify-center transition-all duration-300",
+                          isActive
+                            ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/30 ring-4 ring-blue-100"
+                            : isDone
+                            ? "bg-emerald-500 border-emerald-500 text-white shadow-sm"
+                            : "bg-white border-border text-muted-foreground/50"
+                        )}>
+                          {isDone ? (
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          ) : (
+                            <Icon className="h-[15px] w-[15px]" />
+                          )}
+                        </div>
+
+                        {/* Label */}
+                        <div className="text-center px-1">
+                          <p className={cn(
+                            "text-[11px] font-semibold leading-tight",
+                            isActive ? "text-blue-600" : isDone ? "text-emerald-600" : "text-muted-foreground/50"
+                          )}>
+                            {stage.label}
+                          </p>
+                          <p className={cn(
+                            "text-[10px] leading-tight mt-0.5 hidden sm:block",
+                            isActive ? "text-blue-400" : isDone ? "text-emerald-400" : "text-muted-foreground/35"
+                          )}>
+                            {stage.sublabel}
+                          </p>
+                          {isActive && (
+                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 text-[9px] font-bold uppercase tracking-wide">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">Device Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* ── Identity ─────────────────────────────── */}
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Identity</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  {[
+                    { icon: <Tag />,      label: "Asset ID",       value: asset.assetId },
+                    { icon: <span className="text-base leading-none" aria-hidden>{getAssetEmoji(asset.assetType)}</span>, label: "Type", value: asset.assetType },
+                    { icon: <Package />,  label: "Brand",          value: asset.brand },
+                    { icon: <Package />,  label: "Model",          value: asset.model },
+                    { icon: <Tag />,      label: "Serial Number",  value: asset.serialNumber },
+                    ...(asset.productNumber ? [{ icon: <Tag />, label: "Product Number", value: asset.productNumber }] : []),
+                  ].map(f => (
+                    <div key={f.label} className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium break-all">{f.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Specs (Laptop / Desktop / Tab) ───────── */}
+              {(asset.processor || asset.ram || asset.storage || asset.operatingSystem) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Specifications</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "Processor",        value: asset.processor },
+                      { label: "RAM",               value: asset.ram },
+                      { label: "Storage",           value: asset.storage },
+                      { label: "Operating System",  value: asset.operatingSystem },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Mobile / Tab specific ────────────────── */}
+              {(asset.assetType === "Mobile" || asset.assetType === "Tab") &&
+               (asset.imeiNumber || asset.imei2) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Device Identifiers</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "IMEI 1",        value: asset.imeiNumber },
+                      { label: "IMEI 2",        value: asset.imei2 },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium font-mono">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sim Card specific ────────────────────── */}
+              {asset.assetType === "Sim Card" && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sim Card Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "Provider",              value: asset.simProvider, mono: false },
+                      { label: "Official Mobile Number", value: asset.phoneNumber, mono: true },
+                      { label: "SIM Number (ICCID)",    value: asset.simNumber, mono: true },
+                      { label: "User Name",             value: asset.userName, mono: false },
+                      { label: "Use Case",              value: asset.useCase, mono: false },
+                      { label: "Billable Name",         value: asset.billableName, mono: false },
+                      { label: "Plan Name",             value: asset.planName, mono: false },
+                      { label: "Plan Amount",           value: asset.planAmount, mono: false },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Smartphone /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className={cn("text-sm text-foreground mt-0.5 font-medium", f.mono && "font-mono")}>{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Desktop peripherals ──────────────────── */}
+              {asset.assetType === "Desktop" &&
+               (asset.cpu || asset.monitorBrand || asset.monitorModel || asset.monitorSize || asset.keyboard || asset.mouse) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Peripherals</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                    {[
+                      { label: "CPU",           value: asset.cpu },
+                      { label: "Monitor Brand", value: asset.monitorBrand },
+                      { label: "Monitor Model", value: asset.monitorModel },
+                      { label: "Monitor Size",  value: asset.monitorSize },
+                      { label: "Keyboard",      value: asset.keyboard },
+                      { label: "Mouse",         value: asset.mouse },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex items-start gap-3">
+                        <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Monitor /></div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                          <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Purchase & Location ──────────────────── */}
+              <div className="border-t border-border pt-4">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Purchase & Location</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  {[
+                    { icon: <Calendar />, label: "Purchase Date", value: asset.purchaseDate },
+                    { icon: <MapPin />,   label: "Location",      value: asset.location },
+                    { icon: <Building />, label: "Ownership",     value: asset.ownership ?? "Miles" },
+                    ...(asset.vendor   ? [{ icon: <Building />, label: "Vendor",      value: asset.vendor }]  : []),
+                    ...(asset.invoice  ? [{ icon: <Tag />,      label: "Invoice No.", value: asset.invoice }] : []),
+                  ].map(f => (
+                    <div key={f.label} className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{f.icon}</div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium">{f.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Accessories / Others / Remarks ───────── */}
+              {(asset.accessories || asset.others || asset.remarks) && (
+                <div className="border-t border-border pt-4 space-y-3">
+                  {asset.accessories && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Package /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Accessories</p>
+                        <p className="text-sm text-foreground mt-0.5 font-medium">{asset.accessories}</p>
+                      </div>
+                    </div>
+                  )}
+                  {asset.others && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Others</p>
+                        <p className="text-sm text-foreground mt-0.5">{asset.others}</p>
+                      </div>
+                    </div>
+                  )}
+                  {asset.remarks && (
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex-shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4"><Tag /></div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Remarks</p>
+                        <p className="text-sm text-foreground mt-0.5">{asset.remarks}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold">Related Tickets <span className="text-muted-foreground font-normal">({relatedTickets.length})</span></CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {relatedTickets.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">No tickets raised for this asset.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        {["Ticket ID","Category","Priority","Status","Date"].map(h => (
+                          <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {relatedTickets.map(t => (
+                        <tr key={t.ticketId} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-3"><Link href={`/tickets/${t.ticketId}`} className="text-primary font-medium hover:underline">{t.ticketId}</Link></td>
+                          <td className="px-4 py-3 text-muted-foreground">{t.category} — {t.subcategory}</td>
+                          <td className="px-4 py-3"><span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", PRIORITY_COLORS[t.priority])}>{t.priority}</span></td>
+                          <td className="px-4 py-3"><span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", TICKET_STATUS_COLORS[t.status])}>{t.status}</span></td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">{t.createdDate}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Activity timeline ─────────────────────────────────────────── */}
+          <AssetActivityTimeline
+            history={history}
+            commands={commands}
+            agentInstalledAt={(device?.created_at as string | null | undefined) ?? null}
+            loading={historyLoading || deviceLoading}
+          />
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Status</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Current Status</span>
+                <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium", STATUS_COLORS[asset.status])}>{asset.status}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Open Tickets</span>
+                <span className="font-bold text-foreground">
+                  {relatedTickets.filter(t => !["Resolved","Closed","Rejected"].includes(t.status)).length}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {(asset.assignedTo || asset.assignedEmail || history.length > 0) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  User Assignment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(asset.assignedTo || asset.assignedEmail) && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Current Assigned User</p>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
+                          {(asset.assignedTo ?? asset.assignedEmail ?? "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                    <p className="text-sm font-semibold text-foreground">{asset.assignedTo ?? asset.assignedEmail}</p>
+                    <p className="text-xs text-muted-foreground">{asset.department}</p>
+                    {asset.assignedEmail && <p className="text-xs text-muted-foreground">{asset.assignedEmail}</p>}
+                    {asset.assignedAt && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Assigned on{" "}
+                        <span className="font-medium text-blue-600">
+                          {new Date(asset.assignedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        </span>
+                      </p>
+                    )}
+                    {asset.acknowledged ? (
+                      <span className="inline-flex items-center gap-1 mt-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                        Acknowledged
+                        {asset.acknowledgedAt && (
+                          <span className="font-normal text-emerald-600 ml-0.5">
+                            · {new Date(asset.acknowledgedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 mt-1 rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                        Pending Acknowledgement
+                      </span>
+                    )}
+                    {/* ── Admin: Mark as acknowledged manually ── */}
+                    {!asset.acknowledged && isAdmin && (
+                      <button
+                        type="button"
+                        disabled={ackState === "saving"}
+                        onClick={handleMarkAcknowledged}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        {ackState === "saving" ? "Saving…" : "Mark as Acknowledged"}
+                      </button>
+                    )}
+                    {/* ── Re-send email block ── */}
+                    {!asset.acknowledged && asset.assignedEmail && asset.ackToken && isAdmin && (() => {
+                      const hoursElapsed = asset.assignedAt
+                        ? (Date.now() - new Date(asset.assignedAt).getTime()) / 36e5
+                        : 0;
+                      const isOverdue = hoursElapsed >= 24;
+                      return (
+                        <div className="mt-2 flex flex-col gap-1.5">
+                          {isOverdue && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                              <Clock className="h-3 w-3" />
+                              {Math.floor(hoursElapsed)}h without acknowledgement
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={resendState === "sending" || resendState === "sent"}
+                            onClick={resendAckEmail}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                              resendState === "sent"
+                                ? "bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default"
+                                : resendState === "error"
+                                ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                                : isOverdue
+                                ? "bg-red-600 border-red-700 text-white hover:bg-red-700 disabled:opacity-60"
+                                : "bg-white border-border text-foreground hover:bg-accent disabled:opacity-60"
+                            )}
+                          >
+                            {resendState === "sending" ? (
+                              <><RefreshCw className="h-3 w-3 animate-spin" />Sending…</>
+                            ) : resendState === "sent" ? (
+                              <><MailCheck className="h-3 w-3" />Email Sent</>
+                            ) : (
+                              <><RefreshCw className="h-3 w-3" />Re-send Acknowledgement Email</>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── User History (previous assignments) ── */}
+                {(() => {
+                  const hasCurrent = !!(asset.assignedTo || asset.assignedEmail);
+                  // Drop the current active assignment's "assigned" event so the same
+                  // user is never shown twice (once as current, once in history).
+                  const matchesCurrent = (row: HistoryRow) => {
+                    if (!hasCurrent) return false;
+                    if (asset.assignedEmail && row.user_email)
+                      return row.user_email.toLowerCase() === asset.assignedEmail.toLowerCase();
+                    if (asset.assignedTo && row.user_name)
+                      return row.user_name === asset.assignedTo;
+                    return false;
+                  };
+                  const currentAssignedId = hasCurrent
+                    ? history.find(r => r.event_type === "assigned" && matchesCurrent(r))?.id
+                    : undefined;
+                  const pastHistory = history.filter(r => r.id !== currentAssignedId);
+                  return (
+                    <div className={cn(hasCurrent && "border-t border-border pt-3")}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">User History</p>
+                        {pastHistory.length > 0 && (
+                          <span className="ml-auto text-xs font-normal text-muted-foreground">
+                            {pastHistory.length} event{pastHistory.length !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                      {historyLoading ? (
+                        <p className="py-3 text-center text-xs text-muted-foreground">Loading…</p>
+                      ) : pastHistory.length === 0 ? (
+                        <p className="py-3 text-center text-xs text-muted-foreground">
+                          {hasCurrent ? "No previous assignments." : "No assignment history yet."}
+                        </p>
+                      ) : (
+                        <ol className="relative ml-4 border-l border-border">
+                          {pastHistory.map((row, i) => {
+                            const isAssigned  = row.event_type === "assigned";
+                            const isReturned  = row.event_type === "returned" || row.event_type === "unassigned";
+                            const dotClass    = isAssigned
+                              ? "bg-blue-500 ring-blue-100"
+                              : isReturned
+                              ? "bg-emerald-500 ring-emerald-100"
+                              : "bg-gray-400 ring-gray-100";
+                            const label       = isAssigned ? "Assigned" : isReturned ? "Returned" : row.event_type;
+                            const labelClass  = isAssigned
+                              ? "text-blue-600 bg-blue-50 border-blue-200"
+                              : isReturned
+                              ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+                              : "text-gray-500 bg-gray-50 border-gray-200";
+                            const displayName = [row.user_ecode, row.user_name].filter(Boolean).join(" · ") || row.user_email || "Unknown user";
+                            const date        = row.created_at
+                              ? new Date(row.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                              : "";
+                            return (
+                              <li key={row.id ?? i} className="ml-4 mb-4 last:mb-0">
+                                <span className={cn("absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full ring-4", dotClass)} />
+                                <div className="pl-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold", labelClass)}>{label}</span>
+                                    <span className="text-xs text-muted-foreground">{date}</span>
+                                  </div>
+                                  <p className="mt-0.5 text-sm font-medium text-foreground leading-snug">{displayName}</p>
+                                  {row.department && <p className="text-xs text-muted-foreground">{row.department}</p>}
+                                  {row.user_email && row.user_name && <p className="text-xs text-muted-foreground">{row.user_email}</p>}
+                                  {row.notes && <p className="mt-1 text-xs italic text-muted-foreground">"{row.notes}"</p>}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold">Warranty</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Purchased</span><span className="font-medium">{asset.purchaseDate}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Expires</span><span className="font-medium">{asset.warrantyEndDate}</span></div>
+            </CardContent>
+          </Card>
+
+          {/* ── Device Agent (Laptops only) ───────────────── */}
+          {(asset.assetType === "Laptop" || asset.assetType === "Desktop") && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
+
+          {/* ── Asset Recovery (only when a recovery is in progress) ─────── */}
+          {asset.id && <RecoveryCard assetId={asset.id} />}
+        </div>
+      </div>
+
+      <Dialog open={assignDialogOpen} onOpenChange={v => !v && closeAssignDialog()}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Assign {asset.assetId}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1">
+
+            {/* Reason for assignment */}
+            <div>
+              <label className="text-sm font-medium text-foreground block mb-1.5">
+                Reason for Assignment <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["New Joiner", "Replacement", "Additional Asset"] as const).map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setAssignReason(r)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors text-center ${
+                      assignReason === r
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-muted/30 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Search box */}
+            <div>
+              <label className="text-sm font-medium text-foreground block mb-1.5">
+                Search by Ecode or Name <span className="text-destructive">*</span>
+              </label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  data-testid="input-assign-search"
+                  className="pl-8 pr-8"
+                  placeholder="e.g. MPE1234 or Anjali…"
+                  value={assignSearch}
+                  onChange={e => { setAssignSearch(e.target.value); setAssignUserId(""); }}
+                  autoFocus
+                />
+                {assignSearch && (
+                  <button
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => { setAssignSearch(""); setAssignUserId(""); }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Results list — only show when no user selected yet */}
+            {!selectedUser && (
+              <ScrollArea className="max-h-52 rounded-lg border border-border">
+                {searchedUsers.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">No users found</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {searchedUsers.map(u => (
+                      <li key={u.id}>
+                        <button
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                          onClick={() => { setAssignUserId(u.id); setAssignSearch(""); }}
+                          data-testid={`user-result-${u.id}`}
+                        >
+                          <Avatar className="h-7 w-7 flex-shrink-0">
+                            <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
+                              {u.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{u.full_name}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {u.ecode && <span className="font-mono mr-1.5">{u.ecode}</span>}
+                              {u.department}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
+            )}
+
+            {/* Selected user confirmation card */}
+            {selectedUser && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-9 w-9 flex-shrink-0">
+                    <AvatarFallback className="bg-primary/20 text-primary font-semibold text-sm">
+                      {selectedUser.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">{selectedUser.full_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedUser.ecode && <span className="font-mono mr-1.5">{selectedUser.ecode}</span>}
+                      {selectedUser.department}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{selectedUser.email}</p>
+                  </div>
+                  <button
+                    className="text-muted-foreground hover:text-foreground flex-shrink-0"
+                    title="Change user"
+                    onClick={() => { setAssignUserId(""); setAssignSearch(""); }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAssignDialog}>Cancel</Button>
+            <Button onClick={handleAssignConfirm} disabled={!assignUserId || !assignReason || actionBusy} data-testid="button-confirm-assign-detail">
+              Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

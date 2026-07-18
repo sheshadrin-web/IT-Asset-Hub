@@ -1,0 +1,423 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Upload, Check, Send, RefreshCw, ImageIcon, CheckCircle2, Trash2,
+} from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
+import { cn } from "@/lib/utils";
+
+interface Wallpaper {
+  id:           string;
+  name:         string;
+  public_url:   string;
+  sha256:       string;
+  is_active:    boolean;
+  file_size:    number | null;
+  uploaded_at:  string;
+}
+interface Props {
+  assetId:           string;
+  managedDeviceId:   string | null;   // null = agent not installed yet
+  agentInstalled:    boolean;
+}
+
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Common laptop resolutions we render the logo for
+const VARIANT_SIZES: Array<[number, number]> = [
+  [1920, 1080],   // FHD — covers 1366×768 too (Windows will downscale)
+  [2560, 1440],   // QHD
+  [3840, 2160],   // 4K + MacBook 14"/16" Retina (5K is downscaled cleanly)
+];
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+/** Sample 4 corners and average → dominant background colour of the logo image. */
+function detectBgColor(img: HTMLImageElement): string {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const pts = [
+    [1, 1], [c.width - 2, 1], [1, c.height - 2], [c.width - 2, c.height - 2],
+  ];
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const [x, y] of pts) {
+    try {
+      const p = ctx.getImageData(x, y, 1, 1).data;
+      if (p[3] > 10) { r += p[0]; g += p[1]; b += p[2]; n++; }
+    } catch { /* CORS-tainted — fall back */ }
+  }
+  if (!n) return "#0b1d3a";       // Miles dark navy fallback
+  return `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})`;
+}
+
+/** Composite the logo centred on a solid background at the requested size,
+ *  preserving aspect, ~60% of the shortest edge, never upscaling past 1×. */
+async function makeVariant(
+  img: HTMLImageElement, width: number, height: number, bg: string, mime: string,
+): Promise<Blob> {
+  const c = document.createElement("canvas");
+  c.width = width; c.height = height;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // Fit logo into a centred box that's ~60% of the smaller dimension
+  const targetH = Math.min(img.naturalHeight, Math.round(Math.min(width, height) * 0.6));
+  const scale   = targetH / img.naturalHeight;
+  const drawW   = img.naturalWidth  * scale;
+  const drawH   = img.naturalHeight * scale;
+  const x       = Math.round((width  - drawW) / 2);
+  const y       = Math.round((height - drawH) / 2);
+  ctx.drawImage(img, x, y, drawW, drawH);
+
+  const outMime = mime === "image/jpeg" ? "image/jpeg" : "image/png";
+  return new Promise((resolve, reject) => {
+    c.toBlob((b) => b ? resolve(b) : reject(new Error("canvas blob failed")),
+             outMime, outMime === "image/jpeg" ? 0.95 : undefined);
+  });
+}
+
+export default function WallpaperManager({ assetId, managedDeviceId, agentInstalled }: Props) {
+  const { role } = useAuth();
+  const isSuperAdmin = role === "super_admin";
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [wallpapers, setWallpapers] = useState<Wallpaper[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [busy, setBusy]             = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Wallpaper | null>(null);
+
+  const load = useCallback(async () => {
+    if (!supabaseConfigured) { setLoading(false); return; }
+    setLoading(true);
+    const w = await supabase.from("wallpapers")
+      .select("id, name, public_url, sha256, is_active, file_size, uploaded_at")
+      .order("uploaded_at", { ascending: false })
+      .limit(8);
+    setWallpapers((w.data as Wallpaper[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleUpload(file: File, setActive: boolean) {
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Please choose an image file (PNG / JPG)", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    setUploadProgress("Reading image…");
+    try {
+      const buf = await file.arrayBuffer();
+      const sha = await sha256Hex(buf);
+      const ts  = Date.now();
+      const stem = `${ts}_${sha.slice(0, 8)}`;
+
+      // 1. Original
+      setUploadProgress("Uploading original…");
+      const origExt  = (file.name.split(".").pop() || "png").toLowerCase();
+      const origPath = `${stem}/original.${origExt}`;
+      const up = await supabase.storage.from("wallpapers").upload(origPath, file, {
+        cacheControl: "31536000", upsert: false, contentType: file.type,
+      });
+      if (up.error) throw up.error;
+      const origUrl = supabase.storage.from("wallpapers").getPublicUrl(origPath).data.publicUrl;
+
+      // 2. Generate dark-bg composites for common laptop resolutions
+      setUploadProgress("Generating resolution variants…");
+      const img = await loadImage(file);
+      const bg  = detectBgColor(img);
+      const outMime = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
+      const outExt  = outMime === "image/jpeg" ? "jpg" : "png";
+
+      const variants: Array<{ width: number; height: number; url: string; sha256: string }> = [];
+      for (const [w, h] of VARIANT_SIZES) {
+        setUploadProgress(`Generating ${w}×${h}…`);
+        const blob   = await makeVariant(img, w, h, bg, outMime);
+        const vBuf   = await blob.arrayBuffer();
+        const vSha   = await sha256Hex(vBuf);
+        const vPath  = `${stem}/${w}x${h}.${outExt}`;
+        const vUp    = await supabase.storage.from("wallpapers").upload(vPath, blob, {
+          cacheControl: "31536000", upsert: false, contentType: outMime,
+        });
+        if (vUp.error) throw vUp.error;
+        variants.push({
+          width: w, height: h, sha256: vSha,
+          url: supabase.storage.from("wallpapers").getPublicUrl(vPath).data.publicUrl,
+        });
+      }
+
+      // 3. Register — primary URL is the largest variant (best for retina; agent picks per screen)
+      setUploadProgress("Registering…");
+      const primary = variants[variants.length - 1];
+      const { data, error } = await supabase.rpc("wallpaper_register", {
+        p_name:         file.name,
+        p_storage_path: origPath,
+        p_public_url:   primary.url,
+        p_sha256:       primary.sha256,
+        p_mime_type:    outMime,
+        p_file_size:    file.size,
+        p_set_active:   setActive,
+        p_variants:     variants,
+      });
+      if (error || !data?.success) throw new Error(error?.message || data?.error || "register failed");
+
+      void origUrl; // (original kept in storage for re-processing later if needed)
+      toast({
+        title: setActive ? "Wallpaper uploaded & set active" : "Wallpaper uploaded",
+        description: `${variants.length} resolution variants generated (${VARIANT_SIZES.map(([w,h])=>`${w}×${h}`).join(", ")})`,
+      });
+      await load();
+    } catch (e: unknown) {
+      toast({ title: "Upload failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false); setUploadProgress(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function setActive(id: string) {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("wallpaper_set_active", { p_wallpaper_id: id });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({ title: "Failed to set active", description: error?.message ?? data?.error, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Set as active wallpaper" });
+    await load();
+  }
+
+  async function deleteWallpaper(id: string) {
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("wallpaper_delete", { p_wallpaper_id: id });
+      if (error || !data?.success) {
+        throw new Error(error?.message ?? data?.error ?? "delete failed");
+      }
+      // Purge the storage folder (original + every resolution variant live under
+      // the same `<stem>/` prefix, e.g. "1716998400000_a1b2c3d4/…").
+      const storagePath: string | undefined = data?.storage_path;
+      const stem = storagePath?.split("/")[0];
+      if (stem) {
+        const list = await supabase.storage.from("wallpapers").list(stem);
+        const paths = (list.data ?? []).map(f => `${stem}/${f.name}`);
+        if (paths.length) await supabase.storage.from("wallpapers").remove(paths);
+      }
+      toast({ title: "Wallpaper deleted" });
+      await load();
+    } catch (e: unknown) {
+      toast({ title: "Failed to delete", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+      setPendingDelete(null);
+    }
+  }
+
+  async function pushToDevice() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("wallpaper_push_to_asset", { p_asset_id: assetId });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Failed to push",
+        description: error?.message ?? data?.error ?? "agent not installed yet",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({ title: "Push queued — device will apply on next sync (≤5 min)" });
+  }
+
+  const active = wallpapers.find(w => w.is_active) ?? null;
+  // Read-only view for non-admins
+  if (!isSuperAdmin) {
+    if (!active) return null;
+    return (
+      <div className="border-t pt-3 mt-2">
+        <p className="text-[11px] font-medium text-muted-foreground mb-2">Company Wallpaper</p>
+        <div className="flex items-center gap-3">
+          <img src={active.public_url} alt={active.name}
+               className="w-14 h-9 rounded object-cover border bg-muted" />
+          <div className="text-xs">
+            <div className="font-medium">{active.name}</div>
+            <div className="text-muted-foreground">Active company wallpaper</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t pt-3 mt-2 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-medium text-muted-foreground">Company Wallpaper</p>
+        <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs"
+                onClick={() => void load()} disabled={busy || loading}>
+          <RefreshCw className={cn("h-3.5 w-3.5", (busy || loading) && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Active wallpaper preview */}
+      {active ? (
+        <div className="flex items-center gap-3 rounded border bg-muted/40 p-2">
+          <img src={active.public_url} alt={active.name}
+               className="w-20 h-12 rounded object-cover border bg-white" />
+          <div className="flex-1 min-w-0 text-xs">
+            <div className="font-medium truncate">{active.name}</div>
+            <div className="text-muted-foreground">
+              Active · {active.file_size ? `${Math.round(active.file_size / 1024)} KB` : "—"}
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700
+                            px-2 py-0.5 text-[10px] font-medium">
+            <CheckCircle2 className="h-3 w-3" /> Active
+          </span>
+        </div>
+      ) : (
+        <div className="rounded border border-dashed bg-muted/30 p-3 text-center text-xs text-muted-foreground">
+          <ImageIcon className="h-4 w-4 mx-auto mb-1 opacity-60" />
+          No active wallpaper yet. Upload the Miles logo below.
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/bmp,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleUpload(f, /*setActive*/ true);
+          }}
+          data-testid="input-wallpaper-file"
+        />
+        <Button
+          className="w-full gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy}
+          data-testid="button-upload-wallpaper"
+        >
+          <Upload className="h-4 w-4" />
+          {uploadProgress ?? "Upload Miles Wallpaper"}
+        </Button>
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          onClick={() => void pushToDevice()}
+          disabled={busy || !agentInstalled || !active}
+          data-testid="button-push-wallpaper"
+          title={!agentInstalled ? "Install the agent first" : !active ? "Set an active wallpaper first" : ""}
+        >
+          <Send className="h-4 w-4" /> Push Wallpaper to Device
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground -mt-1">
+        Upload sets the chosen image as the active company wallpaper. On the next agent sync (within 5 min),
+        every managed device fetches it and applies it to the desktop. Original image quality is preserved
+        (SHA-256 verified). Click <b>Push</b> to apply within seconds instead of waiting.
+      </p>
+
+      {/* Previous wallpapers — quick switch */}
+      {wallpapers.length > 1 && (
+        <div>
+          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Recent Uploads</p>
+          <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
+            {wallpapers.map(w => (
+              <div
+                key={w.id}
+                className={cn(
+                  "relative aspect-video rounded border overflow-hidden bg-muted group",
+                  w.is_active
+                    ? "ring-2 ring-emerald-500"
+                    : "hover:ring-2 hover:ring-violet-400"
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => !w.is_active && void setActive(w.id)}
+                  disabled={busy || w.is_active}
+                  className={cn(
+                    "absolute inset-0 w-full h-full",
+                    w.is_active ? "cursor-default" : "cursor-pointer"
+                  )}
+                  title={w.is_active ? `${w.name} (active)` : `Set "${w.name}" as active`}
+                >
+                  <img src={w.public_url} alt={w.name} className="w-full h-full object-cover" />
+                </button>
+                {w.is_active ? (
+                  <span className="absolute top-0.5 right-0.5 bg-emerald-500 text-white rounded-full p-0.5 pointer-events-none">
+                    <Check className="h-2.5 w-2.5" />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(w)}
+                    disabled={busy}
+                    className="absolute top-0.5 right-0.5 rounded bg-black/55 hover:bg-red-600 text-white p-1
+                               opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-0"
+                    title={`Delete "${w.name}"`}
+                    data-testid={`button-delete-wallpaper-${w.id}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this wallpaper?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.name}" will be permanently removed from the library, along with
+              its stored image files. Devices already showing it keep their current desktop —
+              this only removes it from the list. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={busy}
+              onClick={(e) => { e.preventDefault(); if (pendingDelete) void deleteWallpaper(pendingDelete.id); }}
+              data-testid="button-confirm-delete-wallpaper"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+    </div>
+  );
+}

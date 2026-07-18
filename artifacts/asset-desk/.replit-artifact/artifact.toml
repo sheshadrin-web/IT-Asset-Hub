@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Asset Desk Demo"
+version = "1.0.0"
+id = "artifacts/asset-desk"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22104
+
+[services.development]
+run = "pnpm --filter @workspace/asset-desk run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/asset-desk", "run", "build" ]
+publicDir = "artifacts/asset-desk/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22104"
+BASE_PATH = "/"
