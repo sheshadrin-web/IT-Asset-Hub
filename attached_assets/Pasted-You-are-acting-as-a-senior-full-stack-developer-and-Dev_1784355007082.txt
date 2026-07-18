@@ -1,0 +1,140 @@
+You are acting as a senior full-stack developer and DevOps engineer.
+
+I have attached the existing GitHub project ZIP for the Miles Education IT Asset Hub.
+
+This is an existing production application. Do not recreate the application from scratch, and do not replace the current design or functionality.
+
+Your first task is to safely extract, inspect, and understand the complete project.
+
+IMPORTANT RULES:
+
+1. Do not modify any files during the first review.
+2. Do not delete any code, database configuration, migrations, or documentation.
+3. Do not change the current application logic or user interface.
+4. Do not modify production data.
+5. Do not create a new database.
+6. Continue using the existing Supabase project.
+7. Do not expose, print, or save secret values in source-code files.
+8. Do not commit .env files, tokens, passwords, private keys, or service-role keys.
+9. Do not deploy or publish the application without asking me first.
+10. Do not disconnect the existing Render deployment.
+11. Explain every proposed change before applying it.
+12. Make a checkpoint before any major modification.
+
+CURRENT PROJECT INFORMATION:
+
+- Project name: IT Asset Hub
+- Organisation: Miles Education
+- Source code: GitHub
+- Current hosting: Render
+- Database: Supabase PostgreSQL
+- Authentication: Supabase Auth
+- File storage: Supabase Storage
+- Development platform: Replit
+- Future hosting target: AWS Linux server
+- Future domain: assets.mileseducation.com
+
+The application manages:
+
+- Laptops
+- Desktops
+- Mobile phones
+- SIM cards
+- Headphones
+- Mouse and accessories
+- Software licences
+- Employee asset allocations
+- Asset returns
+- Asset repairs
+- Helpdesk tickets
+- User roles and permissions
+- Reports
+- Device agents
+- Live device information
+
+PHASE 1 — PROJECT REVIEW
+
+Extract and review the complete ZIP file.
+
+Identify and report:
+
+1. Frontend framework and version
+2. Backend framework and version
+3. Programming languages
+4. Complete folder structure
+5. Package manager
+6. Build command
+7. Development command
+8. Production start command
+9. Application port
+10. Database configuration
+11. Supabase configuration
+12. Authentication flow
+13. Storage buckets and file-upload flow
+14. API structure
+15. Device-agent communication flow
+16. Scheduled jobs or background processes
+17. Render configuration
+18. GitHub Actions or deployment workflows
+19. Replit configuration files
+20. All required environment-variable names
+21. Hard-coded URLs
+22. References to onrender.com
+23. CORS configuration
+24. Redirect and callback URLs
+25. Database migrations
+26. Row Level Security policies
+27. Server-side secrets
+28. Frontend-safe public variables
+29. Security risks
+30. Missing documentation
+31. Missing files or broken imports
+32. Possible build or runtime problems
+33. AWS migration risks
+
+Do not display actual secret values. Only list the required variable names and explain what each one is used for.
+
+Classify each environment variable as:
+
+- Frontend public variable
+- Backend secret
+- Database credential
+- Authentication credential
+- Email credential
+- External integration credential
+- Deployment configuration
+
+Also classify each finding by priority:
+
+- Critical
+- High
+- Medium
+- Low
+
+PHASE 2 — REPORT
+
+Before changing anything, provide:
+
+1. Project architecture summary
+2. Technology stack
+3. Application flow
+4. Environment-variable checklist
+5. Missing-secret checklist
+6. Current deployment architecture
+7. Database and storage architecture
+8. Security findings
+9. Build risks
+10. Migration readiness report
+11. Recommended next steps
+
+Do not make any code changes until I review and approve the report.
+
+At the end, ask me whether I want you to:
+
+A. Configure the Replit development environment
+B. Fix build errors only
+C. Create project documentation
+D. Prepare Docker configuration
+E. Prepare the AWS migration plan
+
+Wait for my approval before continuing.
