@@ -38,13 +38,19 @@ export default function IntegrationConfigDialog({ provider, existing, open, savi
 
   // Reset the form whenever a different provider's dialog is opened. Secret
   // values are never returned from the backend, so secret fields always start
-  // blank; non-secret fields (API base URL) are prefilled from the saved row.
+  // blank; non-secret fields (API base URL, organization_name) are prefilled
+  // from the saved row.
   useEffect(() => {
     if (!open || !provider) return;
     const seed: Record<string, string> = {};
+    // Prefill URL field
     if (existing?.api_base_url) {
       const urlField = provider.fields.find(f => f.type === "url");
       if (urlField) seed[urlField.key] = existing.api_base_url;
+    }
+    // Prefill organisation display name (non-secret)
+    if (existing?.organization_name) {
+      seed["organization_name"] = existing.organization_name;
     }
     setValues(seed);
     setAutoSync(existing?.auto_sync_enabled ?? true);

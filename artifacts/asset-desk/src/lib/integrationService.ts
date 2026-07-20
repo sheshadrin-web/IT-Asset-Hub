@@ -27,21 +27,27 @@ export async function getIntegrations(): Promise<IntegrationRow[]> {
 export interface SaveIntegrationInput {
   provider_type: string;
   provider_name: string;
+  /** Friendly display name for this organisation (used when multi_instance=true). */
+  organization_name?: string;
   api_base_url: string | null;
   /** Raw credential field values. Pass `{}` to keep the stored secret unchanged. */
   credentials: Record<string, string>;
   auto_sync: boolean;
   frequency: string;
+  /** When set, update this specific row instead of upsert-by-provider-type. */
+  existing_id?: string;
 }
 
 export async function saveIntegration(input: SaveIntegrationInput): Promise<IntegrationRow> {
   const { data, error } = await supabase.rpc("save_hr_integration", {
     p_provider_type: input.provider_type,
     p_provider_name: input.provider_name,
+    p_organization_name: input.organization_name ?? "",
     p_api_base_url: input.api_base_url,
     p_credentials: input.credentials,
     p_auto_sync: input.auto_sync,
     p_frequency: input.frequency,
+    p_existing_id: input.existing_id ?? null,
   });
   return unwrap(data, error);
 }

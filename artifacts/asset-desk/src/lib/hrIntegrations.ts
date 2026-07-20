@@ -46,6 +46,11 @@ export interface ProviderDef {
   /** Tailwind classes for the logo placeholder tint. */
   accent: string;
   fields: ConfigField[];
+  /**
+   * When true the provider supports multiple simultaneous connections — one
+   * per Zoho / HRMS organisation. Keka and Custom remain single-instance.
+   */
+  multi_instance?: boolean;
 }
 
 export const PROVIDERS: ProviderDef[] = [
@@ -55,7 +60,16 @@ export const PROVIDERS: ProviderDef[] = [
     tagline: "Sync employees from Zoho People HRMS",
     monogram: "Zo",
     accent: "bg-red-50 text-red-600 ring-red-100",
+    multi_instance: true,
     fields: [
+      {
+        key: "organization_name",
+        label: "Organisation Display Name",
+        type: "text",
+        required: true,
+        placeholder: "e.g. Miles Education – Main",
+        help: "A friendly label to identify this Zoho organisation in the portal.",
+      },
       { key: "client_id", label: "Client ID", type: "text", required: true, placeholder: "1000.XXXXXXXXXXXX" },
       { key: "client_secret", label: "Client Secret", type: "password", secret: true, required: true },
       { key: "refresh_token", label: "Refresh Token", type: "password", secret: true, required: true, help: "Generated via Zoho OAuth self-client setup." },

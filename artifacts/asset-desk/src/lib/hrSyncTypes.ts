@@ -10,6 +10,8 @@ export interface IntegrationRow {
   id: string;
   provider_type: ProviderId;
   provider_name: string;
+  /** Friendly display name for this specific organisation (multi-instance only). */
+  organization_name: string;
   status: IntegrationStatus;
   api_base_url: string | null;
   auto_sync_enabled: boolean;
