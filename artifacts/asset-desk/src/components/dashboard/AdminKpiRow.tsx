@@ -91,9 +91,9 @@ export default function AdminKpiRow({
       </div>
 
       {/* ── Body ── */}
-      <div className="p-4 flex gap-4">
+      <div className="p-4 flex flex-col lg:flex-row gap-4">
         {/* ── Left: 6 category cards in a 3×2 grid ── */}
-        <div className="flex-1 grid grid-cols-3 gap-3">
+        <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
           {CATEGORIES.map(cat => {
             const stats = computeStats(assets, cat.types);
             return (
@@ -142,7 +142,7 @@ export default function AdminKpiRow({
         </div>
 
         {/* ── Right: Quick Alerts panel ── */}
-        <div className="w-[200px] shrink-0 rounded-xl border border-border bg-background overflow-hidden flex flex-col">
+        <div className="w-full lg:w-[200px] lg:shrink-0 rounded-xl border border-border bg-background overflow-hidden flex flex-col">
           <div className="px-3.5 py-2.5 border-b border-border/70">
             <p className="text-xs font-semibold text-foreground">Quick Alerts</p>
           </div>
