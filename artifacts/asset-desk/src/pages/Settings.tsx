@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -98,7 +98,16 @@ export default function Settings() {
   const { currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === "super_admin";
 
+  const [, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>("general");
+
+  const handleTabClick = (id: TabId) => {
+    if (id === "integrations") {
+      navigate("/settings/integrations");
+    } else {
+      setActiveTab(id);
+    }
+  };
 
   const [emailNotifications, setEmailNotifications] = useState(DEFAULTS.email_notifications);
   const [ticketAssignment,   setTicketAssignment]   = useState(DEFAULTS.ticket_assignment);
@@ -309,7 +318,7 @@ export default function Settings() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabClick(tab.id)}
                 data-testid={`tab-${tab.id}`}
                 className={cn(
                   "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-left",
@@ -509,23 +518,6 @@ export default function Settings() {
             <SettingsCard icon={Shield} title="Security" description="Authentication and access control">
               {securityFields}
             </SettingsCard>
-          )}
-
-          {activeTab === "integrations" && (
-            <Link href="/settings/integrations" data-testid="link-integrations">
-              <div className="group rounded-2xl border border-card-border/70 bg-card/85 backdrop-blur-md shadow-[0_2px_8px_-2px_rgba(30,58,138,0.10),0_14px_36px_-18px_rgba(30,58,138,0.20)] transition-shadow hover:shadow-[0_6px_18px_-4px_rgba(30,58,138,0.18),0_18px_44px_-18px_rgba(30,58,138,0.28)] cursor-pointer px-5 py-4 sm:px-6 flex items-center gap-4">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Plug className="h-5 w-5 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-base font-semibold text-foreground">HR Portal Integrations</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Connect Zoho People &amp; Keka to sync your user directory, field mappings, sync logs &amp; automation rules
-                  </p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 transition-transform group-hover:translate-x-0.5" />
-              </div>
-            </Link>
           )}
 
           {activeTab === "access" && isSuperAdmin && <AccessControlPanel canEdit={isSuperAdmin} />}
