@@ -1,0 +1,603 @@
+Proceed with fixing the existing Miles Education Remote Access implementation.
+
+IMPORTANT
+
+Do not add or merge rustdesk-master(2).zip.
+
+Do not create a separate project.
+
+Do not create a separate portal.
+
+Do not redesign unrelated modules.
+
+Use the current:
+
+- IT Asset Portal
+- Existing Asset Details Remote Access button
+- Existing Miles Asset Agent
+- Existing Supabase Realtime transport
+- Existing Supabase database
+- Existing employee consent dialog
+- Existing active-session banner
+- Existing Render deployment
+
+Create a new branch:
+
+feature/fix-existing-remote-access
+
+Do not modify main directly.
+
+==================================================
+GOAL
+==================================================
+
+Make the current Remote Access flow work reliably from end to end.
+
+Required working flow:
+
+1. Administrator opens an asset.
+2. Administrator clicks Remote Access.
+3. Portal verifies that the agent is online.
+4. Portal creates a remote-access request.
+5. Agent receives the request.
+6. Employee sees the consent dialog.
+7. Employee accepts View Only or Remote Control.
+8. Portal receives the consent response.
+9. Agent begins screen capture.
+10. Administrator receives the screen stream.
+11. Mouse and keyboard input work correctly.
+12. Employee sees the active-session banner.
+13. Either side can end the session.
+14. Backend records session end, duration, and reason.
+15. Asset activity timeline shows the complete session history.
+
+==================================================
+PHASE 1 — END-TO-END DIAGNOSIS
+==================================================
+
+Before changing code, trace the full request from portal to agent and back.
+
+Inspect:
+
+1. Existing Remote Access button component
+2. Existing click handler
+3. Existing modal
+4. Existing remote request creation
+5. Existing Supabase table writes
+6. Existing Edge Functions
+7. Existing RLS policies
+8. Existing Realtime channel names
+9. Existing broadcast event names
+10. Existing agent subscriptions
+11. Existing consent response handling
+12. Existing screen-capture loop
+13. Existing frame encoding
+14. Existing viewer subscription
+15. Existing mouse input handling
+16. Existing keyboard input handling
+17. Existing session timeout
+18. Existing reconnect logic
+19. Existing end-session logic
+20. Existing activity timeline logging
+
+For every step, report:
+
+- Expected behaviour
+- Actual behaviour
+- Relevant file
+- Relevant function
+- Root cause
+- Fix required
+- Test method
+
+Do not start editing until this diagnosis is complete.
+
+==================================================
+PHASE 2 — FIX CRITICAL ISSUES
+==================================================
+
+Fix these known problems first.
+
+1. BROKEN SELF-UPDATE URL
+
+Current broken URL:
+
+https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py
+
+Add these files to the current Vite public directory:
+
+public/agent/laptop_agent.py
+public/agent/version.json
+
+Use:
+
+https://it.assets.mileseducation.org/agent/laptop_agent.py
+
+and:
+
+https://it.assets.mileseducation.org/agent/version.json
+
+Add:
+
+- Version check
+- SHA-256 checksum
+- Download timeout
+- Compile validation
+- Atomic replacement
+- Rollback on failure
+
+Do not include secrets in public files.
+
+2. SESSION-END REPORTING
+
+When a session ends because of:
+
+- Employee disconnect
+- Administrator disconnect
+- Network failure
+- Timeout
+- Agent restart
+- Viewer close
+- Error
+
+The agent must report:
+
+- session_id
+- ended_at
+- ended_by
+- end_reason
+- duration_seconds
+
+Make the endpoint idempotent.
+
+Update the current asset activity timeline.
+
+3. CONSENT DIALOG
+
+Replace the current basic consent message with:
+
+Miles Education Remote Access Request
+
+Show:
+
+- Administrator name
+- Department
+- Support reason
+- Ticket number
+- Requested mode
+- Request time
+- 120-second countdown
+
+Buttons:
+
+- Allow Remote Control
+- Allow View Only
+- Decline
+
+If expired:
+
+- Auto-decline
+- Notify portal
+- Log expiry
+
+4. ACTIVE SESSION BANNER
+
+Improve the current banner to show:
+
+- Miles Education Remote Access Active
+- Administrator name
+- Reason
+- Ticket number
+- Session mode
+- Session duration
+- Connection status
+
+Buttons:
+
+- Pause Control
+- End Session
+
+Keyboard shortcut:
+
+Ctrl + Shift + D
+
+This shortcut should bring the banner and End Session button into focus.
+
+Do not allow hidden sessions.
+
+==================================================
+PHASE 3 — SCREEN STREAM RELIABILITY
+==================================================
+
+Inspect and fix:
+
+- mss capture loop
+- Pillow encoding
+- JPEG quality
+- Frame rate
+- Frame size
+- Supabase Realtime message limits
+- Dropped frames
+- Duplicate frames
+- Slow consumer behaviour
+- Viewer rendering
+- Reconnect after network interruption
+- Agent CPU usage
+- Agent memory usage
+
+Add safe defaults:
+
+- Initial FPS: 5
+- Adaptive FPS: 2 to 10
+- Initial JPEG quality: 55
+- Maximum frame width: 1600
+- Reduce quality automatically if payload is too large
+- Drop stale frames instead of queueing indefinitely
+
+Do not store screen frames in the database.
+
+Do not log screen contents.
+
+==================================================
+PHASE 4 — REALTIME CHANNEL CONSISTENCY
+==================================================
+
+Ensure the portal and agent use exactly the same:
+
+- Channel naming convention
+- Session ID
+- Device ID
+- Event names
+- Payload schema
+- Auth checks
+- Expiry rules
+
+Define one shared event contract.
+
+Suggested events:
+
+remote_request
+remote_consent_response
+remote_session_authorised
+screen_frame
+mouse_move
+mouse_click
+mouse_scroll
+key_down
+key_up
+select_monitor
+pause_control
+resume_control
+end_session
+session_ended
+heartbeat
+connection_status
+
+Create a shared contract document or schema.
+
+Reject:
+
+- Unknown events
+- Wrong session IDs
+- Wrong device IDs
+- Expired sessions
+- Revoked devices
+- Replayed session tokens
+
+==================================================
+PHASE 5 — MOUSE AND KEYBOARD FIXES
+==================================================
+
+Inspect coordinate mapping.
+
+Support:
+
+- Fit-to-window scaling
+- Actual-size scaling
+- Primary monitor
+- Multiple monitors
+- DPI scaling
+- Negative monitor coordinates
+- Different browser viewport sizes
+
+Mouse:
+
+- move
+- left click
+- right click
+- double click
+- scroll
+- drag
+
+Keyboard:
+
+- key down
+- key up
+- modifiers
+- function keys
+- arrows
+- backspace
+- delete
+- copy/paste shortcuts only when policy allows
+
+Add input rate limiting.
+
+Do not allow input in View Only mode.
+
+==================================================
+PHASE 6 — MULTI-MONITOR
+==================================================
+
+Replace primary-monitor-only capture.
+
+Enumerate:
+
+mss.monitors
+
+Support:
+
+- All Displays
+- Display 1
+- Display 2
+- Additional displays
+
+Add event:
+
+select_monitor
+
+Payload:
+
+{
+  "session_id": "...",
+  "monitor_index": 1
+}
+
+Requirements:
+
+- Validate monitor index
+- Fall back to primary when invalid
+- Report monitor count
+- Report width, height, x, y
+- Switch without restarting the session
+- Log monitor changes
+
+==================================================
+PHASE 7 — SESSION STATE MACHINE
+==================================================
+
+Use clear states:
+
+- requested
+- waiting_for_consent
+- approved
+- connecting
+- connected
+- paused
+- reconnecting
+- ending
+- ended
+- declined
+- expired
+- failed
+
+Prevent invalid transitions.
+
+Examples:
+
+- ended cannot become connected
+- expired cannot be approved
+- declined cannot start
+- revoked device cannot connect
+- View Only cannot send input
+
+Persist important state transitions.
+
+==================================================
+PHASE 8 — SECURITY
+==================================================
+
+Fix insecure Windows token storage.
+
+Current issue:
+
+Token is stored in plaintext in run.cmd.
+
+Replace with:
+
+- Windows Credential Manager, or
+- DPAPI-protected local storage
+
+Requirements:
+
+- No token in run.cmd
+- No token in logs
+- No token in command-line arguments
+- Migrate existing installations safely
+- Remove plaintext token after successful migration
+- Do not revoke the device if migration temporarily fails
+
+Also verify:
+
+- Agent registration
+- Device revocation
+- Session token expiry
+- One-time token usage
+- Tenant isolation
+- RLS
+- Role permissions
+- Super Admin direct access policy
+- Audit integrity
+
+==================================================
+PHASE 9 — PORTAL UI
+==================================================
+
+Update only the existing Remote Access area.
+
+Show button states:
+
+- Available
+- Device Offline
+- Agent Missing
+- Waiting for Approval
+- Approved
+- Connecting
+- Connected
+- Session Active
+- Session Ended
+- Failed
+- Update Required
+- Device Revoked
+
+Remote Access modal must show:
+
+- Asset tag
+- Device name
+- Assigned employee
+- Signed-in user
+- Agent status
+- Agent version
+- Last seen
+- Requested mode
+- Reason
+- Ticket
+- Consent status
+- Connection status
+- Session duration
+- Selected monitor
+
+Add clear error messages for:
+
+- Agent offline
+- Consent declined
+- Request expired
+- Realtime connection failed
+- Screen stream unavailable
+- Input unavailable
+- Session ended
+- Device revoked
+
+==================================================
+PHASE 10 — LOGGING
+==================================================
+
+Add safe diagnostic logs.
+
+Include:
+
+- Timestamp
+- Session ID
+- Asset ID
+- Device ID
+- Event type
+- Connection state
+- Error code
+- Retry count
+- Latency
+- Frame size
+- FPS
+
+Do not log:
+
+- Tokens
+- Passwords
+- Keystrokes
+- Screen content
+- Private keys
+- Clipboard content
+
+Add a debug flag disabled by default.
+
+==================================================
+PHASE 11 — TESTING
+==================================================
+
+Test the complete flow on:
+
+- Windows 10
+- Windows 11
+- Same network
+- Different networks
+- Home Wi-Fi
+- Office Wi-Fi
+- VPN
+- Slow network
+- One monitor
+- Two monitors
+- Sleep and resume
+- Agent restart
+- Viewer refresh
+- Browser refresh
+- Employee decline
+- Employee timeout
+- Employee disconnect
+- Administrator disconnect
+- Network failure
+- Reconnect
+- Revoked device
+- Expired session
+
+Add unit and integration tests for:
+
+- Event schema
+- State transitions
+- Consent expiry
+- Session token expiry
+- Role checks
+- RLS
+- Session end idempotency
+- Coordinate translation
+- View Only input rejection
+- Multi-monitor switching
+
+==================================================
+IMPLEMENTATION ORDER
+==================================================
+
+Use this order:
+
+1. Diagnose current flow.
+2. Fix channel and event mismatches.
+3. Fix consent response.
+4. Fix session authorisation.
+5. Fix screen stream.
+6. Fix mouse/keyboard input.
+7. Add session-end reporting.
+8. Add reconnect.
+9. Add multi-monitor.
+10. Fix token storage.
+11. Fix self-update URL.
+12. Add tests.
+13. Update documentation.
+14. Update agent version only after testing.
+
+Current version:
+
+0.9.3
+
+Target after successful testing:
+
+1.0.0
+
+==================================================
+FIRST RESPONSE REQUIRED
+==================================================
+
+Before editing any file, show:
+
+1. Exact root cause of the current failure.
+2. Complete end-to-end flow map.
+3. Exact files to modify.
+4. Exact functions to modify.
+5. Database changes.
+6. Edge Function changes.
+7. RLS changes.
+8. Realtime event contract.
+9. Agent changes.
+10. Portal changes.
+11. Test plan.
+12. Rollback plan.
+
+Do not change code yet.
+
+Wait for my confirmation.
