@@ -1,0 +1,826 @@
+You are acting as a senior full-stack developer, Rust developer, React/TypeScript developer, Supabase architect, Windows agent developer and application-security engineer.
+
+Current stack:
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Supabase PostgreSQL
+- Supabase Authentication
+- Supabase Storage
+- Supabase Edge Functions
+- Render Static Site
+- Existing Miles Asset Agent installed on managed laptops
+
+There is already a Remote Access button on the Asset Details page.
+
+IMPORTANT INSTRUCTION
+
+Do not create a separate remote-access project.
+
+Do not create a separate portal.
+
+Do not create a separate user-management application.
+
+Do not redirect the administrator to another website.
+
+Do not simply open an external third-party remote-access application.
+
+Update only the existing Remote Access functionality inside the current IT Asset Portal and existing Miles Asset Agent.
+
+Use the uploaded remote-desktop Git source archive as the technical base/reference for screen sharing, mouse control, keyboard control, signalling, relay and viewer functionality.
+
+The user-facing name must be:
+
+Miles Education Remote Access
+
+Short name:
+
+Miles Remote Access
+
+Do not show the original third-party product name in normal user-facing screens.
+
+However:
+
+- Preserve legally required open-source licences.
+- Preserve copyright notices.
+- Preserve required source-code notices.
+- Add an Open Source Notices section.
+- Do not falsely claim ownership of third-party source code.
+- First prepare a licence-compliance assessment.
+
+==================================================
+MAIN EXPECTED EXPERIENCE
+==================================================
+
+The final experience must work similarly to enterprise tools such as JumpCloud Remote Assist.
+
+Administrator flow:
+
+1. Administrator logs in to the existing IT Asset Portal.
+2. Administrator opens an asset.
+3. Administrator clicks the existing Remote Access button.
+4. The portal checks whether the Miles Asset Agent and Miles Remote Access component are online.
+5. The portal displays the device and assigned-user details.
+6. The administrator chooses the access method.
+7. The remote viewer opens as part of the Miles Asset Portal experience.
+8. The administrator can view and control the employee laptop.
+9. The session is logged in the same portal.
+10. After the session ends, the complete activity remains in the asset timeline.
+
+Do not make the administrator manually enter:
+
+- Device ID
+- Permanent password
+- Relay password
+- Connection address
+- Session token
+
+The selected asset must automatically determine which managed laptop is accessed.
+
+==================================================
+ACCESS MODES
+==================================================
+
+Support two access modes.
+
+MODE 1 — EMPLOYEE AUTHORISED ACCESS
+
+This is the default method.
+
+Workflow:
+
+1. IT administrator clicks Remote Access.
+2. Administrator enters:
+   - Support reason
+   - Ticket number
+   - Expected session duration
+   - View Only or Remote Control
+3. Employee receives a visible request on the laptop.
+4. Employee sees:
+   - Administrator name
+   - Department
+   - Support reason
+   - Ticket number
+   - Requested access mode
+5. Employee can:
+   - Allow Remote Control
+   - Allow View Only
+   - Decline
+6. The request expires automatically after 120 seconds.
+7. After approval, the remote session starts.
+8. Employee sees a persistent active-session banner.
+9. Either the administrator or employee can end the session.
+
+MODE 2 — SUPER ADMIN DIRECT ACCESS
+
+Super Admin may start direct access only when all conditions below are met:
+
+- The laptop is company-owned.
+- The asset is actively managed.
+- The Miles Agent is installed and online.
+- A company remote-support policy permits unattended support.
+- The Super Admin has the required permission.
+- The Super Admin enters a mandatory reason.
+- A valid ticket or incident number is entered when required.
+- The action is fully logged.
+- The employee laptop displays a visible active-session notification.
+- The session has a maximum time limit.
+- The session can be terminated from the laptop.
+- The direct-access policy is enabled by an authorised system owner.
+
+Super Admin direct access must not be hidden.
+
+When direct access begins, show on the employee laptop:
+
+“Miles IT Support has started an authorised remote-support session on this company-managed device.”
+
+Display:
+
+- Administrator name
+- Reason
+- Ticket number
+- Session start time
+- End Session button
+
+Do not provide silent or invisible access.
+
+==================================================
+ROLES AND PERMISSIONS
+==================================================
+
+Use the existing portal role system.
+
+Roles:
+
+Super Admin
+
+- Can use Employee Authorised Access
+- Can use Direct Access when organisational policy permits
+- Can configure remote-access policies
+- Can view all remote-session history
+- Can revoke remote access from a device
+
+IT Admin
+
+- Can request Employee Authorised Access
+- Cannot use Direct Access unless explicitly assigned a special permission
+- Can view sessions for assigned assets
+
+Remote Support Engineer
+
+- Can request Employee Authorised Access
+- Must provide a ticket number
+- Cannot use Direct Access
+- Cannot change system policies
+
+IT Auditor
+
+- Can view audit history
+- Cannot start remote sessions
+
+Employee
+
+- Can accept or decline requests
+- Can stop an active session
+- Can view their own session history
+- Cannot remotely access another device
+
+Enforce permissions in the backend.
+
+Do not rely only on hiding frontend buttons.
+
+==================================================
+EXISTING AGENT UPDATE
+==================================================
+
+Do not create a separately managed installation process.
+
+Update the existing Miles Asset Agent installer so that it installs:
+
+1. Miles Asset Agent Service
+2. Miles Education Remote Access Service
+3. Miles Agent Tray Application
+4. Miles Agent Update Service
+5. Shared secure device identity
+
+Installer name:
+
+MilesAssetAgentSetup.exe
+
+When the existing Miles Asset Agent is installed:
+
+- Asset inventory capability must be installed.
+- Device command capability must be installed.
+- Remote-access host capability must also be installed.
+- All components must register against the same asset.
+- All components must use the same secure device registration.
+- The portal must show the versions of both components.
+
+The employee must not need to install remote access separately.
+
+The installer must clearly disclose:
+
+“This software allows Miles Education IT to collect company-device information, perform approved device-management actions and provide authorised remote technical support.”
+
+Do not:
+
+- Hide the installer
+- Disable Windows Defender
+- Disable Windows Firewall
+- Create undocumented startup tasks
+- Store permanent passwords in plaintext
+- Create a hidden administrator account
+- Install unrelated software
+
+==================================================
+REMOTE ACCESS BUTTON
+==================================================
+
+Update the existing Remote Access button shown under:
+
+Asset Details
+→ Quick Actions
+→ Remote Access
+
+Do not add a second button in another project.
+
+Button states:
+
+- Available
+- Device Offline
+- Agent Missing
+- Remote Component Missing
+- Update Required
+- Access Restricted
+- Waiting for Employee Approval
+- Session Active
+- Device Revoked
+
+When clicked, open a modal titled:
+
+Miles Education Remote Access
+
+Display:
+
+DEVICE INFORMATION
+
+- Asset Tag
+- Device Name
+- Assigned Employee
+- Signed-in User
+- Operating System
+- IP Address
+- Asset Agent Version
+- Remote Access Version
+- Online Status
+- Last Seen
+- Current Active Session
+
+ACCESS OPTIONS
+
+- Employee Authorised Access
+- Super Admin Direct Access, visible only when permitted
+
+SESSION DETAILS
+
+- Support Reason
+- Ticket Number
+- Access Mode
+- Expected Duration
+- Clipboard Permission
+- File Transfer Permission
+
+BUTTONS
+
+- Request View Only
+- Request Remote Control
+- Start Direct Access, permitted Super Admin only
+- View Session History
+- Cancel
+
+Do not display:
+
+- Permanent passwords
+- Private keys
+- Raw connection credentials
+- Reusable tokens
+- Relay secrets
+
+==================================================
+REMOTE VIEWER EXPERIENCE
+==================================================
+
+The remote viewer must be part of the Miles Asset Portal workflow.
+
+Preferred experience:
+
+1. Administrator starts an authorised session.
+2. Portal creates a short-lived launch token.
+3. Miles Remote Access Viewer opens for that specific asset.
+4. The viewer validates the token.
+5. The viewer connects only to the selected registered device.
+6. The session cannot be reused for another device.
+7. When the viewer closes, the session ends or enters a controlled reconnect period.
+
+Viewer title:
+
+Miles Education Remote Access
+
+Viewer header must display:
+
+- Asset Tag
+- Device Name
+- Assigned Employee
+- Administrator Name
+- Session Mode
+- Connection Status
+- Session Duration
+
+Viewer actions:
+
+- Full Screen
+- Fit to Window
+- Actual Size
+- Select Monitor
+- View Only
+- Remote Control
+- Pause Control
+- Clipboard On/Off
+- File Transfer, only when permitted
+- Reconnect
+- End Session
+
+Do not provide a general public connection page where the administrator enters any arbitrary device ID and password.
+
+The viewer must open only through an authorised portal session.
+
+==================================================
+REMOTE SESSION CAPABILITIES
+==================================================
+
+Phase 1:
+
+- Live screen viewing
+- Mouse control
+- Keyboard control
+- View-only mode
+- Multiple-monitor selection
+- Full-screen mode
+- Adaptive display quality
+- Connection reconnect
+- Session chat
+- Session duration timer
+- Employee consent
+- Super Admin direct access policy
+- Complete audit history
+
+Phase 2, disabled until separately approved:
+
+- File transfer
+- Clipboard transfer
+- Audio
+- Session recording
+- Remote restart and reconnect
+- Multiple support administrators
+
+Never implement:
+
+- Keylogging
+- Password capture
+- Browser-cookie extraction
+- Hidden screen recording
+- Hidden microphone access
+- Hidden camera access
+- Antivirus bypass
+- Security-tool bypass
+- Undocumented remote shell
+- Arbitrary command execution
+- Invisible unattended access
+
+==================================================
+DEVICE IDENTITY
+==================================================
+
+The remote component must use the same managed device identity as the Asset Agent.
+
+Use:
+
+- tenant_id
+- asset_id
+- agent_id
+- device_id
+- remote_device_id
+- installation_id
+- device_public_key
+- registration_status
+
+Do not use only:
+
+- MAC address
+- IP address
+- Hostname
+- Serial number
+
+Each laptop must have a cryptographically generated identity.
+
+Requirements:
+
+- Private device key stays on the laptop.
+- Public device key is stored by the backend.
+- Device registration can be revoked.
+- Session credentials are short lived.
+- Session credentials cannot be replayed.
+- Returned or deleted assets cannot receive new sessions.
+- Reassigned assets must invalidate old remote permissions.
+
+==================================================
+DATABASE REVIEW
+==================================================
+
+First inspect the current Supabase schema.
+
+Reuse existing tables where suitable.
+
+Add only the tables or columns required for remote access.
+
+Suggested tables:
+
+remote_devices
+
+- id
+- tenant_id
+- asset_id
+- agent_id
+- remote_device_id
+- public_key
+- hostname
+- operating_system
+- asset_agent_version
+- remote_agent_version
+- online_status
+- last_seen_at
+- registered_at
+- revoked_at
+- created_at
+- updated_at
+
+remote_access_requests
+
+- id
+- tenant_id
+- asset_id
+- device_id
+- requested_by
+- employee_user_id
+- ticket_id
+- reason
+- access_type
+- requested_mode
+- requested_capabilities
+- status
+- requested_at
+- expires_at
+- responded_at
+- response_mode
+- created_at
+- updated_at
+
+Access type:
+
+- employee_authorised
+- super_admin_direct
+
+remote_sessions
+
+- id
+- tenant_id
+- request_id
+- asset_id
+- device_id
+- administrator_user_id
+- employee_user_id
+- ticket_id
+- access_type
+- session_mode
+- capabilities
+- status
+- started_at
+- connected_at
+- ended_at
+- duration_seconds
+- ended_by
+- end_reason
+- connection_type
+- viewer_version
+- host_version
+- created_at
+- updated_at
+
+remote_session_events
+
+- id
+- tenant_id
+- session_id
+- event_type
+- actor_user_id
+- event_metadata
+- created_at
+
+remote_access_policies
+
+- id
+- tenant_id
+- consent_required
+- super_admin_direct_access_enabled
+- direct_access_requires_ticket
+- direct_access_maximum_minutes
+- employee_notification_required
+- view_only_default
+- clipboard_allowed
+- file_transfer_allowed
+- allowed_roles
+- allowed_asset_groups
+- active
+- created_at
+- updated_at
+
+Create:
+
+- Foreign keys
+- Indexes
+- Unique constraints
+- Row Level Security
+- Tenant isolation
+- Session-expiry rules
+- Revocation rules
+- Audit-retention rules
+
+Do not store:
+
+- Permanent access passwords
+- Private device keys
+- Raw session credentials
+- Screen content
+- Keystrokes
+- Clipboard content
+
+==================================================
+BACKEND OPERATIONS
+==================================================
+
+Use the existing Supabase and backend architecture.
+
+Do not create an unrelated backend project unless the current technical architecture makes a long-running signalling or relay service unavoidable.
+
+Remote-access business logic must remain part of the current Asset Hub product.
+
+Required operations:
+
+GET /assets/:assetId/remote-access/status
+
+POST /remote-access/requests
+
+POST /remote-access/requests/:requestId/respond
+
+POST /remote-access/sessions/start
+
+POST /remote-access/sessions/:sessionId/connect
+
+POST /remote-access/sessions/:sessionId/heartbeat
+
+POST /remote-access/sessions/:sessionId/end
+
+GET /assets/:assetId/remote-access/history
+
+POST /remote-access/devices/register
+
+POST /remote-access/devices/heartbeat
+
+POST /remote-access/devices/revoke
+
+POST /remote-access/devices/rotate-key
+
+Each operation must verify:
+
+- Authenticated user
+- User role
+- Tenant
+- Asset status
+- Device registration
+- Device online status
+- Device revocation status
+- Employee consent when required
+- Super Admin direct-access policy
+- Session expiry
+- Requested capabilities
+
+Generate trusted session credentials only on the backend.
+
+Do not create trusted tokens inside the React frontend.
+
+==================================================
+SIGNALLING AND RELAY
+==================================================
+
+Use the uploaded remote-desktop source to identify the required:
+
+- Signalling service
+- Rendezvous service
+- Relay service
+- Direct peer-to-peer functionality
+- NAT traversal
+- Encryption
+- Session key exchange
+- Required ports
+
+The portal, agent and remote viewer remain one Miles Asset Hub product.
+
+A backend process needed for signalling or relay may run as infrastructure, but it must not become a separate end-user application.
+
+The employee and administrator must interact only with:
+
+- Miles Asset Agent
+- Miles Asset Portal
+- Miles Education Remote Access Viewer
+
+Do not expose original third-party server names in normal Miles interfaces.
+
+Never use a public third-party relay for production Miles sessions.
+
+Use only Miles-controlled and approved infrastructure.
+
+==================================================
+EMPLOYEE ACTIVE SESSION UI
+==================================================
+
+During an active session, show a persistent banner:
+
+Miles Education Remote Access Active
+
+Display:
+
+- Administrator Name
+- Support Reason
+- Ticket Number
+- Access Mode
+- Session Duration
+- Clipboard Status
+- File Transfer Status
+
+Buttons:
+
+- Pause Control
+- End Session
+
+The employee must always be able to end the session.
+
+Super Admin direct access must still display this banner.
+
+==================================================
+AUDIT HISTORY
+==================================================
+
+Every remote-support event must be visible inside the current asset timeline.
+
+Log:
+
+- Remote request created
+- Request sent to employee
+- Employee accepted
+- Employee declined
+- Super Admin direct access started
+- Session authorised
+- Host connected
+- Viewer connected
+- Session started
+- Session paused
+- Session resumed
+- Session ended
+- Ended by
+- Session duration
+- Access mode
+- Connection type
+- Connection failure
+- Authentication failure
+- Authorisation failure
+- Revoked device
+- Remote agent updated
+
+Do not log:
+
+- Passwords
+- Keystrokes
+- Clipboard contents
+- Screen contents
+- Private keys
+- Session credentials
+
+Normal administrators must not be able to edit remote-session audit records.
+
+==================================================
+CURRENT ISSUE REVIEW
+==================================================
+
+Only inspect and update the Remote Access area.
+
+Do not redesign:
+
+- Dashboard
+- Assets
+- Tickets
+- Users
+- Reports
+- Settings
+- Asset Recovery
+- Existing asset assignment flows
+- Existing agent commands
+
+Find the current Remote Access implementation and report:
+
+1. Existing Remote Access button component.
+2. Existing click handler.
+3. Existing modal.
+4. Existing database fields.
+5. Existing agent-side remote-access code.
+6. Existing viewer code.
+7. Existing session logic.
+8. Existing remote-device registration.
+9. Existing environment variables.
+10. Existing signalling or relay configuration.
+11. Why Remote Access currently does not function.
+12. Which files need changes.
+13. Which uploaded remote-desktop source modules can be reused.
+14. Which modules require rebranding.
+15. Which licence notices must remain.
+16. Which server processes are required.
+17. Which components can run using the current Render and Supabase setup.
+18. Which long-running components require separate infrastructure.
+
+Do not change unrelated code.
+
+==================================================
+RENDER REQUIREMENT
+==================================================
+
+Continue using the current Render-hosted portal.
+
+Current Render Static Site:
+
+IT-Asset-Hub
+
+Production domain:
+
+https://it.assets.mileseducation.org
+
+Do not migrate the portal to AWS.
+
+Do not create a second portal on Render.
+
+Keep the same GitHub repository and the same Render frontend deployment.
+
+If remote signalling or relay requires a long-running service:
+
+- Treat it as an internal infrastructure component of the same project.
+- Keep the portal integration inside the current project.
+- Explain why the infrastructure process is necessary.
+- Do not create a separate end-user product.
+
+Do not place backend secrets in VITE_ environment variables.
+
+==================================================
+IMPLEMENTATION PROCESS
+==================================================
+
+Do not implement everything immediately.
+
+First provide:
+
+1. Current Remote Access architecture.
+2. Current defect/root cause.
+3. Uploaded source assessment.
+4. Licence-compliance report.
+5. Recommended same-project architecture.
+6. Remote Access button changes.
+7. Agent installer changes.
+8. Agent service changes.
+9. Viewer changes.
+10. Database migration.
+11. Backend operations.
+12. Required signalling and relay processes.
+13. Render and Supabase impact.
+14. Role and permission design.
+15. Employee-authorised access flow.
+16. Super Admin direct-access flow.
+17. Audit design.
+18. Security risks.
+19. Files to change.
+20. Testing plan.
+21. Rollback plan.
+22. Estimated implementation phases.
+
+Do not modify files yet.
+
+Wait for my approval after presenting this assessment.
+

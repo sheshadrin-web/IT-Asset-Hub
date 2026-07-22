@@ -1,0 +1,1295 @@
+You are acting as a senior systems architect, Rust developer, Flutter developer,
+Windows desktop engineer, React/TypeScript developer, Supabase architect,
+DevOps engineer and application-security reviewer.
+
+PROJECT NAME
+
+Miles Education Remote Access
+
+This must be presented to employees and IT administrators as:
+
+Miles Education Remote Access
+
+Do not display the original third-party product name in the user-facing interface,
+installer name, tray application, portal screens, notifications, service name,
+desktop shortcut, documentation or connection window.
+
+However:
+
+- Do not remove legally required copyright notices.
+- Do not remove open-source licence files.
+- Do not remove legally required attribution.
+- Do not claim that Miles Education wrote third-party source code that it did not create.
+- Complete a licence-compliance review before making or distributing a branded build.
+- Clearly identify all AGPL-3.0 obligations.
+- List every third-party dependency, licence and notice that must remain.
+- Do not proceed with distribution until the legal/licence review is approved.
+
+The uploaded remote-desktop source archive may be used only as a technical reference
+and, where legally permitted, as the base for an internal branded fork.
+
+Do not simply integrate or launch an external remote-access application.
+
+The goal is to create an internal Miles Education remote-support capability that:
+
+1. Is installed together with the existing Miles Asset Agent.
+2. Runs under Miles Education branding.
+3. Is controlled from the existing IT Asset & Helpdesk Portal.
+4. Allows authorised Miles IT administrators to remotely assist employees.
+5. Requires clear employee visibility and consent unless an approved unattended-support
+   policy applies to a company-owned device.
+6. Records a complete audit history for every remote-support request and session.
+7. Uses Miles-controlled server infrastructure.
+8. Does not rely on a public third-party relay or public remote-access account.
+9. Does not expose permanent remote-access passwords in the portal.
+10. Cannot be used invisibly or without authorisation.
+
+==================================================
+CURRENT APPLICATION
+==================================================
+
+Current product:
+
+Miles Education IT Asset & Helpdesk Portal
+
+Current frontend:
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+
+Current backend platform:
+
+- Supabase PostgreSQL
+- Supabase Authentication
+- Supabase Storage
+- Supabase Edge Functions
+- Row Level Security
+- Realtime where currently used
+
+Existing device-management features include:
+
+- Asset Agent installation
+- Agent key generation
+- Agent registration
+- Agent heartbeat
+- Device online/offline status
+- Device information
+- Logged-in user information
+- Lock device
+- Unlock device
+- Restart device
+- Schedule restart
+- Notify before restart
+- Revoke agent key
+- Remove agent
+- Command audit history
+- Activity timeline
+- Remote Access button on the asset-details page
+
+Current hosting direction:
+
+- Portal hosted in Miles AWS infrastructure
+- Remote-access coordination and relay services must also be hosted on infrastructure
+  approved and controlled by Miles Education
+- Production portal domain:
+  https://it.assets.mileseducation.org
+
+Do not redesign unrelated asset-management functionality.
+
+==================================================
+MAIN OBJECTIVE
+==================================================
+
+Build Miles Education Remote Access as a native capability of the existing Miles Asset Agent.
+
+When the Miles Asset Agent is installed on an employee laptop:
+
+- Asset inventory agent must be installed.
+- Miles Education Remote Access host service must also be installed.
+- Both components must register against the same asset record.
+- Both must use the same approved device identity.
+- Both must be managed from the same asset portal.
+- The installer should clearly disclose both capabilities.
+- The employee must see that Miles remote-support software is installed.
+- The employee must be able to see when a remote-support request is pending.
+- The employee must see a persistent indicator while a session is active.
+
+The IT administrator must not need to separately install or configure another
+remote-access host on the employee laptop.
+
+==================================================
+IMPORTANT SECURITY BOUNDARIES
+==================================================
+
+Do not create any of the following:
+
+- Hidden remote-control capability
+- Undocumented background access
+- Credential harvesting
+- Password extraction
+- Browser-cookie extraction
+- Keylogging
+- Microphone monitoring without explicit permission
+- Camera monitoring without explicit permission
+- Silent screen recording
+- Security-product bypass
+- Antivirus evasion
+- Firewall evasion
+- Persistence outside the documented installer
+- Privilege escalation through vulnerabilities
+- Unrestricted command execution
+- Anonymous connections
+- Shared permanent passwords
+- Hard-coded administrator credentials
+- Publicly exposed management endpoints
+- Direct database access from an untrusted desktop agent
+- Ability to connect to devices not registered in Miles Asset Hub
+
+Remote support must be:
+
+- Authenticated
+- Authorised
+- Explicitly requested
+- Visible
+- Time limited
+- Audited
+- Revocable
+- Restricted to company-managed devices
+
+==================================================
+PHASE 1 — INSPECT THE EXISTING PROJECT
+==================================================
+
+Do not modify files yet.
+
+Inspect the complete Asset Portal and Asset Agent project.
+
+Identify and document:
+
+1. Asset Details page.
+2. Existing Remote Access button.
+3. Current Agent installer.
+4. Current Agent source language and architecture.
+5. Current Agent Windows service.
+6. Current Agent tray application.
+7. Agent heartbeat mechanism.
+8. Agent command polling or realtime mechanism.
+9. Agent registration process.
+10. Agent key generation.
+11. Device identity fields.
+12. Asset-to-agent mapping.
+13. User-role system.
+14. Existing audit-log implementation.
+15. Existing activity timeline.
+16. Current Supabase database tables.
+17. Existing Edge Functions.
+18. Existing Row Level Security policies.
+19. Existing notification mechanism.
+20. Existing agent update mechanism.
+21. Windows installer technology.
+22. Code-signing support.
+23. Existing AWS deployment structure.
+24. Existing domains and environment variables.
+25. Any current remote-access prototype or placeholder code.
+
+Produce:
+
+- Current architecture diagram
+- Current installer flow
+- Current agent registration flow
+- Current command flow
+- Current security model
+- Identified technical risks
+
+Do not make code changes until the assessment is approved.
+
+==================================================
+PHASE 2 — INSPECT THE UPLOADED REMOTE-DESKTOP SOURCE
+==================================================
+
+Inspect the uploaded source archive.
+
+Do not blindly rename strings.
+
+Document:
+
+1. Main source languages.
+2. Desktop UI framework.
+3. Windows-specific implementation.
+4. Screen-capture modules.
+5. Keyboard and mouse input modules.
+6. Clipboard modules.
+7. File-transfer modules.
+8. Audio modules.
+9. Camera modules.
+10. Networking layer.
+11. Encryption layer.
+12. Device-ID generation.
+13. Rendezvous/signalling service.
+14. Relay service.
+15. Direct peer-to-peer connection behaviour.
+16. NAT traversal behaviour.
+17. Service installation.
+18. Privilege/elevation handling.
+19. Windows session handling.
+20. Multi-monitor support.
+21. Display-quality settings.
+22. Reconnection behaviour.
+23. Client auto-update system.
+24. Build system.
+25. Packaging system.
+26. Code-signing requirements.
+27. Server components required.
+28. Network ports required.
+29. Third-party dependencies.
+30. Licence and attribution obligations.
+31. User-facing names, icons, logos and URLs.
+32. Hard-coded public server references.
+33. Telemetry or external service calls.
+34. Features unsuitable for Miles internal use.
+35. Any components that should be removed rather than rebranded.
+
+Prepare a fork feasibility report containing:
+
+- What may be reused
+- What must be rewritten
+- What must remain attributed
+- What cannot legally or safely be renamed
+- Build complexity
+- Long-term maintenance risk
+- Upgrade strategy
+- Security risks
+- Estimated implementation phases
+
+Do not modify source until this report is approved.
+
+==================================================
+PHASE 3 — BRANDING REQUIREMENTS
+==================================================
+
+User-facing product name:
+
+Miles Education Remote Access
+
+Suggested short name:
+
+Miles Remote Access
+
+Windows service display name:
+
+Miles Education Remote Access Service
+
+Windows service internal name:
+
+MilesRemoteAccessService
+
+Tray application name:
+
+Miles Remote Access
+
+Installer name:
+
+MilesAssetAgentSetup.exe
+
+or, if a separate package is technically necessary:
+
+MilesRemoteAccessSetup.exe
+
+Desktop shortcut:
+
+Miles Remote Access
+
+Windows Start Menu folder:
+
+Miles Education
+
+Publisher:
+
+Miles Education Private Limited
+
+Support email:
+
+it.assets@mileseducation.com
+
+Portal URL:
+
+https://it.assets.mileseducation.org
+
+Use Miles-approved branding assets only.
+
+Create replaceable branding configuration for:
+
+- Product name
+- Company name
+- Logo
+- Application icon
+- Tray icon
+- Installer banner
+- Support email
+- Support URL
+- Privacy notice URL
+- Terms URL
+- Primary domain
+- Server domain
+- Copyright notice
+- Version information
+
+Do not hard-code branding throughout the codebase.
+
+Create one central branding configuration wherever technically possible.
+
+Do not remove required open-source licence acknowledgements. Put them under:
+
+Settings → About → Open Source Notices
+
+==================================================
+PHASE 4 — INSTALLER REQUIREMENTS
+==================================================
+
+The existing Miles Asset Agent installer must also install Miles Education Remote Access.
+
+The installer must:
+
+1. Display the Miles Education name and logo.
+2. Explain that the software provides:
+   - Asset inventory
+   - Device health reporting
+   - IT support commands
+   - Remote support
+3. Require administrator approval where needed.
+4. Install the inventory agent.
+5. Install the remote-access host service.
+6. Install a visible tray application.
+7. Register both components with one asset identity.
+8. Store secrets securely.
+9. Apply correct file permissions.
+10. Add required Windows Firewall rules.
+11. Configure automatic service start.
+12. Create uninstall entries.
+13. Support repair.
+14. Support upgrade.
+15. Support complete removal.
+16. Remove local credentials during uninstall.
+17. Revoke server-side registration during uninstall when connectivity exists.
+18. Produce local installation logs.
+19. Report installation state to the portal.
+20. Verify code signatures.
+21. Reject tampered installer packages.
+
+The installer must not:
+
+- Hide itself
+- Disable antivirus
+- Disable Windows Firewall
+- Add unrelated startup tasks
+- Create undocumented scheduled tasks
+- Store passwords in plaintext
+- Store reusable unattended-access credentials in logs
+
+Create a clear component list:
+
+- Miles Asset Agent Service
+- Miles Remote Access Service
+- Miles Agent Tray
+- Miles Agent Updater
+- Shared secure configuration
+- Shared device identity
+
+==================================================
+PHASE 5 — DEVICE IDENTITY
+==================================================
+
+Use one stable device identity for both the asset agent and remote-access host.
+
+Proposed identifiers:
+
+- asset_id
+- agent_id
+- device_id
+- remote_device_id
+- installation_id
+- agent_public_key
+- tenant_id
+
+Do not rely only on:
+
+- Hostname
+- MAC address
+- IP address
+- Serial number
+
+Use cryptographically generated device credentials.
+
+Each device must have:
+
+- Unique device key pair
+- Server-issued registration
+- Short-lived access tokens
+- Revocation status
+- Last rotation date
+- Registration timestamp
+- Device certificate or equivalent trusted identity
+
+Private device keys must never leave the employee laptop.
+
+The portal must never display private device credentials.
+
+==================================================
+PHASE 6 — REMOTE SUPPORT USER FLOW
+==================================================
+
+Administrator workflow:
+
+1. Administrator opens an asset.
+2. Administrator clicks “Remote Access”.
+3. Portal verifies administrator role.
+4. Portal verifies asset status.
+5. Portal verifies agent status.
+6. Portal verifies remote host availability.
+7. Portal displays device details:
+   - Asset tag
+   - Device name
+   - Assigned employee
+   - Signed-in user
+   - Operating system
+   - IP address
+   - Agent version
+   - Remote-access version
+   - Online status
+   - Last seen
+8. Administrator selects a support reason.
+9. Administrator optionally enters a ticket number.
+10. Administrator clicks “Request Remote Access”.
+11. Employee receives an on-screen request:
+    “Miles IT Support is requesting remote access to help resolve your issue.”
+12. Employee sees:
+    - Administrator name
+    - Department
+    - Reason
+    - Ticket number
+    - Requested capabilities
+13. Employee can:
+    - Accept
+    - Decline
+    - Accept view-only
+14. On acceptance, a short-lived session is created.
+15. Administrator opens the remote viewer.
+16. Employee sees a persistent active-session banner.
+17. Either party can end the session.
+18. Session access expires immediately when ended.
+19. Session summary is written to the audit log.
+
+If the device is offline:
+
+- Disable connection.
+- Show last seen.
+- Allow “Notify me when device is online”.
+- Do not create a permanent connection credential.
+
+==================================================
+PHASE 7 — EMPLOYEE CONSENT WINDOW
+==================================================
+
+Create an employee-side consent dialog.
+
+Title:
+
+Miles Education Remote Access Request
+
+Message:
+
+“Miles IT Support is requesting access to your company device to help resolve
+the reported issue.”
+
+Display:
+
+- IT administrator name
+- Support reason
+- Ticket number
+- Request time
+- Requested capabilities
+- Session timeout
+- Privacy notice
+
+Buttons:
+
+- Allow Remote Control
+- Allow View Only
+- Decline
+
+Optional policy-controlled checkbox:
+
+- Allow clipboard during this session
+- Allow file transfer during this session
+
+Do not include:
+
+- Remember permanently
+- Always allow this administrator
+- Permanent unattended password
+
+Consent request must expire automatically after a configurable period.
+
+Example:
+
+120 seconds
+
+==================================================
+PHASE 8 — ACTIVE SESSION INDICATORS
+==================================================
+
+While a remote session is active, the employee must see:
+
+- Persistent desktop banner
+- Tray icon change
+- Administrator name
+- Session duration
+- Capabilities currently enabled
+- “End Session” button
+- “Pause Control” button
+- “Disable Clipboard” option
+- “Disable File Transfer” option
+
+Do not allow invisible sessions.
+
+Do not allow the session banner to be hidden by the administrator.
+
+==================================================
+PHASE 9 — ROLES AND PERMISSIONS
+==================================================
+
+Define roles:
+
+- Super Admin
+- IT Admin
+- Remote Support Engineer
+- IT Auditor
+- Employee
+
+Permissions:
+
+Super Admin:
+- Configure system
+- Manage support roles
+- Start sessions
+- View all audits
+- Revoke devices
+
+IT Admin:
+- Start approved sessions
+- View session history
+- Manage devices
+
+Remote Support Engineer:
+- Start sessions only for assigned tickets or approved assets
+- Cannot modify system-wide settings
+
+IT Auditor:
+- View session metadata and audit logs
+- Cannot connect
+
+Employee:
+- Accept or reject session
+- End session
+- View their session history
+- Cannot initiate administrator access
+
+Apply permissions on the server.
+
+Do not rely only on hiding buttons in the UI.
+
+==================================================
+PHASE 10 — SESSION CAPABILITIES
+==================================================
+
+Phase 1 capabilities:
+
+- View remote screen
+- Keyboard control
+- Mouse control
+- Multi-monitor selection
+- Adaptive display quality
+- Full-screen mode
+- Session chat
+- Clipboard text, only after consent
+- Secure reconnect during an active session
+
+Phase 2 capabilities, disabled by default until separately approved:
+
+- File transfer
+- Audio
+- Remote restart and reconnect
+- Elevation request
+- Multiple administrator participants
+- Session recording
+
+Do not implement or enable:
+
+- Keylogging
+- Hidden recording
+- Background microphone
+- Background camera
+- Password extraction
+- Browser-session extraction
+- Remote shell without separate authorisation
+- Arbitrary command execution through the viewer
+
+==================================================
+PHASE 11 — DATABASE DESIGN
+==================================================
+
+Review existing tables first and reuse existing conventions.
+
+Propose tables similar to:
+
+remote_devices
+
+- id
+- tenant_id
+- asset_id
+- agent_id
+- remote_device_id
+- public_key
+- hostname
+- os_name
+- os_version
+- remote_agent_version
+- status
+- last_seen_at
+- registered_at
+- key_rotated_at
+- revoked_at
+- created_at
+- updated_at
+
+remote_access_requests
+
+- id
+- tenant_id
+- asset_id
+- device_id
+- requested_by
+- employee_user_id
+- ticket_id
+- reason
+- requested_capabilities
+- request_status
+- requested_at
+- expires_at
+- responded_at
+- response_type
+- decline_reason
+- created_at
+
+remote_sessions
+
+- id
+- tenant_id
+- request_id
+- asset_id
+- device_id
+- administrator_user_id
+- employee_user_id
+- ticket_id
+- status
+- connection_mode
+- capabilities
+- started_at
+- connected_at
+- ended_at
+- duration_seconds
+- ended_by
+- end_reason
+- direct_or_relay
+- relay_region
+- administrator_ip_hash
+- employee_ip_hash
+- client_version
+- host_version
+- created_at
+- updated_at
+
+remote_session_events
+
+- id
+- tenant_id
+- session_id
+- event_type
+- actor_user_id
+- event_metadata
+- created_at
+
+remote_access_policies
+
+- id
+- tenant_id
+- policy_name
+- consent_required
+- unattended_access_allowed
+- view_only_default
+- clipboard_allowed
+- file_transfer_allowed
+- maximum_session_minutes
+- allowed_roles
+- allowed_asset_groups
+- active
+- created_at
+- updated_at
+
+remote_server_nodes
+
+- id
+- node_name
+- node_type
+- region
+- endpoint
+- public_key
+- status
+- last_heartbeat_at
+- created_at
+- updated_at
+
+Do not store:
+
+- Raw permanent passwords
+- Private keys
+- Reusable session secrets
+- Unencrypted sensitive connection credentials
+
+Create:
+
+- Foreign keys
+- Indexes
+- Unique constraints
+- Retention rules
+- Row Level Security
+- Tenant isolation
+- Audit protection
+- Soft deletion where required
+
+==================================================
+PHASE 12 — BACKEND AND SESSION CONTROL
+==================================================
+
+Use secure server-side endpoints or Edge Functions for:
+
+GET /assets/:assetId/remote-access/status
+
+POST /remote-access/request
+
+POST /remote-access/respond
+
+POST /remote-access/session/start
+
+POST /remote-access/session/end
+
+POST /remote-access/session/heartbeat
+
+GET /remote-access/session/:sessionId
+
+GET /assets/:assetId/remote-access/history
+
+GET /remote-access/audit
+
+POST /remote-access/device/register
+
+POST /remote-access/device/rotate-key
+
+POST /remote-access/device/revoke
+
+Requirements:
+
+- Verify authenticated user.
+- Verify role.
+- Verify tenant.
+- Verify asset.
+- Verify device registration.
+- Verify device is not revoked.
+- Verify employee consent when required.
+- Issue a short-lived one-time session credential.
+- Bind credential to:
+  - Device
+  - Administrator
+  - Session
+  - Expiry
+  - Requested capabilities
+- Reject replay.
+- Reject expired tokens.
+- Reject altered requests.
+- End session immediately on revocation.
+- Record all security-relevant events.
+
+Do not let the browser generate trusted remote-session credentials.
+
+==================================================
+PHASE 13 — REMOTE NETWORK ARCHITECTURE
+==================================================
+
+Design a Miles-controlled remote-access infrastructure.
+
+Expected logical components:
+
+1. Remote Access API
+2. Device registration service
+3. Signalling/rendezvous service
+4. Relay service
+5. Session authorisation service
+6. Audit service
+7. Portal
+8. Employee remote host
+9. Administrator remote viewer
+
+Preferred connection order:
+
+1. Secure direct connection when allowed and successfully authenticated.
+2. Miles-controlled relay when direct connection is unavailable.
+3. Never fall back to a public third-party relay.
+
+All traffic must use strong encryption.
+
+Document:
+
+- Transport protocol
+- Signalling protocol
+- Encryption protocol
+- Key exchange
+- Authentication mechanism
+- Session-token design
+- Direct connection behaviour
+- Relay behaviour
+- NAT traversal
+- Certificate management
+- Key rotation
+- Replay prevention
+- Session revocation
+- Network ports
+- Firewall rules
+- Bandwidth expectations
+- Relay capacity estimates
+
+Do not invent a custom cryptographic algorithm.
+
+Use well-reviewed, standard cryptographic libraries and protocols.
+
+==================================================
+PHASE 14 — AWS DEPLOYMENT
+==================================================
+
+Prepare architecture for Miles AWS infrastructure.
+
+Separate:
+
+- Portal hosting
+- Remote-access API
+- Signalling server
+- Relay server
+- Monitoring
+- Logs
+- Secrets
+- Backups
+
+Do not assume the existing small EC2 instance is adequate for relay traffic.
+
+Estimate infrastructure separately for:
+
+- 5 concurrent sessions
+- 10 concurrent sessions
+- 25 concurrent sessions
+- 50 concurrent sessions
+
+Calculate expected:
+
+- CPU
+- RAM
+- Bandwidth
+- Monthly data transfer
+- Disk
+- Log volume
+
+Recommend whether to use:
+
+- EC2
+- Elastic IP
+- Application Load Balancer
+- Network Load Balancer
+- Route 53
+- AWS Certificate Manager
+- CloudWatch
+- Secrets Manager
+- Systems Manager
+- S3 for approved logs or recordings
+- WAF where applicable
+- Separate relay nodes
+
+Define production domains such as:
+
+portal:
+https://it.assets.mileseducation.org
+
+remote API:
+https://remote-api.assets.mileseducation.org
+
+signalling:
+remote-signal.assets.mileseducation.org
+
+relay:
+remote-relay.assets.mileseducation.org
+
+These are proposals only.
+
+Do not alter DNS until approved.
+
+==================================================
+PHASE 15 — PORTAL UI
+==================================================
+
+Improve the Remote Access section shown on the Asset Details page.
+
+Remote Access button states:
+
+- Available
+- Device offline
+- Agent missing
+- Remote host missing
+- Update required
+- Access restricted
+- Session active
+
+On click, show a professional modal.
+
+Header:
+
+Miles Education Remote Access
+
+Device details:
+
+- Asset Tag
+- Device Name
+- Assigned Employee
+- Signed-in User
+- OS
+- IP Address
+- Asset Agent Version
+- Remote Access Version
+- Last Seen
+- Status
+
+Support details:
+
+- Ticket
+- Reason
+- Requested Mode
+- Expected Duration
+
+Actions:
+
+- Request Remote Control
+- Request View Only
+- Copy Device ID
+- View Session History
+- Cancel
+
+Do not expose:
+
+- Passwords
+- Private keys
+- Relay credentials
+- Permanent access tokens
+
+Add a Remote Access History panel containing:
+
+- Date
+- Administrator
+- Employee
+- Ticket
+- Reason
+- Mode
+- Start
+- End
+- Duration
+- Result
+- Ended by
+
+==================================================
+PHASE 16 — ADMINISTRATOR VIEWER
+==================================================
+
+Create or brand the administrator-side viewer as:
+
+Miles Education Remote Access
+
+The administrator viewer must:
+
+- Authenticate the administrator.
+- Open only portal-authorised sessions.
+- Accept a short-lived session launch token.
+- Verify the session with the server.
+- Prevent arbitrary device-ID connections.
+- Display asset and employee details.
+- Display consent status.
+- Display connection status.
+- Allow screen selection.
+- Allow approved controls.
+- Allow administrator to end the session.
+- Report session heartbeat.
+- Report session end.
+
+Do not provide a general public “enter any ID and password” interface for the Miles build.
+
+The Miles administrator viewer should be portal-driven.
+
+==================================================
+PHASE 17 — AGENT UPDATE AND VERSION MANAGEMENT
+==================================================
+
+Create controlled version management for:
+
+- Miles Asset Agent
+- Miles Remote Access Host
+- Miles Remote Access Viewer
+- Installer
+- Server components
+
+Requirements:
+
+- Signed releases
+- Version manifest
+- SHA-256 verification
+- Staged rollout
+- Pilot group
+- Rollback
+- Minimum supported version
+- Forced security update
+- Update audit log
+- Failure reporting
+
+Do not automatically download unsigned binaries.
+
+==================================================
+PHASE 18 — LOGGING AND AUDIT
+==================================================
+
+Record:
+
+- Request created
+- Employee notified
+- Employee accepted or declined
+- Mode accepted
+- Session authorised
+- Viewer connected
+- Host connected
+- Direct or relay connection
+- Capability changes
+- Clipboard enabled or disabled
+- File transfer enabled or disabled
+- Session paused
+- Session resumed
+- Session ended
+- Ended by
+- Duration
+- Connection failures
+- Authentication failures
+- Revocation
+- Agent updates
+
+Protect audit logs against modification by ordinary administrators.
+
+Do not record:
+
+- Keystrokes
+- Clipboard contents
+- Passwords
+- Screen content
+- File content
+- Private encryption keys
+
+==================================================
+PHASE 19 — SECURITY REVIEW
+==================================================
+
+Perform a threat model covering:
+
+- Stolen administrator account
+- Stolen employee-device credential
+- Replay attack
+- Session-token leakage
+- Malicious portal user
+- Compromised relay server
+- Compromised remote host
+- Man-in-the-middle attack
+- Cross-tenant access
+- Database policy error
+- Insider misuse
+- Brute force
+- Denial of service
+- Unauthorised unattended access
+- Tampered installer
+- Malicious update
+- Lost laptop
+- Revoked employee
+- Deleted asset
+- Reassigned asset
+
+For every risk provide:
+
+- Severity
+- Likelihood
+- Impact
+- Prevention
+- Detection
+- Response
+- Residual risk
+
+==================================================
+PHASE 20 — TESTING
+==================================================
+
+Create tests for:
+
+Functional:
+
+- Agent installation
+- Combined installer
+- Device registration
+- Online/offline status
+- Consent request
+- Accept
+- Decline
+- View only
+- Remote control
+- Multi-monitor
+- Session end
+- Administrator disconnect
+- Employee disconnect
+- Network interruption
+- Reconnect
+- Direct connection
+- Relay connection
+- Agent update
+- Agent uninstall
+- Device revoke
+
+Security:
+
+- Unauthenticated request
+- Wrong tenant
+- Wrong asset
+- Wrong administrator
+- Expired session
+- Replayed token
+- Revoked device
+- Deleted asset
+- Offline device
+- Tampered request
+- Modified installer
+- Invalid update
+- Session after consent expiry
+- Session after employee ends it
+- Session after administrator role removal
+
+Platform:
+
+- Windows 10
+- Windows 11
+- Multiple monitors
+- Different DPI settings
+- Restricted office network
+- Home Wi-Fi
+- VPN
+- Slow network
+- Sleep and resume
+- Restart
+- User switching
+- Locked Windows session
+
+==================================================
+PHASE 21 — DELIVERY PLAN
+==================================================
+
+Do not attempt to complete everything in one change.
+
+Create implementation phases:
+
+Phase 0:
+- Source review
+- Licence review
+- Threat model
+- Architecture approval
+
+Phase 1:
+- Branded proof of concept
+- Self-hosted signalling and relay
+- Manual pilot installation
+- View-only session
+- Consent and audit
+
+Phase 2:
+- Remote mouse and keyboard
+- Portal-controlled launch
+- Combined installer
+- Role-based access
+- Session history
+
+Phase 3:
+- Automatic updates
+- Multi-monitor
+- Clipboard controls
+- Operational monitoring
+- Pilot rollout
+
+Phase 4:
+- Optional file transfer
+- Advanced policy controls
+- High availability
+- Wider production rollout
+
+For each phase provide:
+
+- Scope
+- Files changed
+- Database changes
+- Infrastructure changes
+- Security risks
+- Test plan
+- Rollback plan
+- Estimated effort
+- Dependencies
+- Approval required
+
+==================================================
+FINAL REQUIRED OUTPUT
+==================================================
+
+Before modifying any file, produce:
+
+1. Executive summary.
+2. Existing Asset Agent architecture.
+3. Uploaded remote-desktop source architecture.
+4. Licence-compliance report.
+5. Branding feasibility report.
+6. Recommended build-vs-fork decision.
+7. Proposed Miles Education Remote Access architecture.
+8. Portal workflow.
+9. Employee consent workflow.
+10. Administrator workflow.
+11. Combined installer design.
+12. Database schema proposal.
+13. API proposal.
+14. AWS infrastructure proposal.
+15. Required domains and ports.
+16. Security threat model.
+17. Audit and retention design.
+18. Implementation phases.
+19. Effort estimate.
+20. Pilot rollout plan.
+21. Rollback plan.
+22. Exact files that would be created or changed.
+23. List of questions requiring business approval.
+24. List of questions requiring IT/security approval.
+25. List of licence matters requiring legal review.
+
+Do not make changes yet.
+
+Wait for my approval after presenting the complete assessment.
