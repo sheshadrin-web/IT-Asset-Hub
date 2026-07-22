@@ -258,6 +258,25 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
+    // POST /remote-access/session/end — { session_id, ended_by, end_reason, duration_seconds }
+    // Called by the agent for ALL session exit paths (employee disconnect, timeout,
+    // network failure, capture error, agent shutdown, etc.). Idempotent — safe to
+    // call more than once; a second call for an already-ended session returns
+    // { success: true, already_ended: true } without modifying the row.
+    if (req.method === "POST" && path === "/remote-access/session/end") {
+      if (!body.session_id) {
+        return json({ success: false, error: "missing session_id" }, 400);
+      }
+      const r = await rpc("agent_end_remote_session", {
+        p_token:            token,
+        p_session_id:       body.session_id,
+        p_ended_by:         body.ended_by         ?? "agent",
+        p_end_reason:       body.end_reason        ?? null,
+        p_duration_seconds: body.duration_seconds  ?? null,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
     return json({ success: false, error: `route not found: ${req.method} ${path}` }, 404);
   } catch (err) {
     return json({ success: false, error: (err as Error).message }, 500);

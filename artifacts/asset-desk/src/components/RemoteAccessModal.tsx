@@ -509,22 +509,29 @@ export default function RemoteAccessModal({
               )}
             </div>
 
-            {/* Commit-2 transport spike: prove the per-session Realtime round-trip
-                once the session is approved/active. No screen capture or input. */}
-            {(activeSession.status === "approved" || activeSession.status === "active") && (
+            {/* DEV-ONLY transport spike: verifies the per-session Realtime
+                round-trip (ping/pong) without screen capture or input.
+                Hidden in production — the viewer issues its own session token,
+                so rendering this alongside it creates a dual-channel conflict. */}
+            {import.meta.env.DEV && (activeSession.status === "approved" || activeSession.status === "active") && (
               <RemoteTransportTest sessionId={activeSession.id} />
             )}
 
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { stopPolling(); onClose(); }}>Close</Button>
               {(activeSession.status === "approved" || activeSession.status === "active") && (
-                <Button
-                  type="button"
-                  onClick={() => window.open(`${import.meta.env.BASE_URL}remote/${activeSession.id}`, "_blank", "noopener")}
-                  className="gap-2"
-                  data-testid="button-open-live-viewer"
-                >
-                  <MonitorPlay className="h-4 w-4" /> Open Live Viewer
+                /* Use a real <a> so the browser treats it as a user-gesture link
+                   and never blocks it as a popup (window.open() in a re-render
+                   cycle is often silently blocked). The viewer page issues its
+                   own session token — the modal must not issue one here. */
+                <Button asChild className="gap-2" data-testid="button-open-live-viewer">
+                  <a
+                    href={`${import.meta.env.BASE_URL}remote/${activeSession.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <MonitorPlay className="h-4 w-4" /> Open Live Viewer
+                  </a>
                 </Button>
               )}
               {(activeSession.status === "requested" || activeSession.status === "approved" || activeSession.status === "active") && (

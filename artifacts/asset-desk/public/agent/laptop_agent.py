@@ -66,7 +66,10 @@ API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # from the service context (e.g. a root/SYSTEM service that did not inherit a
 # user-scope env var). Without a working default the update check 404s silently
 # and the device stays pinned to whatever version it was installed with.
-DEFAULT_AGENT_URL   = "https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py"
+DEFAULT_AGENT_URL   = "https://it.assets.mileseducation.org/agent/laptop_agent.py"
+# version.json is served alongside the script and lets the updater check the
+# version and SHA-256 checksum BEFORE downloading the full script (~200 kB).
+DEFAULT_VERSION_URL = "https://it.assets.mileseducation.org/agent/version.json"
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
 # Self-update: check once every 24 h. Set to 0 to disable.
 SELF_UPDATE_INTERVAL_SEC = int(os.environ.get("MILES_AGENT_UPDATE_INTERVAL", "86400"))
@@ -244,16 +247,29 @@ def _parse_version(src: str) -> tuple[int, ...]:
         return (0,)
 
 
+def _agent_version_url() -> str:
+    """Derive the version.json URL from the script URL (same directory)."""
+    import re
+    base = _agent_script_url()
+    # Replace the trailing filename with version.json.
+    vurl = re.sub(r"/[^/]+\.py$", "/version.json", base)
+    return vurl if vurl != base else DEFAULT_VERSION_URL
+
+
 def _self_update(force: bool = False) -> tuple[bool, str]:
     """Check for a newer agent script and apply it if one exists.
 
     Steps:
       1. Rate-limit to SELF_UPDATE_INTERVAL_SEC (skipped when force=True).
-      2. Download the remote script to a temp file.
-      3. Parse its AGENT_VERSION — skip if not strictly newer.
-      4. Compile-check the download so a truncated/corrupt file never replaces us.
-      5. Atomically replace the local script with os.replace().
-      6. os.execv() to restart the current process in-place with the new code.
+      2. Fetch version.json to compare version numbers and get the SHA-256
+         checksum BEFORE downloading the full ~200 kB script.
+      3. Download the remote script to a temp file.
+      4. Verify SHA-256 against the checksum from version.json.
+      5. Compile-check the download so a truncated/corrupt file never replaces us.
+      6. Backup the current script to <script>.backup.
+      7. Atomically replace the local script with os.replace().
+         If the replace fails, restore from backup.
+      8. os.execv() to restart the current process in-place with the new code.
          (execv replaces the process image — the caller never returns.)
 
     Returns (updated: bool, message: str). 'updated' is only False when the
@@ -271,13 +287,38 @@ def _self_update(force: bool = False) -> tuple[bool, str]:
 
     _last_update_check = now
 
-    url = _agent_script_url()
-    if not url:
+    script_url = _agent_script_url()
+    if not script_url:
         return (False, "no agent URL configured")
 
-    tmp_path = _AGENT_SCRIPT_PATH + ".update_tmp"
+    # ── Step 1: version.json pre-check ───────────────────────────────────────
+    # Fetch the small manifest first to compare versions and get SHA-256
+    # without downloading the full script body.
+    remote_sha256 = None
+    version_url = _agent_version_url()
     try:
-        r = requests.get(url, timeout=30, stream=True)
+        vr = requests.get(version_url, timeout=15)
+        if vr.status_code == 200:
+            vinfo = vr.json()
+            remote_ver_str  = vinfo.get("version", "")
+            remote_sha256   = vinfo.get("sha256")
+            download_url    = vinfo.get("download_url") or script_url
+            remote_ver = _parse_version(f'AGENT_VERSION = "{remote_ver_str}"')
+            cur_ver    = _parse_version(f'AGENT_VERSION = "{AGENT_VERSION}"')
+            if remote_ver <= cur_ver:
+                return (False, f"already up to date (local={AGENT_VERSION}, remote={remote_ver_str})")
+            # Use the URL from the manifest (allows hosted redirects).
+            script_url = download_url
+    except Exception as e:
+        # version.json unavailable — fall through to direct script check.
+        print(f"[update] version.json unavailable ({e}); falling back to direct script check",
+              file=sys.stderr)
+
+    # ── Steps 2–8: download, verify, compile, backup, replace, restart ────────
+    tmp_path    = _AGENT_SCRIPT_PATH + ".update_tmp"
+    backup_path = _AGENT_SCRIPT_PATH + ".backup"
+    try:
+        r = requests.get(script_url, timeout=30, stream=True)
         if r.status_code != 200:
             return (False, f"download failed: HTTP {r.status_code}")
 
@@ -288,13 +329,25 @@ def _self_update(force: bool = False) -> tuple[bool, str]:
         with open(tmp_path, "r", encoding="utf-8", errors="ignore") as fh:
             new_src = fh.read()
 
+        # Version parse fallback (when version.json was unavailable).
         new_ver = _parse_version(new_src)
         cur_ver = _parse_version(f'AGENT_VERSION = "{AGENT_VERSION}"')
         if new_ver <= cur_ver:
             os.remove(tmp_path)
             return (False, f"already up to date (local={AGENT_VERSION})")
 
-        # Validate: reject if the new script does not compile cleanly.
+        # ── SHA-256 verification ──────────────────────────────────────────────
+        if remote_sha256:
+            import hashlib
+            with open(tmp_path, "rb") as fh:
+                actual_sha256 = hashlib.sha256(fh.read()).hexdigest()
+            if actual_sha256 != remote_sha256:
+                os.remove(tmp_path)
+                return (False,
+                        f"SHA-256 mismatch — expected {remote_sha256[:16]}… "
+                        f"got {actual_sha256[:16]}…; download may be corrupt")
+
+        # ── Compile check ─────────────────────────────────────────────────────
         import py_compile
         try:
             py_compile.compile(tmp_path, doraise=True)
@@ -302,14 +355,32 @@ def _self_update(force: bool = False) -> tuple[bool, str]:
             os.remove(tmp_path)
             return (False, f"new script failed syntax check: {exc}")
 
-        # Atomic replace — on the same filesystem this is a rename, never a
-        # partial write. If the replace fails the old script is untouched.
-        os.replace(tmp_path, _AGENT_SCRIPT_PATH)
+        # ── Backup current version ────────────────────────────────────────────
+        try:
+            import shutil
+            shutil.copy2(_AGENT_SCRIPT_PATH, backup_path)
+        except Exception as backup_exc:
+            print(f"[update] backup failed (non-fatal): {backup_exc}", file=sys.stderr)
 
-        # Restart in-place. os.execv() replaces this process with a fresh
-        # Python interpreter running the updated script — the run loop, any
-        # threads, and open handles are cleanly replaced without leaving a
-        # ghost process.  This line never returns.
+        # ── Atomic replace — same filesystem → rename, never partial write ────
+        try:
+            os.replace(tmp_path, _AGENT_SCRIPT_PATH)
+        except Exception as replace_exc:
+            # Replace failed; attempt rollback from backup.
+            if os.path.exists(backup_path):
+                try:
+                    import shutil
+                    shutil.copy2(backup_path, _AGENT_SCRIPT_PATH)
+                    print("[update] rollback from backup succeeded", file=sys.stderr)
+                except Exception:
+                    pass
+            raise replace_exc
+
+        # ── Restart in-place ──────────────────────────────────────────────────
+        # os.execv() replaces this process with a fresh Python interpreter
+        # running the updated script — the run loop, any threads, and open
+        # handles are cleanly replaced without leaving a ghost process.
+        # This line never returns.
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     except Exception as exc:
@@ -2317,6 +2388,11 @@ _active_remote_lock = threading.Lock()
 # One id per agent PROCESS. Used to claim a session so two agent instances can
 # never serve the same session token (the first to claim wins; we exit if not).
 _AGENT_INSTANCE_ID = uuid.uuid4().hex
+# Session-end reporting: track which sessions we've already reported to prevent
+# duplicate calls (idempotency guard on the agent side, separate from the DB
+# idempotency in agent_end_remote_session).
+_reported_remote_ends: set[str] = set()
+_reported_remote_ends_lock = threading.Lock()
 
 
 def _current_user() -> str:
@@ -2355,6 +2431,53 @@ def _ensure_websockets() -> bool:
         return False
 
 
+def _report_remote_session_end(
+    session_id: str,
+    ended_by: str,
+    end_reason: str,
+    duration_seconds: int,
+) -> None:
+    """Report a session end to the portal. Idempotent and best-effort.
+
+    - At-most-once per session_id (agent-side guard, in addition to the DB
+      idempotency in agent_end_remote_session).
+    - Short timeout; does not block shutdown.
+    - Does not raise.
+    - Never logs the agent token.
+    - Retries once on transient server errors (5xx).
+    """
+    with _reported_remote_ends_lock:
+        if session_id in _reported_remote_ends:
+            return
+        _reported_remote_ends.add(session_id)
+
+    payload = {
+        "session_id":       session_id,
+        "ended_by":         ended_by,
+        "end_reason":       end_reason,
+        "duration_seconds": max(0, duration_seconds),
+    }
+    for attempt in range(2):
+        try:
+            r = requests.post(
+                f"{API_BASE}/remote-access/session/end",
+                json=payload,
+                headers=_headers(),
+                timeout=10,
+            )
+            if r.status_code < 500:
+                break          # 2xx = success; 4xx = don't retry (client error)
+            if attempt == 0:
+                time.sleep(1)  # brief back-off before the one retry on 5xx
+        except Exception as exc:
+            print(
+                f"[remote] session-end report failed (attempt {attempt + 1}): {exc}",
+                file=sys.stderr,
+            )
+            if attempt == 0:
+                time.sleep(1)
+
+
 def start_remote_session(session_id: str) -> None:
     """Entry point: dedupe per session, then run the transport. Safe to call from
     multiple threads — only one transport runs per session id."""
@@ -2372,7 +2495,7 @@ def start_remote_session(session_id: str) -> None:
 
 
 def _run_remote_session(session_id: str) -> None:
-    # 1. Poll until the portal has issued a token for this approved session.
+    # ── 1. Poll until the portal has issued a token for this approved session ──
     cfg = None
     for _ in range(60):  # ~2 min ceiling (60 × 2 s)
         resp = _get(f"/remote-access/session?session_id={session_id}")
@@ -2381,32 +2504,37 @@ def _run_remote_session(session_id: str) -> None:
             break
         if resp.get("success") is False:
             print(f"[remote] cannot fetch session token: {resp.get('error')}", file=sys.stderr)
+            _report_remote_session_end(session_id, "agent", "token_fetch_failed", 0)
             return
         time.sleep(2)
     if not cfg:
         print("[remote] portal never issued a session token; giving up", file=sys.stderr)
+        _report_remote_session_end(session_id, "timeout", "portal_token_timeout", 0)
         return
 
-    # 2. Claim the session for THIS instance. If another agent already owns it
-    #    we are rejected and must not join — prevents one token serving two agents.
+    # ── 2. Claim the session for THIS instance ─────────────────────────────────
+    # If another agent already owns it, we are rejected — prevents one token
+    # serving two agents.  Do NOT report session end when rejected: the other
+    # instance is running the session.
     claim = _post("/remote-access/claim", {
         "session_id":  session_id,
         "instance_id": _AGENT_INSTANCE_ID,
     })
     if not claim.get("claimed"):
         print(f"[remote] claim rejected: {claim.get('error')}", file=sys.stderr)
-        return
+        return   # NOT our session — do not call _report_remote_session_end
 
     if not _ensure_websockets():
+        _report_remote_session_end(session_id, "error", "websockets_unavailable", 0)
         return
     from websockets.sync.client import connect as ws_connect
 
-    # 3. Obtain a GENUINE Supabase auth token bound to THIS session so we can join
-    #    the PRIVATE per-session channel. Frames only ever flow on an RLS-gated
-    #    private channel — there is no public fallback.
+    # ── 3. Obtain a GENUINE Supabase auth token bound to THIS session ──────────
+    # Frames only flow on an RLS-gated private channel — no public fallback.
     rt = _post("/remote-access/realtime-token", {"session_id": session_id})
     if not rt.get("success") or not rt.get("ready"):
         print(f"[remote] realtime token not ready: {rt.get('error') or rt.get('status')}", file=sys.stderr)
+        _report_remote_session_end(session_id, "error", "realtime_token_failed", 0)
         return
 
     realtime_url = rt.get("realtime_url")
@@ -2417,6 +2545,7 @@ def _run_remote_session(session_id: str) -> None:
     token_exp    = rt.get("expires_at") or 0
     if not (realtime_url and anon_key and channel and access_token):
         print("[remote] incomplete realtime config from portal", file=sys.stderr)
+        _report_remote_session_end(session_id, "error", "config_error", 0)
         return
 
     # Streaming knobs (env-overridable). Conservative defaults keep bandwidth and
@@ -2425,6 +2554,13 @@ def _run_remote_session(session_id: str) -> None:
     max_w     = int(os.environ.get("MILES_REMOTE_MAX_W", "1280"))
     quality   = int(os.environ.get("MILES_REMOTE_QUALITY", "55"))
     max_bytes = int(os.environ.get("MILES_REMOTE_MAX_BYTES", "90000"))
+
+    # ── Exit-state tracking (mutable dict for nested-function access) ──────────
+    # Every exit path sets these before returning so the finally block can
+    # submit an accurate end report.  Using a dict avoids the need for nonlocal
+    # and works correctly from closure scope.
+    _exit = {"ended_by": "agent", "end_reason": "session_end"}
+    session_start_mono = time.monotonic()
 
     topic  = f"realtime:{channel}"
     ws_url = f"{realtime_url}?apikey={anon_key}&vsn=1.0.0"
@@ -2437,213 +2573,255 @@ def _run_remote_session(session_id: str) -> None:
     stop_evt  = threading.Event()
 
     print(f"[remote] joining PRIVATE channel {channel}", file=sys.stderr)
-    with ws_connect(ws_url, open_timeout=20, close_timeout=5) as ws:
-        def ws_send(obj) -> bool:
-            # All sends are serialized: the capture thread and the recv loop both
-            # write to the socket.
-            try:
-                with send_lock:
-                    ws.send(json.dumps(obj))
-                return True
-            except Exception:
-                stop_evt.set()
-                return False
+    try:
+        with ws_connect(ws_url, open_timeout=20, close_timeout=5) as ws:
+            def ws_send(obj) -> bool:
+                # All sends are serialized: the capture thread and the recv loop
+                # both write to the socket.
+                try:
+                    with send_lock:
+                        ws.send(json.dumps(obj))
+                    return True
+                except Exception:
+                    # Tag exit reason only when it hasn't been set to something
+                    # more specific already (e.g. employee_disconnect).
+                    if _exit["end_reason"] == "session_end":
+                        _exit["ended_by"] = "network"
+                        _exit["end_reason"] = "websocket_send_failed"
+                    stop_evt.set()
+                    return False
 
-        def send_broadcast(event: str, payload: dict) -> bool:
-            return ws_send({
+            def send_broadcast(event: str, payload: dict) -> bool:
+                return ws_send({
+                    "topic":   topic,
+                    "event":   "broadcast",
+                    "payload": {"type": "broadcast", "event": event, "payload": payload},
+                    "ref":     next_ref(),
+                })
+
+            join_ref = next_ref()
+            # PRIVATE channel: Realtime authorizes the join via access_token (our
+            # session-bound agent identity) against the realtime.messages RLS policies.
+            ws_send({
                 "topic":   topic,
-                "event":   "broadcast",
-                "payload": {"type": "broadcast", "event": event, "payload": payload},
-                "ref":     next_ref(),
+                "event":   "phx_join",
+                "payload": {
+                    "config": {"broadcast": {"self": False, "ack": False},
+                               "presence": {"key": ""},
+                               "private": True},
+                    "access_token": access_token,
+                },
+                "ref":      join_ref,
+                "join_ref": join_ref,
             })
 
-        join_ref = next_ref()
-        # PRIVATE channel: Realtime authorizes the join via access_token (our
-        # session-bound agent identity) against the realtime.messages RLS policies.
-        ws_send({
-            "topic":   topic,
-            "event":   "phx_join",
-            "payload": {
-                "config": {"broadcast": {"self": False, "ack": False},
-                           "presence": {"key": ""},
-                           "private": True},
-                "access_token": access_token,
-            },
-            "ref":      join_ref,
-            "join_ref": join_ref,
-        })
+            # ── Remote input-control state ────────────────────────────────────
+            # input_state["enabled"] is the agent-side gate: input is replayed
+            # ONLY while an admin holds control (a `control` broadcast) AND the
+            # session token has not locally expired. The backend is built lazily.
+            input_state = {"enabled": False, "by": None}
+            _backend_box = [None]
+            _backend_tried = [False]
 
-        # ── Commit 4: remote input-control state ─────────────────────────────
-        # input_state["enabled"] is the agent-side gate: input is replayed ONLY
-        # while an admin holds control (a `control` broadcast) AND the session
-        # token has not locally expired. The backend is built lazily on first use.
-        input_state = {"enabled": False, "by": None}
-        _backend_box = [None]
-        _backend_tried = [False]
+            def _get_backend():
+                if _backend_box[0] is None and not _backend_tried[0]:
+                    _backend_tried[0] = True
+                    _backend_box[0] = _make_input_backend()
+                    if _backend_box[0] is None:
+                        print("[remote] no input backend available; control disabled", file=sys.stderr)
+                    else:
+                        print(f"[remote] input backend = {_backend_box[0].name}", file=sys.stderr)
+                return _backend_box[0]
 
-        def _get_backend():
-            if _backend_box[0] is None and not _backend_tried[0]:
-                _backend_tried[0] = True
-                _backend_box[0] = _make_input_backend()
-                if _backend_box[0] is None:
-                    print("[remote] no input backend available; control disabled", file=sys.stderr)
-                else:
-                    print(f"[remote] input backend = {_backend_box[0].name}", file=sys.stderr)
-            return _backend_box[0]
-
-        def _banner_disconnect():
-            print("[remote] END USER disconnected via banner; ending session", file=sys.stderr)
-            try:
-                send_broadcast("end", {"reason": "enduser_disconnect"})
-            except Exception:
-                pass
-            stop_evt.set()
-
-        banner = _RemoteControlBanner(on_disconnect=_banner_disconnect)
-
-        def _set_input_enabled(want: bool, by: str = None, reason: str = None):
-            prev = input_state["enabled"]
-            input_state["enabled"] = want
-            if by:
-                input_state["by"] = by
-            who = input_state["by"] or "IT Admin"
-            if want != prev:
-                ts = int(time.time() * 1000)
-                if want:
-                    print(f"[remote][audit] INPUT-ENABLED session={session_id} by={who} ts={ts}", file=sys.stderr)
-                    _append_input_audit(session_id, "input_enabled", who)
-                    banner.show(who)
-                else:
-                    print(f"[remote][audit] INPUT-DISABLED session={session_id} reason={reason or 'released'} ts={ts}", file=sys.stderr)
-                    _append_input_audit(session_id, "input_disabled", who)
-                    banner.hide()
-            elif want and by:
-                banner.update(who)
-
-        # 4. Capture + stream frames in a dedicated thread so recv() stays
-        #    responsive to ping/end. Capture deps are imported lazily in-thread.
-        def capture_loop() -> None:
-            grab = _make_screen_grabber()
-            if grab is None:
-                print("[remote] screen capture unavailable; streaming disabled", file=sys.stderr)
-                return
-            seq = 0
-            interval = (1.0 / fps) if fps > 0 else 0.16
-            while not stop_evt.is_set():
-                t0 = time.monotonic()
+            def _banner_disconnect():
+                """Called when the employee clicks Disconnect in the on-screen banner."""
+                print("[remote] END USER disconnected via banner; ending session", file=sys.stderr)
+                _exit["ended_by"] = "employee"
+                _exit["end_reason"] = "employee_disconnect"
                 try:
-                    w, h, jpeg = grab(max_w, quality, max_bytes)
-                except Exception as e:
-                    print(f"[remote] capture error: {e}", file=sys.stderr)
-                    stop_evt.wait(1.0)
-                    continue
-                if not send_broadcast("frame", {
-                    "seq": seq, "ts": int(time.time() * 1000),
-                    "w": w, "h": h, "fmt": "jpeg",
-                    "data": base64.b64encode(jpeg).decode("ascii"),
-                }):
-                    break
-                seq += 1
-                dt = time.monotonic() - t0
-                if interval - dt > 0:
-                    stop_evt.wait(interval - dt)
+                    send_broadcast("end", {"reason": "enduser_disconnect"})
+                except Exception:
+                    pass
+                stop_evt.set()
 
-        cap_thread = threading.Thread(target=capture_loop, name="remote-capture", daemon=True)
-        cap_thread.start()
+            banner = _RemoteControlBanner(on_disconnect=_banner_disconnect)
 
-        last_hb    = time.monotonic()
-        last_check = time.monotonic()
-        deadline   = time.monotonic() + 3600  # safety cap (1 h)
-        while time.monotonic() < deadline and not stop_evt.is_set():
-            now = time.monotonic()
-            if now - last_hb >= 25:  # Phoenix heartbeat keeps the socket alive
-                if not ws_send({"topic": "phoenix", "event": "heartbeat",
-                                "payload": {}, "ref": next_ref()}):
-                    break
-                last_hb = now
+            def _set_input_enabled(want: bool, by: str = None, reason: str = None):
+                prev = input_state["enabled"]
+                input_state["enabled"] = want
+                if by:
+                    input_state["by"] = by
+                who = input_state["by"] or "IT Admin"
+                if want != prev:
+                    ts = int(time.time() * 1000)
+                    if want:
+                        print(f"[remote][audit] INPUT-ENABLED session={session_id} by={who} ts={ts}", file=sys.stderr)
+                        _append_input_audit(session_id, "input_enabled", who)
+                        banner.show(who)
+                    else:
+                        print(f"[remote][audit] INPUT-DISABLED session={session_id} reason={reason or 'released'} ts={ts}", file=sys.stderr)
+                        _append_input_audit(session_id, "input_disabled", who)
+                        banner.hide()
+                elif want and by:
+                    banner.update(who)
 
-            # Periodic authority re-check (defense in depth on top of the RLS gate):
-            # stop the instant the portal ends / the session expires, and refresh
-            # the realtime token before it lapses so long sessions stay authorized.
-            if now - last_check >= 5:
-                last_check = now
-                st = _get(f"/remote-access/session?session_id={session_id}")
-                if not st.get("ready"):
-                    print(f"[remote] session no longer active ({st.get('status') or st.get('error')}); stopping", file=sys.stderr)
-                    break
-                if token_exp and time.time() > (token_exp - 120):
-                    nr = _post("/remote-access/realtime-token", {"session_id": session_id})
-                    if nr.get("success") and nr.get("access_token"):
-                        access_token = nr["access_token"]
-                        token_exp    = nr.get("expires_at") or token_exp
-                        ws_send({"topic": topic, "event": "access_token",
-                                 "payload": {"access_token": access_token},
-                                 "ref": next_ref()})
-
-            try:
-                raw = ws.recv(timeout=2)
-            except TimeoutError:
-                continue
-            except Exception:
-                break
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                continue
-
-            mevt = msg.get("event")
-            if mevt == "phx_reply" and msg.get("ref") == join_ref:
-                status = (msg.get("payload") or {}).get("status")
-                if status != "ok":
-                    print(f"[remote] private channel join refused: {msg.get('payload')}", file=sys.stderr)
-                    break
-                print("[remote] private channel joined; streaming frames", file=sys.stderr)
-                continue
-            if mevt != "broadcast":
-                continue
-            inner = msg.get("payload") or {}
-            evt   = inner.get("event")
-            if evt == "ping":
-                p = inner.get("payload") or {}
-                # Echo the nonce + ts so the portal can correlate and measure RTT.
-                send_broadcast("pong", {
-                    "nonce":     p.get("nonce"),
-                    "ts":        p.get("ts"),
-                    "agent":     socket.gethostname(),
-                    "version":   AGENT_VERSION,
-                    "user":      _current_user(),
-                    "device_id": device_id,
-                })
-            elif evt == "end":
-                print("[remote] portal ended the session", file=sys.stderr)
-                break
-            elif evt == "control":
-                # Admin took / released control. Flip the agent-side gate, surface
-                # the on-machine banner, and audit the transition.
-                p = inner.get("payload") or {}
-                _set_input_enabled(bool(p.get("enabled")), by=p.get("by"))
-            elif evt == "input":
-                # SECURITY: replay input ONLY while control is enabled AND the
-                # session token has not expired locally. The RLS channel gate
-                # already blocks terminated/expired sessions at the transport
-                # layer; these checks are defense in depth on the agent itself.
-                if not input_state["enabled"]:
-                    continue
-                if token_exp and time.time() > token_exp:
-                    _set_input_enabled(False, reason="token_expired")
-                    continue
-                be = _get_backend()
-                if be is not None:
+            # 4. Capture + stream frames in a dedicated thread so recv() stays
+            #    responsive to ping/end. Capture deps are imported lazily.
+            def capture_loop() -> None:
+                grab = _make_screen_grabber()
+                if grab is None:
+                    print("[remote] screen capture unavailable; streaming disabled", file=sys.stderr)
+                    return
+                seq = 0
+                interval = (1.0 / fps) if fps > 0 else 0.16
+                while not stop_evt.is_set():
+                    t0 = time.monotonic()
                     try:
-                        apply_remote_input(inner.get("payload") or {}, be)
-                    except Exception as ex:
-                        print(f"[remote] input apply error: {ex}", file=sys.stderr)
+                        w, h, jpeg = grab(max_w, quality, max_bytes)
+                    except Exception as e:
+                        print(f"[remote] capture error: {e}", file=sys.stderr)
+                        stop_evt.wait(1.0)
+                        continue
+                    if not send_broadcast("frame", {
+                        "seq": seq, "ts": int(time.time() * 1000),
+                        "w": w, "h": h, "fmt": "jpeg",
+                        "data": base64.b64encode(jpeg).decode("ascii"),
+                    }):
+                        break
+                    seq += 1
+                    dt = time.monotonic() - t0
+                    if interval - dt > 0:
+                        stop_evt.wait(interval - dt)
 
-        stop_evt.set()
-        if input_state["enabled"]:
-            _set_input_enabled(False, reason="session_closed")
-        banner.close()
-        cap_thread.join(timeout=3)
+            cap_thread = threading.Thread(target=capture_loop, name="remote-capture", daemon=True)
+            cap_thread.start()
+
+            last_hb    = time.monotonic()
+            last_check = time.monotonic()
+            deadline   = time.monotonic() + 3600  # 1-hour safety cap
+            while time.monotonic() < deadline and not stop_evt.is_set():
+                now = time.monotonic()
+                if now - last_hb >= 25:  # Phoenix heartbeat keeps the socket alive
+                    if not ws_send({"topic": "phoenix", "event": "heartbeat",
+                                    "payload": {}, "ref": next_ref()}):
+                        # ws_send already set _exit + stop_evt; explicit break
+                        # so we don't wait for the condition to re-evaluate.
+                        _exit["ended_by"] = "network"
+                        _exit["end_reason"] = "heartbeat_failed"
+                        break
+                    last_hb = now
+
+                # Periodic authority re-check (defense in depth on top of the RLS
+                # gate): stop the instant the portal ends / the session expires,
+                # and refresh the realtime token before it lapses.
+                if now - last_check >= 5:
+                    last_check = now
+                    st = _get(f"/remote-access/session?session_id={session_id}")
+                    if not st.get("ready"):
+                        print(f"[remote] session no longer active "
+                              f"({st.get('status') or st.get('error')}); stopping",
+                              file=sys.stderr)
+                        _exit["ended_by"] = "agent"
+                        _exit["end_reason"] = "session_expired"
+                        break
+                    if token_exp and time.time() > (token_exp - 120):
+                        nr = _post("/remote-access/realtime-token", {"session_id": session_id})
+                        if nr.get("success") and nr.get("access_token"):
+                            access_token = nr["access_token"]
+                            token_exp    = nr.get("expires_at") or token_exp
+                            ws_send({"topic": topic, "event": "access_token",
+                                     "payload": {"access_token": access_token},
+                                     "ref": next_ref()})
+
+                try:
+                    raw = ws.recv(timeout=2)
+                except TimeoutError:
+                    continue
+                except Exception:
+                    _exit["ended_by"] = "network"
+                    _exit["end_reason"] = "websocket_recv_error"
+                    break
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+
+                mevt = msg.get("event")
+                if mevt == "phx_reply" and msg.get("ref") == join_ref:
+                    status = (msg.get("payload") or {}).get("status")
+                    if status != "ok":
+                        print(f"[remote] private channel join refused: {msg.get('payload')}", file=sys.stderr)
+                        _exit["ended_by"] = "error"
+                        _exit["end_reason"] = "channel_join_refused"
+                        break
+                    print("[remote] private channel joined; streaming frames", file=sys.stderr)
+                    continue
+                if mevt != "broadcast":
+                    continue
+                inner = msg.get("payload") or {}
+                evt   = inner.get("event")
+                if evt == "ping":
+                    p = inner.get("payload") or {}
+                    # Echo the nonce + ts so the portal can correlate and measure RTT.
+                    send_broadcast("pong", {
+                        "nonce":     p.get("nonce"),
+                        "ts":        p.get("ts"),
+                        "agent":     socket.gethostname(),
+                        "version":   AGENT_VERSION,
+                        "user":      _current_user(),
+                        "device_id": device_id,
+                    })
+                elif evt == "end":
+                    print("[remote] portal ended the session", file=sys.stderr)
+                    _exit["ended_by"] = "administrator"
+                    _exit["end_reason"] = "viewer_disconnect"
+                    break
+                elif evt == "control":
+                    # Admin took / released control. Flip the agent-side gate,
+                    # surface the on-machine banner, and audit the transition.
+                    p = inner.get("payload") or {}
+                    _set_input_enabled(bool(p.get("enabled")), by=p.get("by"))
+                elif evt == "input":
+                    # SECURITY: replay input ONLY while control is enabled AND the
+                    # session token has not expired locally. The RLS channel gate
+                    # already blocks terminated/expired sessions at the transport
+                    # layer; these checks are defense in depth on the agent itself.
+                    if not input_state["enabled"]:
+                        continue
+                    if token_exp and time.time() > token_exp:
+                        _set_input_enabled(False, reason="token_expired")
+                        continue
+                    be = _get_backend()
+                    if be is not None:
+                        try:
+                            apply_remote_input(inner.get("payload") or {}, be)
+                        except Exception as ex:
+                            print(f"[remote] input apply error: {ex}", file=sys.stderr)
+
+            # After the while loop — check if the 1-hour deadline was reached
+            # (loop exited via the time condition rather than break/stop_evt).
+            if time.monotonic() >= deadline and _exit["end_reason"] == "session_end":
+                _exit["ended_by"] = "timeout"
+                _exit["end_reason"] = "session_timeout_1h"
+
+            stop_evt.set()
+            if input_state["enabled"]:
+                _set_input_enabled(False, reason="session_closed")
+            banner.close()
+            cap_thread.join(timeout=3)
+
+    except Exception as _exc_outer:
+        # Unexpected transport exception (ws_connect refused, TLS error, etc.)
+        if _exit["end_reason"] == "session_end":
+            _exit["ended_by"] = "error"
+            _exit["end_reason"] = "transport_exception"
+        print(f"[remote] transport exception: {_exc_outer}", file=sys.stderr)
+    finally:
+        duration = max(0, int(time.monotonic() - session_start_mono))
+        _report_remote_session_end(
+            session_id, _exit["ended_by"], _exit["end_reason"], duration
+        )
+
     print(f"[remote] session {session_id} transport closed", file=sys.stderr)
 
 
