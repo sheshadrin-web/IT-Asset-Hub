@@ -1,0 +1,476 @@
+Proceed with Phase 2A only: fix the four critical blockers in the existing Miles Education Remote Access implementation.
+
+IMPORTANT
+
+- Do not add or merge rustdesk-master(2).zip.
+- Do not create a separate project.
+- Do not create a separate portal.
+- Do not redesign unrelated modules.
+- Do not modify the main branch directly.
+- Use the existing IT Asset Portal, Miles Asset Agent, Supabase backend, Render deployment, and current Remote Access button.
+
+Create or use this branch:
+
+feature/fix-existing-remote-access
+
+Do not implement multi-monitor, telemetry, GPS/location, file transfer, clipboard, audio, recording, or other enhancements in this phase.
+
+==================================================
+SCOPE — FIX ONLY THESE FOUR BLOCKERS
+==================================================
+
+1. SESSION NEVER BECOMES ACTIVE
+
+Current issue:
+
+- Assisted remote sessions move from:
+  requested
+  ->
+  approved
+
+- But no code transitions:
+  approved
+  ->
+  active
+
+- The Realtime RLS policy allows only active sessions.
+- As a result, the agent and viewer cannot join the channel correctly.
+
+Required fix:
+
+Update the database function:
+
+issue_remote_session_token
+
+It must:
+
+- Validate the authenticated administrator.
+- Validate tenant access.
+- Validate asset and device.
+- Validate that the session is approved.
+- Validate that the session is not expired, ended, revoked, or failed.
+- Generate the session token and channel.
+- Atomically update session status to active.
+- Set started_at if it is currently null.
+- Return the existing token/channel response.
+- Prevent duplicate activation.
+- Remain safe if called more than once.
+
+Do not loosen the Realtime RLS policy unnecessarily.
+
+Preferred behaviour:
+
+- Realtime access remains restricted to status='active'.
+- Token generation and activation happen atomically in one trusted RPC.
+
+Add tests for:
+
+- approved -> active
+- requested session cannot activate
+- ended session cannot activate
+- expired session cannot activate
+- unauthorised admin cannot activate
+- duplicate token request does not create conflicting state
+
+==================================================
+2. REMOVE DUAL CHANNEL CONFLICT
+==================================================
+
+Current issue:
+
+RemoteTransportTest and RemoteSessionViewer both:
+
+- Call issue_remote_session_token
+- Join the same channel
+- Create competing WebSocket connections
+- Overwrite or regenerate token information
+- Duplicate control and end events
+
+Required fix:
+
+Remove RemoteTransportTest from the approved and active Remote Access flow.
+
+Inspect:
+
+artifacts/asset-desk/src/components/RemoteAccessModal.tsx
+
+The production remote flow must use only:
+
+RemoteSessionViewer.tsx
+
+Requirements:
+
+- Do not delete RemoteTransportTest permanently if it is useful for development.
+- Move it behind a development-only route or feature flag if needed.
+- It must never render in the production Remote Access modal.
+- The production flow must issue one session token for one viewer connection.
+- The agent and viewer must join one consistent session channel.
+- No duplicate channel subscriptions.
+- No duplicate control events.
+- No duplicate end events.
+
+Add a development guard such as:
+
+import.meta.env.DEV
+
+or an explicit disabled feature flag.
+
+Do not expose a test transport component in production.
+
+==================================================
+3. ADD AGENT-SIDE SESSION END REPORTING
+==================================================
+
+Current issue:
+
+The viewer can end a session, but when the employee, timeout, agent error, restart, or network failure ends the session:
+
+- The agent closes the channel.
+- The database is not updated.
+- The session may stay approved or active.
+- ended_at, ended_by, end_reason, and duration_seconds are missing.
+
+Required database migration:
+
+Add columns to remote_access_sessions:
+
+- ended_by
+- end_reason
+- duration_seconds
+
+Use appropriate data types and existing project conventions.
+
+Do not drop or rename existing columns.
+
+Create an idempotent RPC:
+
+agent_end_remote_session
+
+Expected inputs:
+
+- agent token or verified device identity
+- session_id
+- ended_by
+- end_reason
+- duration_seconds
+
+Required behaviour:
+
+- Verify the agent/device owns the session.
+- Verify tenant and asset association.
+- Allow only the authorised agent or trusted backend.
+- Set status='ended'.
+- Set ended_at if not already set.
+- Set ended_by.
+- Set end_reason.
+- Set duration_seconds.
+- Be idempotent.
+- If already ended, return the current final session state without error.
+- Reject requests for another device's session.
+- Reject revoked devices.
+
+Add Edge Function route:
+
+POST /remote-access/session/end
+
+File:
+
+artifacts/asset-desk/supabase/functions/agent-api/index.ts
+
+Body:
+
+{
+  "session_id": "...",
+  "ended_by": "employee|administrator|timeout|agent|network|error",
+  "end_reason": "...",
+  "duration_seconds": 123
+}
+
+Update the agent:
+
+artifacts/asset-desk/agent/laptop_agent.py
+
+The agent must call the session-end endpoint for all exit paths:
+
+- Employee clicks Disconnect
+- Administrator sends end event
+- Session timeout
+- Network/WebSocket failure
+- Capture error
+- Input-handler error
+- Agent shutdown
+- Agent restart
+- Unexpected exception
+
+Use a single helper function such as:
+
+_report_remote_session_end(...)
+
+Requirements:
+
+- Call at most once per session.
+- Be safe if called more than once.
+- Use a short timeout.
+- Do not block shutdown indefinitely.
+- Do not log tokens.
+- Do not fail the agent loop if reporting fails.
+- Retry once when appropriate.
+- Include a clear end reason.
+
+Add tests for:
+
+- Employee disconnect
+- Viewer disconnect
+- Timeout
+- Network error
+- Duplicate end call
+- Already-ended session
+- Wrong device
+- Revoked agent
+
+==================================================
+4. FIX BROKEN AGENT UPDATE URL
+==================================================
+
+Current broken value:
+
+https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py
+
+Correct production domain:
+
+https://it.assets.mileseducation.org
+
+Update:
+
+DEFAULT_AGENT_URL
+
+to:
+
+https://it.assets.mileseducation.org/agent/laptop_agent.py
+
+Create or verify these files:
+
+artifacts/asset-desk/public/agent/laptop_agent.py
+artifacts/asset-desk/public/agent/version.json
+
+version.json format:
+
+{
+  "version": "0.9.3",
+  "download_url": "https://it.assets.mileseducation.org/agent/laptop_agent.py",
+  "sha256": "<generated SHA-256 checksum>"
+}
+
+Do not bump the agent version yet.
+
+Keep version 0.9.3 until all four blocker fixes are tested successfully.
+
+Verify the Vite/Render build serves:
+
+https://it.assets.mileseducation.org/agent/laptop_agent.py
+
+and:
+
+https://it.assets.mileseducation.org/agent/version.json
+
+Add update safety:
+
+- HTTP timeout
+- Status-code validation
+- SHA-256 verification
+- Python compile validation
+- Atomic file replacement
+- Backup of current version
+- Rollback if replacement fails
+
+Do not include:
+
+- Agent token
+- Supabase service-role key
+- Password
+- Environment secrets
+- Private URL credentials
+
+in any public static file.
+
+==================================================
+VIEWER OPENING FIX
+==================================================
+
+Also fix the viewer opening method because the current popup flow can be blocked.
+
+Current issue:
+
+window.open(..., "_blank", "noopener")
+
+may be blocked because it is not reliably executed in a direct user gesture.
+
+Preferred fix:
+
+Use a normal anchor or button rendered after approval:
+
+<a
+  href="/remote/{sessionId}"
+  target="_blank"
+  rel="noopener noreferrer"
+>
+  Open Live Viewer
+</a>
+
+or navigate in the same tab.
+
+Requirements:
+
+- Show a clear message if the viewer cannot open.
+- Do not automatically create another token from the modal.
+- The viewer alone should initialise the production transport.
+- Avoid duplicate token issuance.
+
+==================================================
+MIGRATION REQUIREMENTS
+==================================================
+
+Create one additive migration file.
+
+It should include:
+
+1. Missing session-end columns
+2. Updated issue_remote_session_token
+3. New agent_end_remote_session RPC
+4. Required grants
+5. Required RLS/security checks
+6. Safe backward compatibility
+
+Do not:
+
+- Drop tables
+- Rename columns
+- Delete existing sessions
+- Disable RLS
+- Add public anonymous write access
+
+Show the full migration before applying it.
+
+==================================================
+FILES EXPECTED TO CHANGE
+==================================================
+
+At minimum, review and update:
+
+1. artifacts/asset-desk/supabase/migrations/<new_migration>.sql
+2. artifacts/asset-desk/supabase/functions/agent-api/index.ts
+3. artifacts/asset-desk/src/components/RemoteAccessModal.tsx
+4. artifacts/asset-desk/src/pages/RemoteSessionViewer.tsx
+5. artifacts/asset-desk/agent/laptop_agent.py
+6. artifacts/asset-desk/public/agent/laptop_agent.py
+7. artifacts/asset-desk/public/agent/version.json
+
+Do not modify unrelated files unless technically required.
+
+If another file must change, explain why before editing it.
+
+==================================================
+TESTING
+==================================================
+
+Run these tests before reporting completion.
+
+DATABASE
+
+- Approved session activates successfully
+- Requested session cannot activate
+- Ended session cannot activate
+- Token issuance is idempotent
+- Agent end RPC is idempotent
+- Wrong device cannot end session
+- Realtime policy allows active session only
+
+PORTAL
+
+- RemoteTransportTest does not render in production flow
+- Only one viewer channel is created
+- Open Live Viewer works without popup issues
+- Modal does not issue duplicate session tokens
+- Session status becomes active
+
+AGENT
+
+- Agent joins active session
+- Screen frames begin after activation
+- Employee disconnect reports end
+- Network failure reports end
+- Timeout reports end
+- Duplicate end reporting does not break
+- Broken update URL is gone
+- version.json is reachable
+- checksum validation works
+- rollback works when update fails
+
+END-TO-END
+
+Test this exact flow:
+
+1. Admin opens asset.
+2. Admin requests remote access.
+3. Employee approves.
+4. Session becomes active.
+5. Viewer opens.
+6. Agent joins channel.
+7. Screen frames appear.
+8. Viewer closes.
+9. Session becomes ended.
+10. ended_at, ended_by, end_reason, duration_seconds are stored.
+11. No duplicate channel remains.
+12. Agent continues its normal heartbeat after the session.
+
+==================================================
+ROLLBACK
+==================================================
+
+Prepare a rollback plan.
+
+Rollback must include:
+
+- Revert frontend branch
+- Revert Edge Function deployment
+- Revert RPC definitions if required
+- Keep additive columns in place if harmless
+- Restore previous DEFAULT_AGENT_URL only if necessary
+- Restore previous public agent file
+- Confirm existing asset-agent heartbeat still works
+
+Do not deploy to production automatically.
+
+==================================================
+FINAL INSTRUCTION
+==================================================
+
+You already completed the diagnosis.
+
+Now implement only these blocker fixes.
+
+Before editing, show me:
+
+1. Exact migration SQL
+2. Exact functions to change
+3. Exact frontend changes
+4. Exact agent changes
+5. Security impact
+6. Test commands
+7. Rollback steps
+
+After showing that plan, proceed with implementation on the branch.
+
+Do not touch main.
+
+Do not deploy to production.
+
+After implementation, provide:
+
+- Git diff summary
+- Files changed
+- Tests run
+- Test results
+- Remaining known issues
+- Manual testing steps
+- Deployment steps for Supabase and Render

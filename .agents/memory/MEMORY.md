@@ -1,0 +1,1 @@
+- [Remote Access Phase 2A](remote-access-phase2a.md) — four blockers fixed on branch feature/fix-existing-remote-access; migration 008 must be applied manually in Supabase SQL Editor before testing.
