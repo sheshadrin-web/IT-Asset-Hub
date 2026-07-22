@@ -54,6 +54,8 @@ import uuid
 import base64
 import hashlib
 import threading
+import signal
+import atexit
 from datetime import datetime, timezone
 
 import requests
@@ -2393,6 +2395,56 @@ _AGENT_INSTANCE_ID = uuid.uuid4().hex
 # idempotency in agent_end_remote_session).
 _reported_remote_ends: set[str] = set()
 _reported_remote_ends_lock = threading.Lock()
+
+
+# ── Clean shutdown: SIGTERM + atexit ─────────────────────────────────────────
+# The agent runs as a managed service (launchd on macOS, NSSM/Task Scheduler on
+# Windows, systemd on Linux). When the service manager stops it, SIGTERM is
+# sent. Python's default SIGTERM handler terminates the process immediately,
+# without running `finally` blocks in threads or `atexit` callbacks.
+#
+# Fix: convert SIGTERM → SystemExit in the main thread. SystemExit propagates
+# through the main thread's call stack (running its finally blocks) and then
+# triggers atexit handlers before the interpreter tears down. The daemon remote-
+# session threads are killed *after* atexit handlers finish, so the atexit
+# reporter below can still make HTTP calls on their behalf.
+#
+# Coverage:
+#   SIGTERM (service stop)  → _handle_sigterm → sys.exit(0) → atexit  ✓
+#   SIGINT  (Ctrl+C)        → KeyboardInterrupt → interpreter exit     ✓ (atexit)
+#   sys.exit() / return     → normal interpreter exit                  ✓ (atexit)
+#   SIGKILL / hard crash    → unrecoverable; token expiry self-heals ≤10 min
+def _handle_sigterm(signum: int, frame: object) -> None:  # noqa: ARG001
+    raise SystemExit(0)
+
+
+try:
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+except (OSError, ValueError):
+    # Can only register signals in the main thread of the main interpreter.
+    # Frozen PyInstaller binaries and some test harnesses run setup in threads;
+    # skip silently — the atexit handler below still covers graceful exits.
+    pass
+
+
+def _atexit_end_active_sessions() -> None:
+    """Called by the interpreter at process exit (SIGTERM via our handler, SIGINT,
+    or sys.exit). Reports a session-end for every session that is still in the
+    _active_remote_sessions set at that moment.
+
+    This is the backup path for daemon threads whose `finally` blocks cannot run
+    because the main thread initiated the exit.  The per-session finally block
+    is the primary path for sessions that exit cleanly (network error, viewer
+    disconnect, etc.); the _reported_remote_ends set ensures at-most-once
+    semantics even when both paths fire for the same session.
+    """
+    with _active_remote_lock:
+        sessions = set(_active_remote_sessions)
+    for sid in sessions:
+        _report_remote_session_end(sid, "agent", "process_shutdown", 0)
+
+
+atexit.register(_atexit_end_active_sessions)
 
 
 def _current_user() -> str:

@@ -56,10 +56,16 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Insufficient permissions');
   END IF;
 
-  -- ── Load session ───────────────────────────────────────────────────────────
+  -- ── Load session (WITH row lock) ──────────────────────────────────────────
+  -- FOR UPDATE serializes concurrent callers: if two viewers call this at the
+  -- same time on the same session (e.g. modal transport-test races with viewer),
+  -- the second call blocks here until the first commits, then re-reads the
+  -- now-active row and hits the idempotency guard below — returning the token the
+  -- first call generated rather than overwriting it with a new one.
   SELECT * INTO v_session
     FROM remote_access_sessions
-   WHERE id = p_session_id;
+   WHERE id = p_session_id
+     FOR UPDATE;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'Session not found');
@@ -174,10 +180,15 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'invalid or revoked token');
   END IF;
 
-  -- ── Load session ───────────────────────────────────────────────────────────
+  -- ── Load session (WITH row lock) ──────────────────────────────────────────
+  -- FOR UPDATE prevents a concurrent end call from both reading status='active'
+  -- and both executing the UPDATE, which would leave the last writer's
+  -- ended_by/end_reason in the audit row and potentially overwrite a more
+  -- accurate value from the first writer.
   SELECT * INTO v_session
     FROM remote_access_sessions
-   WHERE id = p_session_id;
+   WHERE id = p_session_id
+     FOR UPDATE;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'session not found');
@@ -215,13 +226,18 @@ BEGIN
   END IF;
 
   -- ── Apply the end ──────────────────────────────────────────────────────────
+  -- The AND status != 'ended' guard is the concurrency safety net: if two
+  -- concurrent calls both passed the idempotency guard above (both read
+  -- status='active' before either committed), the second UPDATE is a no-op
+  -- rather than overwriting the first writer's ended_by/end_reason values.
   UPDATE remote_access_sessions
      SET status           = 'ended',
          ended_at         = COALESCE(ended_at, NOW()),
          ended_by         = p_ended_by,
          end_reason       = p_end_reason,
          duration_seconds = p_duration_seconds
-   WHERE id = p_session_id;
+   WHERE id = p_session_id
+     AND status != 'ended';
 
   PERFORM _log_remote_access_audit(
     'remote_access.agent_ended',
