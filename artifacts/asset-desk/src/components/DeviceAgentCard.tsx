@@ -7,14 +7,13 @@ import {
 import {
   Shield, Copy, RefreshCw, KeyRound, Power, CheckCircle2, AlertCircle, Download,
   Lock, Unlock, Trash2, Ban, ShieldOff, Zap,
-  FileText, X, MonitorPlay,
+  FileText, X,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import WallpaperManager from "./WallpaperManager";
-import RemoteAccessModal from "@/components/RemoteAccessModal";
 
 interface ManagedDevice {
   id:                  string;
@@ -123,7 +122,6 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const [showForceRestart, setShowForceRestart] = useState(false);
   const [showRemoveAgent,  setShowRemoveAgent]  = useState(false);
   const [showForceRemove,  setShowForceRemove]  = useState(false);
-  const [showRemoteAccess, setShowRemoteAccess] = useState(false);
   const [removeReason, setRemoveReason] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -966,38 +964,6 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                         <Download className="h-4 w-4" /> Download Uninstall Command
                       </Button>
                     )}
-                    {token && !agentRemoved && (
-                      <Button
-                        size="sm" variant="outline"
-                        className="gap-2 text-sky-700 border-sky-300 hover:bg-sky-50"
-                        onClick={() => setShowRemoteAccess(true)}
-                        disabled={busy}
-                        data-testid="button-remote-access"
-                      >
-                        <MonitorPlay className="h-4 w-4" /> Remote Access
-                      </Button>
-                    )}
-                  </div>
-                </details>
-              </div>
-            )}
-
-            {/* Remote Access — visible to it_admin (super_admin uses the More Controls section above) */}
-            {isAdmin && !isSuperAdmin && token && !agentRemoved && (
-              <div className="pt-1">
-                <details className="rounded-md border bg-muted/20">
-                  <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-muted-foreground">
-                    More controls
-                  </summary>
-                  <div className="flex flex-wrap gap-2 px-3 pb-3">
-                    <Button
-                      size="sm" variant="outline"
-                      className="gap-2 text-sky-700 border-sky-300 hover:bg-sky-50"
-                      onClick={() => setShowRemoteAccess(true)}
-                      data-testid="button-remote-access-admin"
-                    >
-                      <MonitorPlay className="h-4 w-4" /> Remote Access
-                    </Button>
                   </div>
                 </details>
               </div>
@@ -1395,17 +1361,6 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Remote Access modal — shown for super_admin and it_admin when agent key is active */}
-      {token && (
-        <RemoteAccessModal
-          open={showRemoteAccess}
-          onClose={() => setShowRemoteAccess(false)}
-          assetId={assetId}
-          agentKeyId={token.id}
-          isSuperAdmin={isSuperAdmin}
-          assetTag={assetTag}
-        />
-      )}
     </Card>
   );
 }
