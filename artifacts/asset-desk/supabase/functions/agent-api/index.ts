@@ -28,80 +28,12 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-// Separate anon-key client used purely to exchange an admin-generated magiclink
-// token for a real user session (verifyOtp is a public auth call).
-const anonAuth = createClient(SUPABASE_URL, ANON_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
-// Mint a GENUINE, short-lived Supabase auth session for a CONTROLLED per-asset
-// agent identity. We never touch a JWT secret and never enable anonymous sign-in.
-// (DB-side HMAC minting is impossible on this project: the in-use signing key is
-// asymmetric ES256 and no HS256 secret is exposed to the database.) The identity
-// is a normal — but profile-less and powerless — auth user created by the service
-// role. On each mint we set a fresh random password and sign in with it to obtain
-// a real session (no email is ever sent). We deliberately do NOT use magiclink +
-// verifyOtp: that exchange proved unreliable on this project's GoTrue config
-// ("Email link is invalid or has expired" even for freshly-generated tokens),
-// which silently broke the agent's channel join. The returned token is what the
-// device agent presents to join the PRIVATE Realtime channel; RLS binds it to one
-// session via agent_realtime_uid.
-async function mintAgentRealtimeSession(assetId: string) {
-  const email = `remote-agent.${assetId}@agent.miles.local`;
-
-  // Ensure the controlled per-asset identity exists and (re)set its password to
-  // `pw`. Returns the user id. generateLink is used ONLY to resolve an existing
-  // user's id (it returns data.user) — never for verifyOtp.
-  async function ensureUser(pw: string): Promise<string> {
-    const created = await db.auth.admin.createUser({
-      email,
-      password: pw,
-      email_confirm: true,
-      app_metadata: { remote_agent: true, asset_id: assetId },
-    });
-    if (!created.error) return created.data.user!.id;
-    if (created.error.code !== "email_exists") {
-      throw new Error(`agent identity: ${created.error.message}`);
-    }
-    const link = await db.auth.admin.generateLink({ type: "magiclink", email });
-    const uid = link.data?.user?.id ?? null;
-    if (!uid) {
-      throw new Error(`agent identity: ${link.error?.message ?? "could not resolve user"}`);
-    }
-    const upd = await db.auth.admin.updateUserById(uid, { password: pw, email_confirm: true });
-    if (upd.error) throw new Error(`agent identity: ${upd.error.message}`);
-    return uid;
-  }
-
-  // Set a fresh password and sign in to obtain a GENUINE short-lived session.
-  // Retry once: a concurrent realtime-token call for the SAME asset (join +
-  // periodic renewal both mint) can rotate the password between our set and our
-  // sign-in, which would otherwise surface as a spurious "Invalid credentials".
-  let lastErr = "no session";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    // Keep under bcrypt's 72-byte limit; one UUID is ample entropy for a
-    // single-use, immediately-consumed password.
-    const password = `Ag3nt!${crypto.randomUUID()}`;
-    const userId = await ensureUser(password);
-    const signin = await anonAuth.auth.signInWithPassword({ email, password });
-    if (!signin.error && signin.data?.session) {
-      return {
-        user_id:       userId ?? signin.data.user?.id ?? null,
-        access_token:  signin.data.session.access_token,
-        refresh_token: signin.data.session.refresh_token,
-        expires_at:    signin.data.session.expires_at,
-      };
-    }
-    lastErr = signin.error?.message ?? "no session";
-  }
-  throw new Error(`verify: ${lastErr}`);
-}
 
 async function rpc(name: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(name, args);
@@ -142,91 +74,6 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
-    // GET /remote-access — pending Assisted Access sessions for this device
-    if (req.method === "GET" && path === "/remote-access") {
-      const r = await rpc("agent_get_pending_remote_access", { p_token: token });
-      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
-    }
-
-    // GET /remote-access/session?session_id=... — the agent polls this after the
-    // end user approves. Returns { ready:false } until the portal has issued a
-    // session token, then { ready:true, session_token, channel_name, ... } plus
-    // the public Realtime connection params so the agent can join the per-session
-    // broadcast channel WITHOUT hardcoding any key. The anon key returned here is
-    // the same public key already shipped in the browser bundle.
-    if (req.method === "GET" && path === "/remote-access/session") {
-      const sessionId = url.searchParams.get("session_id") ?? "";
-      const r = await rpc("agent_get_remote_session_token", {
-        p_token:      token,
-        p_session_id: sessionId,
-      });
-      if (!r.ok) return json({ success: false, error: r.error }, 400);
-      const data = (r.data ?? {}) as Record<string, unknown>;
-      if (data.ready === true) {
-        // https://<ref>.supabase.co -> wss://<ref>.supabase.co/realtime/v1/websocket
-        data.realtime_url = SUPABASE_URL.replace(/^http/, "ws") + "/realtime/v1/websocket";
-        data.anon_key     = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-      }
-      return json(data);
-    }
-
-    // POST /remote-access/claim — { session_id, instance_id }. Single-agent lock:
-    // the first instance to claim wins; another instance with the same token is
-    // rejected so one (possibly shared) token can't drive two agents.
-    if (req.method === "POST" && path === "/remote-access/claim") {
-      const r = await rpc("agent_claim_remote_session", {
-        p_token:       token,
-        p_session_id:  body.session_id,
-        p_instance_id: body.instance_id,
-      });
-      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
-    }
-
-    // POST /remote-access/realtime-token — { session_id }. The agent calls this
-    // (after claiming) to obtain a GENUINE Supabase auth token bound to the
-    // session, so it can join the PRIVATE per-session channel. We re-check the
-    // session is active & belongs to this device, then mint + bind the identity.
-    if (req.method === "POST" && path === "/remote-access/realtime-token") {
-      const sessionId = body.session_id;
-      if (!sessionId) return json({ success: false, error: "missing session_id" }, 400);
-
-      const tok = await rpc("agent_get_remote_session_token", {
-        p_token: token, p_session_id: sessionId,
-      });
-      if (!tok.ok) return json({ success: false, error: tok.error }, 400);
-      const sess = (tok.data ?? {}) as Record<string, unknown>;
-      if (sess.ready !== true) {
-        return json({ success: true, ready: false, status: sess.status ?? null, error: sess.error ?? null });
-      }
-
-      const assetId = String(sess.asset_id);
-      let minted;
-      try {
-        minted = await mintAgentRealtimeSession(assetId);
-      } catch (e) {
-        return json({ success: false, error: (e as Error).message }, 500);
-      }
-      if (!minted.user_id) return json({ success: false, error: "could not resolve agent identity" }, 500);
-
-      const bind = await rpc("agent_bind_realtime_uid", {
-        p_token: token, p_session_id: sessionId, p_uid: minted.user_id,
-      });
-      if (!bind.ok) return json({ success: false, error: bind.error }, 400);
-
-      return json({
-        success:       true,
-        ready:         true,
-        access_token:  minted.access_token,
-        refresh_token: minted.refresh_token,
-        expires_at:    minted.expires_at,
-        realtime_url:  SUPABASE_URL.replace(/^http/, "ws") + "/realtime/v1/websocket",
-        auth_url:      SUPABASE_URL + "/auth/v1",
-        anon_key:      ANON_KEY,
-        channel_name:  sess.channel_name,
-        asset_id:      assetId,
-      });
-    }
-
     if (req.method === "POST" && path === "/wallpaper/status") {
       const r = await rpc("agent_report_wallpaper", {
         p_token:        token,
@@ -248,15 +95,6 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
-    // POST /remote-access/respond — { session_id, response: "approved"|"denied" }
-    if (req.method === "POST" && path === "/remote-access/respond") {
-      const r = await rpc("agent_respond_remote_access", {
-        p_token:      token,
-        p_session_id: body.session_id,
-        p_response:   body.response,
-      });
-      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
-    }
 
     return json({ success: false, error: `route not found: ${req.method} ${path}` }, 404);
   } catch (err) {
