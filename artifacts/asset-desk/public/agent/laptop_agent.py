@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.3"
+AGENT_VERSION       = "0.9.4"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
