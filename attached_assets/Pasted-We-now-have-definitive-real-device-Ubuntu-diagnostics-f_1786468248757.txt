@@ -1,0 +1,162 @@
+We now have definitive real-device Ubuntu diagnostics for MILES-LAP-1142.
+
+DO NOT modify Supabase.
+DO NOT regenerate keys.
+DO NOT deploy yet.
+DO NOT touch Windows/macOS.
+Focus ONLY on Ubuntu lock behavior.
+
+REAL DEVICE DETAILS
+===================
+
+Employee:
+sheshadri-n
+UID:
+1000
+
+loginctl list-sessions:
+
+SESSION  UID   USER         SEAT   CLASS
+2        1000  sheshadri-n  seat0  user
+3        1000  sheshadri-n  -      manager
+
+Graphical process:
+
+/usr/libexec/gdm-wayland-session /usr/bin/gnome-session --session=ubuntu
+
+Agent service:
+
+miles-agent.service
+Active: running
+Runs as root system service
+
+ExecStart:
+... /opt/miles-agent/laptop_agent.py run
+
+Agent logs repeatedly show:
+
+usermod: lock user 'sheshadri-n' password
+then approximately 1 second later:
+usermod: unlock user 'sheshadri-n' password
+
+They also show:
+
+Can't open display
+
+Current account status after rollback:
+
+passwd -S sheshadri-n
+=> P
+
+So the agent is:
+1. disabling the account
+2. failing to terminate the active graphical session
+3. rolling the account lock back
+
+This matches the portal:
+"Lock failed — device NOT locked"
+
+ROOT CAUSE TO AUDIT
+===================
+
+Audit the current Linux lock implementation and determine why the active
+Wayland/GDM session is not being terminated.
+
+Do not assume:
+- DISPLAY exists
+- X11 exists
+- gdm-greeter is a normal /etc/passwd user
+- root systemd service has desktop DBus access
+
+Use systemd-logind/loginctl as the authoritative Linux session source.
+
+TARGET DESIGN
+=============
+
+For Ubuntu:
+
+1. Identify the actual employee user.
+
+2. Enumerate sessions using loginctl.
+
+3. Distinguish:
+   - CLASS=user graphical/interactive session
+   - CLASS=manager user@UID.service session
+   - GDM/system sessions
+
+4. Never lock/modify gdm/gdm-greeter/system accounts.
+
+5. Prevent new login for the employee account.
+
+6. Terminate the real interactive CLASS=user session through logind.
+
+For this real machine that means the relevant session is:
+SESSION 2
+USER sheshadri-n
+SEAT seat0
+CLASS user
+
+7. Do NOT use broad pkill -9 -u as the normal implementation.
+
+8. Do NOT terminate miles-agent.service.
+
+9. Keep GDM running so the machine returns to the login screen.
+
+10. After termination, verify with loginctl that there is no remaining
+interactive CLASS=user session for sheshadri-n.
+
+11. Only after verification:
+   report lock_screen COMPLETED.
+
+12. If session termination fails:
+   restore account state
+   report FAILED
+   exactly as the current safe rollback does.
+
+UNLOCK
+======
+
+Unlock should:
+- restore only account changes made by the agent
+- clear Miles lock state
+- allow normal employee login again
+- leave system accounts/GDM unchanged
+
+IMPORTANT:
+Do not weaken system security.
+Do not edit PAM globally.
+Do not disable GDM.
+Do not delete user accounts.
+Do not change passwords.
+Do not use arbitrary shell execution.
+
+TESTS
+=====
+
+Add Linux unit/regression tests for:
+
+- Wayland session
+- X11 session if supported
+- CLASS=user + CLASS=manager for same UID
+- multiple employee sessions
+- no graphical session
+- loginctl terminate success
+- loginctl terminate failure
+- rollback
+- already locked
+- unlock
+- GDM not modified
+- system account exclusion
+- agent process remains alive
+
+Then show me:
+
+1. Exact current failing code path
+2. Root cause
+3. Proposed code change
+4. Exact files changed
+5. Test results
+6. Controlled physical-device validation commands
+
+DO NOT DEPLOY.
+STOP after local implementation + tests.

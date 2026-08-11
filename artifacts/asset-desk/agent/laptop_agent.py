@@ -1556,23 +1556,63 @@ def _mac_force_logout(user: str) -> None:
         time.sleep(1)
 
 
-def _linux_console_user() -> str | None:
-    """Best-effort: the human user logged into the graphical/console session —
-    the one a hard lock must lock out. Only meaningful when running as root."""
+def _linux_user_sessions() -> list[dict[str, str]] | None:
+    """Return login sessions, with logind's authoritative class/type metadata.
+
+    `list-sessions` includes the per-user manager session (CLASS=manager) as
+    well as the actual desktop session.  Never treat the manager as an
+    interactive session and never infer a graphical session from DISPLAY/X11.
+    """
+    sessions: list[dict[str, str]] = []
     try:
-        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
-                             capture_output=True, text=True, timeout=10).stdout
-        for line in out.splitlines():
+        listed = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                                capture_output=True, text=True, timeout=10)
+        if listed.returncode != 0:
+            return None
+        for line in listed.stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 3:
-                uid, user = parts[1], parts[2]
-                try:
-                    if int(uid) >= 1000 and user != "root":
-                        return user
-                except ValueError:
-                    continue
+            if not parts:
+                continue
+            sid = parts[0]
+            details = subprocess.run(
+                ["loginctl", "show-session", sid, "-p", "User", "-p", "Name",
+                 "-p", "Class", "-p", "Type", "-p", "Seat"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if details.returncode != 0:
+                continue
+            values: dict[str, str] = {}
+            for item in details.stdout.splitlines():
+                key, sep, value = item.partition("=")
+                if sep:
+                    values[key] = value
+            uid_text = values.get("User", "")
+            username = values.get("Name", "")
+            if not uid_text.isdigit() or int(uid_text) < 1000 or not username:
+                continue
+            sessions.append({
+                "id": sid,
+                "uid": uid_text,
+                "user": username,
+                "class": values.get("Class", ""),
+                "type": values.get("Type", ""),
+                "seat": values.get("Seat", ""),
+            })
     except Exception:
-        pass
+        return None
+    return sessions
+
+
+def _linux_console_user() -> str | None:
+    """Return the human user owning an interactive CLASS=user session."""
+    sessions = _linux_user_sessions()
+    if sessions is not None:
+        for session in sessions:
+            if session["class"] == "user":
+                return session["user"]
+        return None
+    # Only use legacy fallbacks when logind is unavailable, not when it
+    # successfully reports sessions. This avoids selecting gdm/system users.
     try:
         out = subprocess.run(["who"], capture_output=True, text=True, timeout=10).stdout
         for line in out.splitlines():
@@ -1586,19 +1626,11 @@ def _linux_console_user() -> str | None:
 
 
 def _linux_user_has_session(user: str) -> bool:
-    """True if `user` still has an active login session (root-only check)."""
-    try:
-        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
-                             capture_output=True, text=True, timeout=10).stdout
-        for line in out.splitlines():
-            parts = line.split()
-            if len(parts) >= 3 and parts[2] == user:
-                return True
-    except Exception:
-        # If we cannot determine it, assume a session may remain (fail safe:
-        # the caller treats "unknown" as "still there" and reports honestly).
-        return True
-    return False
+    """True if `user` still owns an interactive CLASS=user session."""
+    sessions = _linux_user_sessions()
+    return sessions is None or any(
+        s["user"] == user and s["class"] == "user" for s in sessions
+    )
 
 
 def _linux_account_locked(user: str) -> bool | None:
@@ -1783,13 +1815,18 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                 return ("failed", None,
                         f"The lock command returned success but account '{user}' is "
                         f"still reported as unlocked, so the device was NOT locked.")
-            # 2) Terminate the active session so the user is kicked out NOW. We must
-            #    confirm the session is actually gone — a still-running session means
-            #    the user can keep using the device, which is NOT a real lock.
-            subprocess.run(["loginctl", "terminate-user", user], capture_output=True, text=True, timeout=15)
+            # 2) Terminate only the employee's interactive CLASS=user sessions.
+            # The per-user CLASS=manager session is intentionally left alone;
+            # logind owns it and it is not a desktop the employee can use.
+            sessions = [s for s in (_linux_user_sessions() or [])
+                        if s["user"] == user and s["class"] == "user"]
+            for session in sessions:
+                subprocess.run(["loginctl", "terminate-session", session["id"]],
+                               capture_output=True, text=True, timeout=15)
             if _linux_user_has_session(user):
-                # Escalate: kill all of the user's processes/scopes.
-                subprocess.run(["loginctl", "kill-user", user], capture_output=True, text=True, timeout=15)
+                # Escalate through logind for the specific employee only.
+                subprocess.run(["loginctl", "kill-user", user],
+                               capture_output=True, text=True, timeout=15)
                 time.sleep(1)
             if _linux_user_has_session(user):
                 # Could not evict the live session. Roll the account lock back so the
