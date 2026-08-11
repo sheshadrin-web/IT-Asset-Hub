@@ -2044,15 +2044,10 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             user = _linux_console_user()
             if not user:
                 return ("failed", None, "Could not determine the logged-in user to lock.")
-            # Configure the actual Ubuntu/GDM login screen before terminating the
-            # graphical session. A wallpaper only affects the desktop; GDM owns
-            # the username prompt shown after logout.
-            banner_ok, banner_detail = _linux_set_login_message(asset_tag)
-            if not banner_ok or not _linux_login_message_configured():
-                return ("failed", None,
-                        "Ubuntu login screen could not be configured with the Miles "
-                        f"lock message: {banner_detail}. The device was NOT locked.")
-            # 1) Password-lock the account so the user cannot log back in.
+            # Lock the account and terminate its active sessions. Do not depend
+            # on a GDM greeter account or dconf banner: Ubuntu installations
+            # legitimately vary in whether that account exists, and the account
+            # lock is the enforcement mechanism requested by the portal.
             r = subprocess.run(["usermod", "--lock", user], capture_output=True, text=True, timeout=15)
             if r.returncode != 0:
                 r = subprocess.run(["passwd", "-l", user], capture_output=True, text=True, timeout=15)
@@ -2087,8 +2082,7 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                         f"The partial lock was rolled back. Please retry.")
             _write_lock_state({"locked": True, "platform": "linux", "user": user,
                                "asset_tag": asset_tag, "lock_message": lock_msg})
-            banner_note = "" if banner_ok else f"; WARNING: {banner_detail}"
-            return ("completed", f"Account '{user}' locked and session terminated{banner_note}", None)
+            return ("completed", f"Account '{user}' locked and session terminated", None)
 
         return ("failed", None, f"unsupported platform: {sys.platform}")
     except Exception as e:
@@ -2115,7 +2109,6 @@ def _release_lock() -> tuple[str, str | None, str | None]:
             ok, detail = _linux_unlock_account(user)
             if not ok:
                 return ("failed", None, f"Failed to unlock account '{user}': {detail}")
-            _linux_clear_login_message()
             _write_lock_state({"locked": False})
             return ("completed", f"Account '{user}' unlocked ({detail})", None)
         if IS_MAC:
