@@ -56,13 +56,14 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.6"
+AGENT_VERSION       = "0.9.5"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
-# Public, unauthenticated distribution URL for the agent source. This must not
-# be the authenticated portal origin: downloads are public, while registration,
-# sync, command polling, and command status remain protected by X-Agent-Token.
-# Keep this identical to DeviceAgentCard's generated install URL.
+# Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
+# self-update works even when the install-time MILES_AGENT_URL env var is missing
+# from the service context (e.g. a root/SYSTEM service that did not inherit a
+# user-scope env var). Without a working default the update check 404s silently
+# and the device stays pinned to whatever version it was installed with.
 DEFAULT_AGENT_URL   = "https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py"
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
 # Self-update: check once every 24 h. Set to 0 to disable.
@@ -200,18 +201,7 @@ def _ioreg_serial() -> str:
     for line in text.splitlines():
         if '"IOPlatformSerialNumber"' in line:
             # ... "IOPlatformSerialNumber" = "C02XXXXXXXX"
-            return _normalize_serial(line.split("=", 1)[-1].strip().strip('"').strip())
-    return ""
-
-
-def _system_profiler_serial() -> str:
-    """Read Apple's hardware serial without relying on a user shell."""
-    text = _run(["/usr/sbin/system_profiler", "SPHardwareDataType"], timeout=10)
-    if not text:
-        text = _run(["system_profiler", "SPHardwareDataType"], timeout=10)
-    for line in text.splitlines():
-        if line.strip().lower().startswith("serial number"):
-            return _normalize_serial(line.split(":", 1)[-1])
+            return line.split("=", 1)[-1].strip().strip('"').strip()
     return ""
 
 
@@ -233,7 +223,7 @@ _last_update_check   = 0.0   # monotonic time of the last version check
 def _agent_script_url() -> str:
     """Return the URL where the latest laptop_agent.py is served.
 
-    install.ps1 saves MILES_AGENT_URL as a machine-level env var
+    install.ps1 / install.sh saves MILES_AGENT_URL as a user-level env var
     during enrollment — that's the preferred source (lets a differently-hosted
     portal override the default). When it is empty we fall back to the hardcoded
     DEFAULT_AGENT_URL so the updater always has a reachable source.
@@ -242,7 +232,10 @@ def _agent_script_url() -> str:
     if url:
         return url
     # No env var (common when a root/SYSTEM service does not inherit a user-scope
-    # var). Fall back to the canonical public distribution URL.
+    # var). Fall back to the hardcoded portal URL so self-update ALWAYS has a
+    # reachable source. The old behaviour derived a URL from the Supabase API base
+    # (https://<ref>.supabase.co/agent/laptop_agent.py) — a path Supabase does not
+    # serve, so every update 404'd silently and the device never upgraded.
     return DEFAULT_AGENT_URL
 
 
@@ -343,33 +336,14 @@ def _self_update(force: bool = False) -> tuple[bool, str]:
 _WIN_BAD_VALUES = {
     "", "to be filled by o.e.m.", "default string", "none", "n/a",
     "not applicable", "system serial number", "0", "unknown",
-    "not specified", "00000000",
     "no asset tag", "asset-1234567890",
 }
 
 
-def _normalize_serial(val: str | None) -> str:
-    """Strip whitespace and reject common OEM placeholder serials."""
-    v = (val or "").strip()
-    return "" if v.lower() in _WIN_BAD_VALUES else v
-
-
 def _cim_clean(val: str) -> str:
-    return _normalize_serial(val)
-
-
-_last_serial_diagnostic: tuple[str, bool] | None = None
-
-
-def _serial_diagnostic(source: str, value: str) -> str:
-    """Log only the serial source and availability, never the serial itself."""
-    global _last_serial_diagnostic
-    state = (source, bool(value))
-    if state != _last_serial_diagnostic:
-        print(f"Serial number source: {source}; Serial number available: "
-              f"{'yes' if value else 'no'}")
-        _last_serial_diagnostic = state
-    return value
+    """Strip whitespace; return empty string for known placeholder values."""
+    v = val.strip()
+    return "" if v.lower() in _WIN_BAD_VALUES else v
 
 
 def _collect_windows() -> dict:
@@ -480,13 +454,8 @@ def _collect_macos() -> dict:
                 storage = f"{round(int(parts[1]) / (1024**2))} GB"
     os_ver = _run(["sw_vers", "-productVersion"])
     os_name_full = _run(["sw_vers", "-productName"]) or "macOS"
-    profiler_serial = _system_profiler_serial()
-    serial = profiler_serial or _ioreg_serial()
     return {
-        "serial_number": _serial_diagnostic(
-            "system_profiler" if profiler_serial else ("ioreg" if serial else "none"),
-            serial,
-        ),
+        "serial_number": _ioreg_serial(),
         "brand":         "Apple",
         "model":         model,
         "processor":     cpu,
@@ -498,24 +467,10 @@ def _collect_macos() -> dict:
 
 
 def _collect_linux() -> dict:
-    # Hardware-only sources. Never substitute hostname, MAC address, or machine-id.
+    # Brand / model / serial from DMI (requires read access — usually root for serial)
     brand   = _read_file("/sys/class/dmi/id/sys_vendor")
     model   = _read_file("/sys/class/dmi/id/product_name")
-    serial = _normalize_serial(_read_file("/sys/class/dmi/id/product_serial"))
-    serial_source = "dmi-sysfs"
-    if not serial:
-        serial = _normalize_serial(
-            _read_file("/sys/devices/virtual/dmi/id/product_serial")
-        )
-        serial_source = "dmi-sysfs-secondary"
-    if not serial and _is_root():
-        serial = _normalize_serial(
-            _run(["dmidecode", "-s", "system-serial-number"], timeout=5)
-        )
-        serial_source = "dmidecode"
-    if not serial:
-        serial = _normalize_serial(_read_file("/sys/class/dmi/id/board_serial"))
-        serial_source = "dmi-board" if serial else "none"
+    serial  = _read_file("/sys/class/dmi/id/product_serial") or _read_file("/sys/class/dmi/id/board_serial")
     # Processor from /proc/cpuinfo
     cpu = ""
     cpuinfo = _read_file("/proc/cpuinfo")
@@ -548,7 +503,7 @@ def _collect_linux() -> dict:
         if line.startswith("PRETTY_NAME="):
             os_name = line.split("=", 1)[-1].strip().strip('"'); break
     return {
-        "serial_number": _serial_diagnostic(serial_source, serial),
+        "serial_number": serial,
         "brand":         brand,
         "model":         model,
         "processor":     cpu,
@@ -1154,20 +1109,9 @@ LOCK_SCREEN_BG      = "#0a1a3f"   # deep brand blue
 LOCK_SCREEN_FG      = "#ffffff"
 LOCK_SCREEN_ACCENT  = "#9db8ff"
 WIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
-LIN_GDM_DCONF_DIR   = "/etc/dconf/db/gdm.d"
-LIN_GDM_DCONF_FILE  = f"{LIN_GDM_DCONF_DIR}/00-miles-agent-lock"
-LIN_GDM_PROFILE_DIR = "/etc/dconf/profile"
-LIN_GDM_PROFILE_FILE = f"{LIN_GDM_PROFILE_DIR}/gdm"
-LIN_GDM_PROFILE_TEXT = "user-db:user\nsystem-db:gdm\nfile-db:/usr/share/gdm/greeter-dconf-defaults\n"
-LIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
-LIN_LOCK_MESSAGE    = "This device has been locked by the IT Asset Management Team."
 # Standard end-user accounts disabled on a Windows hard lock. The account the
 # agent itself runs as is NEVER disabled (break-glass + keeps enforcement alive).
 WIN_LOCK_USERS      = ["Miles", "Miles-IT-Support"]
-WIN_SYSTEM_USERS    = {
-    "system", "local service", "network service", "administrator",
-    "defaultuser0", "defaultuser", "wdagutilityaccount",
-}
 
 
 def _win_is_admin() -> bool:
@@ -1189,80 +1133,22 @@ def _win_account_exists(user: str) -> bool:
         return False
 
 
-def _win_account_disabled(user: str) -> bool | None:
-    """Verify ``net user`` reports the account as inactive.
-
-    ``net user`` output is localized, so use the stable ``Account active``
-    label where available and return unknown rather than claiming enforcement
-    when Windows cannot be queried.
-    """
-    try:
-        r = subprocess.run(
-            ["net", "user", user], capture_output=True, text=True, timeout=15,
-            creationflags=_NO_WINDOW,
-        )
-        if r.returncode != 0:
-            return None
-        for line in r.stdout.splitlines():
-            if "account active" in line.lower():
-                value = line.split(":", 1)[-1].strip().lower()
-                if value in {"no", "n"}:
-                    return True
-                if value in {"yes", "y"}:
-                    return False
-        return None
-    except Exception:
-        return None
-
-
-def _win_interactive_users() -> list[str]:
-    """Return human accounts with an interactive Windows session.
-
-    The agent must not assume that every customer names the end-user account
-    ``Miles``. ``quser`` is available from an elevated/system service and
-    identifies the account that is actually using the console. Fixed Miles
-    accounts remain a fallback for a device sitting at the sign-in screen.
-    """
-    users: list[str] = []
-    try:
-        out = subprocess.run(
-            ["quser"], capture_output=True, text=True, timeout=15,
-            creationflags=_NO_WINDOW,
-        ).stdout
-        for line in out.splitlines()[1:]:
-            parts = line.replace(">", " ").split()
-            if not parts:
-                continue
-            user = parts[0].strip()
-            if user and user.lower() not in WIN_SYSTEM_USERS and user not in users:
-                users.append(user)
-    except Exception:
-        pass
-    return users
-
-
 def _win_disable_lock_accounts() -> list[str]:
-    """Disable the actual interactive account(s) so sign-in is rejected.
-
-    NEVER disables the account the agent itself runs as (our break-glass account)
-    or a system account. Returns only accounts whose ``net user`` command
-    succeeded.
-    """
+    """Disable the standard end-user accounts so their password is rejected at the
+    Windows sign-in screen. NEVER disables the account the agent itself runs as
+    (our break-glass and the only thing keeping enforcement + unlock alive) nor an
+    account that does not exist. Returns the accounts actually disabled."""
     disabled: list[str] = []
     me = (os.environ.get("USERNAME") or "").strip().lower()
-    candidates = _win_interactive_users() + WIN_LOCK_USERS
-    for u in candidates:
-        normalized = u.strip().lower()
-        if not normalized or normalized == me or normalized in WIN_SYSTEM_USERS:
-            continue
-        if any(existing.lower() == normalized for existing in disabled):
+    for u in WIN_LOCK_USERS:
+        if u.strip().lower() == me:
             continue
         if not _win_account_exists(u):
             continue
         try:
             r = subprocess.run(["net", "user", u, "/active:no"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            if r.returncode == 0 and _win_account_disabled(u) is True:
+            if r.returncode == 0:
                 disabled.append(u)
         except Exception:
             pass
@@ -1674,43 +1560,17 @@ def _linux_console_user() -> str | None:
     """Best-effort: the human user logged into the graphical/console session —
     the one a hard lock must lock out. Only meaningful when running as root."""
     try:
-        r = subprocess.run(
-            ["loginctl", "--no-pager", "--no-legend", "list-sessions"],
-            capture_output=True, text=True, timeout=10,
-            env=dict(os.environ, LC_ALL="C", LANG="C"),
-        )
-        if r.returncode != 0:
-            raise RuntimeError("loginctl list-sessions failed")
-        out = r.stdout
-        candidates: list[tuple[str, str]] = []
+        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                             capture_output=True, text=True, timeout=10).stdout
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 3:
                 uid, user = parts[1], parts[2]
                 try:
                     if int(uid) >= 1000 and user != "root":
-                        candidates.append((parts[0], user))
+                        return user
                 except ValueError:
                     continue
-        # Prefer an active local graphical session. This avoids selecting a
-        # stale SSH/TTY session when the agent runs as a root system service.
-        for session_id, user in candidates:
-            props = subprocess.run(
-                ["loginctl", "show-session", session_id,
-                 "-p", "Active", "-p", "Remote", "-p", "Type", "-p", "Class"],
-                capture_output=True, text=True, timeout=10,
-                env=dict(os.environ, LC_ALL="C", LANG="C"),
-            ).stdout
-            values = dict(
-                line.split("=", 1) for line in props.splitlines() if "=" in line
-            )
-            if (values.get("Active") == "yes"
-                    and values.get("Remote") != "yes"
-                    and values.get("Class") in ("user", "greeter")
-                    and values.get("Type") in ("wayland", "x11", "mir")):
-                return user
-        if candidates:
-            return candidates[0][1]
     except Exception:
         pass
     try:
@@ -1725,77 +1585,20 @@ def _linux_console_user() -> str | None:
     return su if su and su != "root" else None
 
 
-def _linux_user_sessions(user: str) -> list[str] | None:
-    """Return active logind session IDs owned by `user`.
-
-    `loginctl terminate-user` is not reliable enough on every Ubuntu desktop
-    stack: the user manager or graphical session can remain alive after the
-    broad operation returns. Targeting each session gives the agent a
-    deterministic escalation path and lets the caller verify the real state.
-    """
-    sessions: list[str] = []
+def _linux_user_has_session(user: str) -> bool:
+    """True if `user` still has an active login session (root-only check)."""
     try:
-        # Keep parsing independent of the user's locale and avoid the pager
-        # ever being inherited by a non-interactive systemd service.
-        r = subprocess.run(
-            ["loginctl", "--no-pager", "--no-legend", "list-sessions"],
-            capture_output=True, text=True, timeout=10,
-            env=dict(os.environ, LC_ALL="C", LANG="C"),
-        )
-        if r.returncode != 0:
-            return None
-        out = r.stdout
+        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                             capture_output=True, text=True, timeout=10).stdout
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 3 and parts[2] == user:
-                sessions.append(parts[0])
+                return True
     except Exception:
-        # None means the session state is unknown. An empty list means the
-        # query completed successfully and the user has no active sessions.
-        return None
-    return sessions
-
-
-def _linux_user_has_session(user: str) -> bool:
-    """True if `user` still has an active login session (root-only check)."""
-    sessions = _linux_user_sessions(user)
-    # Fail closed: never claim a hard lock when session state cannot be
-    # verified. The caller reports a failed lock and rolls the account lock
-    # back instead of leaving the device in an ambiguous state.
-    return sessions is None or bool(sessions)
-
-
-def _linux_terminate_user_sessions(user: str) -> None:
-    """Terminate every session for `user`, escalating explicitly.
-
-    Ubuntu GNOME may leave a graphical session alive after terminate-user.
-    Session-level termination/kill is attempted first, followed by user-level
-    termination/kill and process termination. The caller must verify with
-    `_linux_user_has_session` before claiming the device is locked.
-    """
-    session_ids = _linux_user_sessions(user)
-    if session_ids is not None:
-        for session_id in session_ids:
-            subprocess.run(["loginctl", "terminate-session", session_id],
-                           capture_output=True, text=True, timeout=15)
-
-    subprocess.run(["loginctl", "terminate-user", user],
-                   capture_output=True, text=True, timeout=15)
-    time.sleep(1)
-
-    session_ids = _linux_user_sessions(user)
-    if session_ids is not None:
-        for session_id in session_ids:
-            subprocess.run(["loginctl", "kill-session", session_id, "--signal=KILL"],
-                           capture_output=True, text=True, timeout=15)
-    subprocess.run(["loginctl", "kill-user", user, "--signal=KILL"],
-                   capture_output=True, text=True, timeout=15)
-    # Fallback for desktop/session processes that are not controlled by
-    # logind's user manager. Never target root; `user` came from a UID>=1000
-    # console session or an explicit non-root fallback.
-    subprocess.run(["pkill", "-KILL", "-u", user],
-                   capture_output=True, text=True, timeout=15)
-    time.sleep(1)
+        # If we cannot determine it, assume a session may remain (fail safe:
+        # the caller treats "unknown" as "still there" and reports honestly).
+        return True
+    return False
 
 
 def _linux_account_locked(user: str) -> bool | None:
@@ -1812,84 +1615,6 @@ def _linux_account_locked(user: str) -> bool | None:
     except Exception:
         return None
     return None
-
-
-def _linux_set_login_message(asset_tag: str = "") -> tuple[bool, str]:
-    """Configure the GDM greeter banner for a hard-locked Ubuntu device.
-
-    GDM owns the screen shown after the user's graphical session is terminated;
-    changing the desktop wallpaper cannot replace its username prompt. The
-    dconf database is system-wide and survives the transition to the greeter.
-    """
-    if not _is_root():
-        return (False, "GDM login message requires root")
-    try:
-        os.makedirs(LIN_GDM_PROFILE_DIR, mode=0o755, exist_ok=True)
-        profile_tmp = LIN_GDM_PROFILE_FILE + ".tmp"
-        with open(profile_tmp, "w", encoding="utf-8") as fh:
-            fh.write(LIN_GDM_PROFILE_TEXT)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(profile_tmp, 0o644)
-        os.replace(profile_tmp, LIN_GDM_PROFILE_FILE)
-        os.makedirs(LIN_GDM_DCONF_DIR, mode=0o755, exist_ok=True)
-        tag_line = f"\\nAsset ID: {asset_tag}" if asset_tag else ""
-        text = (
-            "[org/gnome/login-screen]\n"
-            "banner-message-enable=true\n"
-            "disable-user-list=true\n"
-            f"banner-message-text='{LIN_LOCK_CAPTION}\\n{LIN_LOCK_MESSAGE}{tag_line}'\n"
-        )
-        tmp = LIN_GDM_DCONF_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, LIN_GDM_DCONF_FILE)
-        if shutil.which("dconf"):
-            r = subprocess.run(["dconf", "update"], capture_output=True,
-                               text=True, timeout=15)
-            if r.returncode != 0:
-                return (False, r.stderr.strip() or "dconf update failed")
-        return (True, "GDM profile and login message configured")
-    except Exception as exc:
-        return (False, str(exc))
-
-
-def _linux_clear_login_message() -> tuple[bool, str]:
-    """Remove the Miles GDM lock banner and restore normal greeter defaults."""
-    if not _is_root():
-        return (False, "GDM login message requires root")
-    try:
-        if os.path.exists(LIN_GDM_DCONF_FILE):
-            os.remove(LIN_GDM_DCONF_FILE)
-        # Keep the standard GDM profile available; only remove the Miles lock
-        # database fragment so normal Ubuntu greeter defaults remain intact.
-        if shutil.which("dconf"):
-            r = subprocess.run(["dconf", "update"], capture_output=True,
-                               text=True, timeout=15)
-            if r.returncode != 0:
-                return (False, r.stderr.strip() or "dconf update failed")
-        return (True, "GDM login message cleared")
-    except Exception as exc:
-        return (False, str(exc))
-
-
-def _linux_login_message_configured() -> bool:
-    """Verify the profile and lock fragment exist before claiming banner setup."""
-    try:
-        return (
-            _is_root()
-            and os.path.isfile(LIN_GDM_PROFILE_FILE)
-            and open(LIN_GDM_PROFILE_FILE, encoding="utf-8").read() == LIN_GDM_PROFILE_TEXT
-            and os.path.isfile(LIN_GDM_DCONF_FILE)
-            and "banner-message-enable=true" in open(
-                LIN_GDM_DCONF_FILE, encoding="utf-8"
-            ).read()
-        )
-    except Exception:
-        return False
 
 
 def _linux_unlock_account(user: str) -> tuple[bool, str]:
@@ -2044,10 +1769,7 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             user = _linux_console_user()
             if not user:
                 return ("failed", None, "Could not determine the logged-in user to lock.")
-            # Lock the account and terminate its active sessions. Do not depend
-            # on a GDM greeter account or dconf banner: Ubuntu installations
-            # legitimately vary in whether that account exists, and the account
-            # lock is the enforcement mechanism requested by the portal.
+            # 1) Password-lock the account so the user cannot log back in.
             r = subprocess.run(["usermod", "--lock", user], capture_output=True, text=True, timeout=15)
             if r.returncode != 0:
                 r = subprocess.run(["passwd", "-l", user], capture_output=True, text=True, timeout=15)
@@ -2064,7 +1786,11 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             # 2) Terminate the active session so the user is kicked out NOW. We must
             #    confirm the session is actually gone — a still-running session means
             #    the user can keep using the device, which is NOT a real lock.
-            _linux_terminate_user_sessions(user)
+            subprocess.run(["loginctl", "terminate-user", user], capture_output=True, text=True, timeout=15)
+            if _linux_user_has_session(user):
+                # Escalate: kill all of the user's processes/scopes.
+                subprocess.run(["loginctl", "kill-user", user], capture_output=True, text=True, timeout=15)
+                time.sleep(1)
             if _linux_user_has_session(user):
                 # Could not evict the live session. Roll the account lock back so the
                 # device is left in a consistent UNLOCKED state and report the truth —
