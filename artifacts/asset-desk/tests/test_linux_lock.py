@@ -185,14 +185,19 @@ class WindowsLockTests(unittest.TestCase):
                     "SYSTEM                                     0  Active\n",
                     "",
                 )
-            if cmd[:2] == ["net", "user"]:
-                return subprocess.CompletedProcess(cmd, 0, "", "")
             if cmd[:4] == ["net", "user", "new-employee", "/active:no"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if cmd[:3] == ["net", "user", "new-employee"]:
+                return subprocess.CompletedProcess(
+                    cmd, 0, "Account active               No\n", "",
+                )
+            if cmd[:2] == ["net", "user"]:
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             raise AssertionError(cmd)
 
         with patch.object(agent.subprocess, "run", side_effect=run), \
              patch.dict(agent.os.environ, {"USERNAME": "SYSTEM"}, clear=False), \
+             patch.object(agent, "_win_account_disabled", return_value=True), \
              patch.object(agent, "_write_lock_state") as write_state:
             self.assertEqual(agent._win_interactive_users(), ["new-employee"])
             result = agent._apply_hard_lock()

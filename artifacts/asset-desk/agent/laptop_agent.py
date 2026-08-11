@@ -1120,7 +1120,7 @@ WIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
 WIN_LOCK_USERS      = ["Miles", "Miles-IT-Support"]
 WIN_SYSTEM_ACCOUNTS = {
     "system", "localsystem", "local service", "network service",
-    "defaultaccount", "wdagutilityaccount",
+    "administrator", "defaultaccount", "defaultuser0", "wdagutilityaccount",
 }
 
 
@@ -1141,6 +1141,31 @@ def _win_account_exists(user: str) -> bool:
         return r.returncode == 0
     except Exception:
         return False
+
+
+def _win_account_disabled(user: str) -> bool | None:
+    """Verify that Windows reports the account as inactive.
+
+    ``net user`` output is localized, so this returns ``None`` when the stable
+    ``Account active`` field cannot be interpreted. Locking fails closed when
+    verification is unavailable; a successful command alone is not enough to
+    claim that sign-in is blocked.
+    """
+    try:
+        r = subprocess.run(["net", "user", user], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        if r.returncode != 0:
+            return None
+        for line in r.stdout.splitlines():
+            if "account active" in line.lower():
+                value = line.split(":", 1)[-1].strip().lower()
+                if value in ("no", "n"):
+                    return True
+                if value in ("yes", "y"):
+                    return False
+        return None
+    except Exception:
+        return None
 
 
 def _win_interactive_users() -> list[str]:
@@ -1195,7 +1220,7 @@ def _win_disable_lock_accounts(users: list[str] | None = None) -> list[str]:
         try:
             r = subprocess.run(["net", "user", u, "/active:no"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            if r.returncode == 0:
+            if r.returncode == 0 and _win_account_disabled(u) is True:
                 disabled.append(u)
         except Exception:
             pass
