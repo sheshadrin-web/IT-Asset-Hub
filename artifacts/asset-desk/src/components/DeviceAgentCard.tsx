@@ -481,6 +481,42 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
       `irm "${installPsUrl}" | iex`,
     ].join("\n");
 
+  // Repair an existing managed installation without generating/revoking a key,
+  // re-registering the asset, or changing inventory data. The commands read the
+  // token already persisted by the privileged service and only replace the
+  // agent source + restart the existing root/SYSTEM service.
+  const repairCmdLinux = [
+    `sudo bash -c '`,
+    `set -eu`,
+    `ENV_FILE=/etc/miles-agent/agent.env`,
+    `TOKEN_FILE=/etc/miles-agent/agent.token`,
+    `TOKEN="$(sed -n "s/^MILES_AGENT_TOKEN=//p" "$ENV_FILE" 2>/dev/null || true)"`,
+    `if [ -z "$TOKEN" ] && [ -r "$TOKEN_FILE" ]; then TOKEN="$(cat "$TOKEN_FILE")"; fi`,
+    `test -n "$TOKEN"`,
+    `API_BASE="$(sed -n "s/^MILES_AGENT_API_BASE=//p" "$ENV_FILE" 2>/dev/null || true)"`,
+    `mkdir -p /opt/miles-agent`,
+    `python3 -c "import urllib.request; urllib.request.urlretrieve('${agentUrl}', '/opt/miles-agent/laptop_agent.py')"`,
+    `PY="$(sed -n "s/^ExecStart=\\([^ ]*\\).*/\\1/p" /etc/systemd/system/miles-agent.service 2>/dev/null | head -n1)"`,
+    `test -x "$PY"`,
+    `MILES_AGENT_TOKEN="$TOKEN" MILES_AGENT_API_BASE="$API_BASE" "$PY" /opt/miles-agent/laptop_agent.py install-service`,
+    `'`,
+  ].join("\n");
+
+  const repairCmdWindows = [
+    `$ErrorActionPreference = "Stop"`,
+    `$d = Join-Path $env:ProgramData "MilesAgent"`,
+    `$tokenFile = Join-Path $d "agent.token"`,
+    `$token = if (Test-Path $tokenFile) { (Get-Content $tokenFile -Raw).Trim() } else { [Environment]::GetEnvironmentVariable("MILES_AGENT_TOKEN", "Machine") }`,
+    `if ([string]::IsNullOrWhiteSpace($token)) { throw "Existing Windows agent key was not found. Generate a key only if this installation has no local key." }`,
+    `$py = Join-Path $d "venv\\Scripts\\python.exe"`,
+    `$script = Join-Path $d "laptop_agent.py"`,
+    `if (-not (Test-Path $py)) { throw "Existing MilesAgent Python service was not found under $d." }`,
+    `Invoke-WebRequest -Uri "${agentUrl}" -OutFile $script -UseBasicParsing`,
+    `$env:MILES_AGENT_TOKEN = $token`,
+    `& $py $script install-service`,
+    `if ($LASTEXITCODE -ne 0) { throw "MilesAgent SYSTEM service repair failed with exit code $LASTEXITCODE." }`,
+  ].join("\n");
+
   // Real HARD lock (OS-level account/workstation lock with honest status
   // reporting) needs a recent agent. Older agents either ignore the command,
   // show a dismissable overlay, or lock the screen only once (the user types
@@ -492,7 +528,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   //     agents could not truly lock, so they must be reinstalled.
   // Detect the mismatch and warn IT to update the agent.
   const isMac = /mac|os\s*x|darwin/i.test(device?.os_name ?? "");
-  const LOCK_MIN_VERSION = isMac ? [0, 5, 0] : [0, 9, 5];
+  const LOCK_MIN_VERSION = isMac ? [0, 5, 0] : [0, 9, 6];
   const parseVer = (v: string | null | undefined): number[] =>
     (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
   const lockEnforceable = (() => {
@@ -1069,6 +1105,38 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                   />
                 </div>
               </details>
+               {device && !isMac && (
+                 <details className="mt-3 rounded-md border border-amber-300 bg-amber-50/40">
+                   <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-amber-900">
+                     Repair current Windows / Ubuntu installation (no new key)
+                   </summary>
+                   <div className="space-y-3 px-3 pb-3">
+                     <p className="text-[11px] text-amber-900">
+                       Run as Administrator on Windows or with <b>sudo</b> on Ubuntu. This reuses the
+                       key already stored on the laptop, updates only the agent, and restarts the existing
+                       privileged service. It does not regenerate a key, revoke the device, or change asset data.
+                     </p>
+                     {/ubuntu|linux/i.test(device.os_name ?? "") && (
+                       <CmdBlock
+                         label="Ubuntu / Linux repair"
+                         value={repairCmdLinux}
+                         rows={12}
+                         testid="button-copy-repair-linux"
+                         onCopy={() => copy(repairCmdLinux, "Ubuntu repair command")}
+                       />
+                     )}
+                     {/windows/i.test(device.os_name ?? "") && (
+                       <CmdBlock
+                         label="Windows PowerShell repair (Administrator)"
+                         value={repairCmdWindows}
+                         rows={10}
+                         testid="button-copy-repair-windows"
+                         onCopy={() => copy(repairCmdWindows, "Windows repair command")}
+                       />
+                     )}
+                   </div>
+                 </details>
+               )}
             </div>
           </>
         )}
