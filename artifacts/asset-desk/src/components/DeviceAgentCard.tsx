@@ -39,6 +39,16 @@ interface ManagedDevice {
   lock_reason:         string | null;
   uptime_seconds:      number | null;
   last_boot_at:        string | null;
+  location_source:     "network" | "os" | null;
+  location_city:       string | null;
+  location_region:     string | null;
+  location_postal_code:string | null;
+  location_country:    string | null;
+  location_public_ip:  string | null;
+  location_latitude:   number | null;
+  location_longitude:  number | null;
+  location_accuracy_m: number | null;
+  location_captured_at:string | null;
 }
 interface AgentToken {
   id:               string;
@@ -92,6 +102,17 @@ function formatUptime(seconds: number | null | undefined): string {
   if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+function formatLocationAge(capturedAt: string | null): string {
+  if (!capturedAt) return "—";
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - new Date(capturedAt).getTime()) / 60000));
+  if (ageMinutes < 1) return "just now";
+  if (ageMinutes < 60) return `${ageMinutes} minute${ageMinutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(ageMinutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 // A device that has not rebooted in over a day should be restarted to apply
@@ -370,6 +391,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   const lastSeen = device?.last_seen_at
     ? new Date(device.last_seen_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
     : "—";
+  const locationAge = formatLocationAge(device?.location_captured_at ?? null);
+  const locationIsStale = !!device?.location_captured_at &&
+    Date.now() - new Date(device.location_captured_at).getTime() > 60 * 60 * 1000;
+  const locationName = [
+    device?.location_city,
+    device?.location_region,
+    device?.location_country,
+  ].filter(Boolean).join(", ");
 
   // Agent removed = the management connection has been ended (graceful confirm
   // or force remove). The asset/assignment/history stay; only management stops.
@@ -626,6 +655,37 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                 <Row label="Agent Version" value={device.agent_version ?? "—"} />
                 <Row label="Uptime"        value={formatUptime(device.uptime_seconds)} />
                 <Row label="Last Restart"  value={lastBoot} />
+                <div className="rounded-md border border-slate-200 bg-slate-50/70 px-3 py-2.5 space-y-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Location
+                  </p>
+                  {device.location_source === "network" && locationName ? (
+                    <>
+                      <p className="text-sm font-medium text-foreground">{locationName}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Source: Network/IP estimate
+                      </p>
+                      {device.location_public_ip && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Public IP: <span className="font-mono">{device.location_public_ip}</span>
+                        </p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Accuracy: Approximate · Last Updated: {locationAge}
+                      </p>
+                      {locationIsStale && (
+                        <p className="text-[11px] font-medium text-amber-700">
+                          Location may be stale
+                        </p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Location is estimated from the device&apos;s public network/IP and may not represent the exact physical location.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Location unavailable</p>
+                  )}
+                </div>
               </>
             )}
 

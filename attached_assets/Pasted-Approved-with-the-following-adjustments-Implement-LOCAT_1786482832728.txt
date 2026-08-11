@@ -1,0 +1,202 @@
+Approved with the following adjustments.
+
+Implement LOCATION as a separate feature branch.
+Do NOT mix this into the lock/persistent-lock release.
+
+PHASE 1 ONLY for now:
+Implement approximate NETWORK/IP location.
+
+Do NOT implement Windows Location Services, GeoClue, or macOS Core Location yet.
+Those will be Phase 2 after the network-location pipeline is proven.
+
+DATABASE
+========
+
+Add nullable latest-location fields to managed_devices:
+
+location_source text
+location_city text
+location_region text
+location_postal_code text
+location_country text
+location_public_ip text
+location_latitude numeric(9,6)
+location_longitude numeric(9,6)
+location_accuracy_m numeric
+location_captured_at timestamptz
+
+Constraint:
+
+location_source IS NULL
+OR location_source IN ('network', 'os')
+
+For Phase 1, only 'network' will be written.
+
+Do not create a location-history table yet.
+
+Existing device_sync_logs.sync_payload JSONB can retain submitted telemetry/history.
+
+IMPORTANT:
+Do not clear an existing valid location because a later network/geolocation lookup temporarily fails.
+
+Keep the last known location.
+
+The portal should derive freshness from location_captured_at.
+
+AGENT
+=====
+
+Collect location ONLY during the existing heavy sync cycle.
+
+Do NOT run location lookup during 5-second command polling.
+
+Phase 1 flow:
+
+1. Determine current public IP.
+2. Resolve the public IP through one approved geolocation provider.
+3. Collect:
+   - city
+   - region
+   - postal code if available
+   - country
+   - public IP
+   - latitude
+   - longitude
+4. Mark:
+   location_source = 'network'
+5. Set coarse accuracy.
+6. Set location_captured_at.
+7. Include the location object in the existing /sync payload.
+8. If lookup fails:
+   - continue normal sync
+   - do not fail agent heartbeat
+   - do not overwrite last known location with null values
+
+API/RPC
+=======
+
+Extend agent_register and agent_sync validation.
+
+Validate:
+- latitude -90..90
+- longitude -180..180
+- accuracy >= 0
+- source allowed
+- captured_at valid timestamp
+
+Do not trust arbitrary nested values.
+
+PORTAL
+======
+
+Display LOCATION inside the existing Device Agent card.
+
+Do NOT restructure the UI.
+
+Example:
+
+LOCATION
+
+Bengaluru, Karnataka, India
+Source: Network/IP estimate
+Public IP: xxx.xxx.xxx.xxx
+Accuracy: Approximate
+Last Updated: 2 minutes ago
+
+If old:
+
+Last Updated: 6 hours ago
+Location may be stale
+
+If never collected:
+
+Location unavailable
+
+Clearly state:
+
+"Location is estimated from the device's public network/IP and may not represent the exact physical location."
+
+PRIVACY
+=======
+
+Do not imply network location is GPS/exact location.
+
+Do not continuously collect at command-poll frequency.
+
+Do not introduce employee movement/history UI.
+
+Do not log exact coordinates unnecessarily.
+
+PROVIDER
+========
+
+Before implementation, compare suitable IP geolocation providers for:
+
+- HTTPS
+- privacy
+- commercial use
+- rate limits
+- reliability
+- required API key
+- expected fleet size
+
+Do not hardcode a paid/secret API key into laptop_agent.py.
+
+If a provider secret is required, prefer resolving IP geolocation server-side rather than distributing the provider secret to every laptop.
+
+ARCHITECTURE PREFERENCE
+=======================
+
+Strongly consider:
+
+Agent sends public IP
+→ backend performs IP geolocation
+→ backend stores resulting latest location
+
+instead of:
+
+Agent contains third-party geolocation API credentials.
+
+This keeps provider credentials centralized and allows the provider to be changed later without updating every agent.
+
+TESTS
+=====
+
+Test:
+
+- valid network location
+- provider timeout
+- provider unavailable
+- malformed provider response
+- invalid coordinates
+- VPN/public-IP changes
+- existing location preserved after temporary failure
+- no location available
+- normal /sync still succeeds when location fails
+- no command polling changes
+- no lock/unlock changes
+- no token changes
+
+VERSIONING
+==========
+
+Do not include this in the current lock release.
+
+Location should be a separate subsequent agent release after the lock lifecycle release is stable.
+
+DO NOT:
+- deploy
+- apply migration
+- modify production Supabase
+- change polling
+- change lock/unlock
+- change agent keys
+
+Implement locally, test, and stop with:
+- migration
+- RPC changes
+- provider architecture
+- exact files
+- tests
+- UI screenshot/description
+- production rollout plan.

@@ -551,7 +551,7 @@ def _boot_time_iso() -> str | None:
         return None
 
 
-def collect_system_info() -> dict:
+def collect_system_info(include_location_request: bool = False) -> dict:
     hostname  = socket.gethostname()
     logged_in = os.environ.get("USERNAME") or os.environ.get("USER") or ""
     # When the agent runs as a root system service (required for Linux hard lock),
@@ -601,7 +601,7 @@ def collect_system_info() -> dict:
             "os_version": platform.version(),
         }
 
-    return {
+    payload = {
         **per_os,
         "hostname":            hostname,
         "logged_in_username":  logged_in,
@@ -613,6 +613,12 @@ def collect_system_info() -> dict:
         "uptime_seconds":      _uptime_seconds(),
         "last_boot_at":        _boot_time_iso(),
     }
+    # Location is resolved server-side from the request's public IP. This marker
+    # is intentionally opt-in so command-poll-triggered inventory syncs do not
+    # perform a location lookup.
+    if include_location_request:
+        payload["location_request"] = "network"
+    return payload
 
 
 # ── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -2101,7 +2107,7 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     action truly took effect."""
     ctype = cmd.get("type")
     if ctype in ("sync_now", "collect_system_info"):
-        _post("/sync", {"payload": collect_system_info()})
+        _post("/sync", {"payload": collect_system_info(False)})
         return ("completed", "synced", None)
     if ctype == "update_agent":
         # Force an immediate self-update check regardless of the daily timer.
@@ -2359,7 +2365,9 @@ def poll_commands() -> tuple[bool, int]:
 def register() -> int:
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN is not set", file=sys.stderr); return 2
-    print(json.dumps(_post("/register", {"payload": collect_system_info()}), indent=2))
+    print(json.dumps(_post("/register", {
+        "payload": collect_system_info(include_location_request=True)
+    }), indent=2))
     # First-run wallpaper apply (best-effort, never blocks registration success)
     status, err = apply_active_wallpaper(force=True)
     if status == "applied": print("[wallpaper] applied")
@@ -2431,7 +2439,9 @@ def run_loop() -> int:
         try:
             # Heavy system sync + wallpaper + lock reconcile on the slow cycle.
             if now - last_sync >= SYNC_INTERVAL_SEC:
-                sync = _post("/sync", {"payload": collect_system_info()})
+                sync = _post("/sync", {
+                    "payload": collect_system_info(include_location_request=True)
+                })
                 if isinstance(sync, dict) and sync.get("success"):
                     if "locked" in sync:
                         reconcile_lock(bool(sync.get("locked")))
