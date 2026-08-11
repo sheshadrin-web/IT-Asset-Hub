@@ -1112,6 +1112,10 @@ WIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
 # Standard end-user accounts disabled on a Windows hard lock. The account the
 # agent itself runs as is NEVER disabled (break-glass + keeps enforcement alive).
 WIN_LOCK_USERS      = ["Miles", "Miles-IT-Support"]
+WIN_SYSTEM_ACCOUNTS = {
+    "system", "localsystem", "local service", "network service",
+    "defaultaccount", "wdagutilityaccount",
+}
 
 
 def _win_is_admin() -> bool:
@@ -1133,15 +1137,52 @@ def _win_account_exists(user: str) -> bool:
         return False
 
 
-def _win_disable_lock_accounts() -> list[str]:
-    """Disable the standard end-user accounts so their password is rejected at the
-    Windows sign-in screen. NEVER disables the account the agent itself runs as
-    (our break-glass and the only thing keeping enforcement + unlock alive) nor an
-    account that does not exist. Returns the accounts actually disabled."""
+def _win_interactive_users() -> list[str]:
+    """Return active interactive usernames from Windows session manager.
+
+    The agent runs as SYSTEM, so USERNAME is not the console employee. `quser`
+    is authoritative for the active interactive session.
+    """
+    try:
+        r = subprocess.run(["quser"], capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        if r.returncode != 0:
+            return []
+        users: list[str] = []
+        for line in r.stdout.splitlines()[1:]:
+            parts = line.strip().lstrip(">").split()
+            if not parts:
+                continue
+            state_index = next(
+                (i for i, value in enumerate(parts)
+                 if value.lower() in ("active", "disc", "idle")),
+                None,
+            )
+            if state_index is None or parts[state_index].lower() != "active":
+                continue
+            user = parts[0]
+            normalized = user.rsplit("\\", 1)[-1].lower()
+            if normalized in WIN_SYSTEM_ACCOUNTS:
+                continue
+            if user not in users:
+                users.append(user)
+        return users
+    except Exception:
+        return []
+
+
+def _win_disable_lock_accounts(users: list[str] | None = None) -> list[str]:
+    """Disable only intended interactive accounts and return changed accounts.
+
+    A fresh lock discovers active users. Reassertion passes the persisted list,
+    allowing the same accounts to remain disabled after reboot at sign-in.
+    """
     disabled: list[str] = []
     me = (os.environ.get("USERNAME") or "").strip().lower()
-    for u in WIN_LOCK_USERS:
-        if u.strip().lower() == me:
+    targets = users if users is not None else _win_interactive_users()
+    for u in targets:
+        normalized = u.strip().rsplit("\\", 1)[-1].lower()
+        if normalized == me or normalized in WIN_SYSTEM_ACCOUNTS:
             continue
         if not _win_account_exists(u):
             continue
@@ -1708,12 +1749,11 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                            "normal user. Reinstall the agent as an administrator / system "
                            "service, then retry the lock.")
                 else:
-                    msg = ("Cannot enforce the lock: none of the standard sign-in accounts "
-                           "(Miles / Miles-IT-Support) could be disabled on this PC — they are "
-                           "absent, or the only match is the account the agent itself runs "
-                           "under (skipped to prevent a permanent lockout). Install the agent "
-                           "as a system service so it can disable the end-user account, then "
-                           "retry the lock.")
+                    msg = ("Cannot enforce the lock: no active interactive Windows account "
+                           "could be identified and disabled. The agent will not guess an "
+                           "account or disable SYSTEM/service accounts. Sign in to the "
+                           "employee account, ensure the agent is installed as the SYSTEM "
+                           "task, then retry the lock.")
                 return ("requires_admin", None, msg)
             # At least one sign-in account was disabled → real enforcement.
             state = {"locked": True, "platform": "windows", "asset_tag": asset_tag,
@@ -1961,7 +2001,9 @@ def reassert_lock() -> None:
             # Keep the standard accounts disabled and the branded kiosk on screen
             # in case either was tampered with since the last cycle.
             if _win_is_admin():
-                _win_disable_lock_accounts()
+                # Re-apply the exact accounts changed by the confirmed lock.
+                # Do not discover a different account at the sign-in screen.
+                _win_disable_lock_accounts(_read_lock_state().get("disabled_users") or None)
             if not _lock_screen_running():
                 _spawn_lock_screen()
     except Exception:

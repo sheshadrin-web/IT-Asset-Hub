@@ -151,5 +151,69 @@ class LinuxLockTests(unittest.TestCase):
         self.assertIn(["usermod", "--unlock", "sheshadri-n"], fake.calls)
 
 
+class WindowsLockTests(unittest.TestCase):
+    def setUp(self):
+        self.flags = (
+            patch.object(agent, "IS_LIN", False),
+            patch.object(agent, "IS_WIN", True),
+            patch.object(agent, "IS_MAC", False),
+            patch.object(agent, "_win_is_admin", return_value=True),
+            patch.object(agent, "_win_lock_now", return_value=(True, None)),
+            patch.object(agent, "_spawn_lock_screen"),
+            patch.object(agent, "_win_set_legalnotice"),
+            patch.object(agent, "_win_force_logoff"),
+            patch.object(agent, "_write_lock_state"),
+            patch.object(agent, "_read_lock_state", return_value={}),
+        )
+        for flag in self.flags:
+            flag.start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_lock_discovers_reinstalled_employee_account(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            cmd = list(cmd)
+            calls.append(cmd)
+            if cmd[:1] == ["quser"]:
+                return subprocess.CompletedProcess(
+                    cmd, 0,
+                    " USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME\n"
+                    ">new-employee          console             1  Active      none   8/11/2026\n"
+                    "SYSTEM                                     0  Active\n",
+                    "",
+                )
+            if cmd[:2] == ["net", "user"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if cmd[:4] == ["net", "user", "new-employee", "/active:no"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(cmd)
+
+        with patch.object(agent.subprocess, "run", side_effect=run), \
+             patch.dict(agent.os.environ, {"USERNAME": "SYSTEM"}, clear=False), \
+             patch.object(agent, "_write_lock_state") as write_state:
+            self.assertEqual(agent._win_interactive_users(), ["new-employee"])
+            result = agent._apply_hard_lock()
+
+        self.assertEqual(result[0], "completed")
+        state = write_state.call_args.args[0]
+        self.assertEqual(state["disabled_users"], ["new-employee"])
+        self.assertIn(["net", "user", "new-employee", "/active:no"], calls)
+        self.assertNotIn(["net", "user", "SYSTEM", "/active:no"], calls)
+
+    def test_reassertion_uses_persisted_account_at_login_screen(self):
+        with patch.object(agent, "_read_lock_state", return_value={
+                "locked": True, "disabled_users": ["new-employee"]}), \
+             patch.object(agent, "_win_disable_lock_accounts",
+                          return_value=["new-employee"]) as disable, \
+             patch.object(agent, "_win_lock_now"), \
+             patch.object(agent, "_lock_screen_running", return_value=True), \
+             patch.object(agent, "_win_is_admin", return_value=True):
+            agent.reassert_lock()
+        disable.assert_called_once_with(["new-employee"])
+
+
 if __name__ == "__main__":
     unittest.main()
