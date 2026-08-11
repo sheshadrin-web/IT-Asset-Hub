@@ -3,7 +3,7 @@
 #
 # Run via the one-line command shown in the portal. It expects these env vars:
 #   MILES_AGENT_TOKEN     (required) one-time agent key
-#   MILES_AGENT_URL       (required) URL of laptop_agent.py served by the portal
+#   MILES_AGENT_URL       (required) public URL of laptop_agent.py
 #   MILES_ASSET_HOSTNAME  (optional) asset tag to rename the PC to
 #   MILES_AGENT_API_BASE  (optional) override the agent API base URL
 #
