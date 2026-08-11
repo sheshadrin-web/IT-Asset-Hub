@@ -1,0 +1,117 @@
+We are preparing the Phase 1 network/IP location feature for IT Asset Hub.
+
+IMPORTANT:
+The Supabase project shown in the SQL Editor is PRODUCTION.
+
+DO NOT:
+- apply any migration automatically
+- deploy any Edge Function
+- modify production Supabase
+- modify any device
+- change agent keys
+- change polling
+- change lock/unlock
+- push or merge anything
+
+CURRENT ISSUE
+=============
+
+I accidentally pasted this migration FILE PATH into Supabase SQL Editor:
+
+artifacts/asset-desk/supabase/migrations/20260812000000_network_location_cache.sql
+
+Supabase returned:
+
+ERROR: 42601: syntax error at or near "artifacts"
+
+This is expected because Supabase SQL Editor needs the SQL CONTENT, not the file path.
+
+TASK
+====
+
+Prepare the exact production-safe migration execution package for manual review.
+
+There are two local migration files:
+
+1.
+artifacts/asset-desk/supabase/migrations/20260811000000_network_device_location.sql
+
+2.
+artifacts/asset-desk/supabase/migrations/20260812000000_network_location_cache.sql
+
+Please do the following READ-ONLY/local work first.
+
+1. Open both migration files.
+
+2. Audit them carefully for:
+   - syntax errors
+   - destructive statements
+   - DROP TABLE / DROP COLUMN
+   - data loss risk
+   - unexpected DELETE / TRUNCATE
+   - changes to lock/unlock logic
+   - changes to agent keys/tokens
+   - changes to unrelated RPCs
+   - SECURITY DEFINER risks
+   - missing search_path hardening if relevant
+   - unsafe grants
+   - missing constraints/indexes
+   - transaction safety
+   - rerun/idempotency behavior
+
+3. Confirm the intended execution order.
+
+Expected:
+FIRST:
+20260811000000_network_device_location.sql
+
+SECOND:
+20260812000000_network_location_cache.sql
+
+4. Print the FULL EXACT SQL CONTENT of migration 1 in one clearly labeled code block.
+
+5. Print the FULL EXACT SQL CONTENT of migration 2 in a second clearly labeled code block.
+
+6. Do not shorten, summarize, or omit any SQL.
+
+7. Before each SQL block, explain in 2-3 lines exactly what it changes.
+
+8. After the SQL blocks, give me READ-ONLY verification queries to run after each migration.
+
+For migration 1, include checks for:
+- managed_devices location columns
+- location_source constraint
+- effective agent_register definition
+- effective agent_sync definition
+
+For migration 2, include checks for:
+- network_location_cache table
+- primary key / unique key on public_ip
+- TTL/backoff columns
+- indexes
+- cache RPC/function definitions
+
+9. Also give me a rollback plan, but DO NOT execute it.
+
+10. Confirm explicitly:
+- no production SQL was executed
+- no migration was applied
+- no Edge Function was deployed
+- no device was touched
+
+FINAL OUTPUT
+============
+
+Return only:
+
+A. Migration audit summary
+B. Exact SQL for migration 1
+C. Verification SQL for migration 1
+D. Exact SQL for migration 2
+E. Verification SQL for migration 2
+F. Rollback plan
+G. Risk notes
+
+STOP after that.
+
+Do NOT deploy or apply anything.
