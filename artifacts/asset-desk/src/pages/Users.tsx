@@ -2020,26 +2020,29 @@ export default function Users() {
 
       {/* ── Reset Password Dialog ─────────────────────────────────────────────── */}
       <Dialog open={resetPassOpen} onOpenChange={v => { if (!resetPassSaving) { setResetPassOpen(v); if (!v) setNewPassword(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[min(92vw,500px)] max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-4 w-4" /> Reset Password
             </DialogTitle>
             {resetPassTarget && (
-              <DialogDescription>{resetPassTarget.full_name} · {resetPassTarget.email}</DialogDescription>
+              <DialogDescription className="min-w-0 break-words">
+                <span className="block font-medium text-foreground">{resetPassTarget.full_name}</span>
+                <span className="block break-all">{resetPassTarget.email}</span>
+              </DialogDescription>
             )}
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">New Password</label>
-              <div className="relative">
+              <div className="relative min-w-0">
                 <Input
                   type={showNewPw ? "text" : "password"}
                   placeholder="Min. 8 characters"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
-                  className="pr-10"
+                   className="w-full min-w-0 pr-10"
                   disabled={resetPassSaving}
                 />
                 <button
@@ -2064,8 +2067,8 @@ export default function Users() {
             </p>
           </div>
 
-          <DialogFooter className="flex-col gap-2">
-            <div className="flex gap-2 w-full">
+          <DialogFooter className="flex-col gap-3 sm:flex-col sm:space-x-0">
+            <div className="flex w-full min-w-0 gap-2">
               <Button variant="outline" onClick={() => setResetPassOpen(false)} disabled={resetPassSaving} className="flex-1">
                 Cancel
               </Button>
@@ -2082,7 +2085,7 @@ export default function Users() {
                 ) : "Set Password"}
               </Button>
             </div>
-            <div className="border-t border-border pt-2 w-full">
+            <div className="w-full min-w-0 border-t border-border pt-2">
               <Button
                 variant="ghost"
                 size="sm"

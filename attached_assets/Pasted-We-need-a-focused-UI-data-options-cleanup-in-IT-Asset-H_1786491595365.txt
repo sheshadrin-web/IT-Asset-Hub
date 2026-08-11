@@ -1,0 +1,356 @@
+We need a focused UI/data-options cleanup in IT Asset Hub.
+
+DO NOT change:
+- Device Agent
+- lock/unlock workflow
+- Recovery workflow
+- agent keys
+- command polling
+- self-update
+- Supabase schema
+- production database
+- authentication/business logic
+
+Audit the current implementation first and make only the UI/form option changes below.
+
+==================================================
+1. RESET PASSWORD MODAL — REARRANGE PROPERLY
+==================================================
+
+Current Reset Password modal layout is still visually incorrect.
+
+Problems visible in production:
+- Password input extends beyond modal width.
+- Modal content alignment is inconsistent.
+- Helper box width/layout is awkward.
+- "Or send a reset link to the user's email" is squeezed into the footer.
+- Buttons and secondary action do not form a clean layout.
+- Overall modal feels too narrow for the content.
+
+Rebuild/rearrange the existing modal using the current design system.
+
+DESIRED STRUCTURE:
+
+Reset Password                           X
+
+Rakesh JM
+rakesh.jm@mojocampus.com
+
+New Password
+[ password input                    eye ]
+
+Generate random password
+
+[ Yellow helper box:
+  Share the new password with the user securely.
+  They should change it after next login. ]
+
+--------------------------------------------
+
+[ Cancel ] [ Set Password ]
+
+🔑 Or send a reset link to the user's email
+
+REQUIREMENTS:
+
+- Desktop max-width approximately 480–520px.
+- width: min(92vw, 500px) or equivalent.
+- All children must remain within modal bounds.
+- Input width = 100%.
+- Add min-width: 0 where flex/grid requires it.
+- Eye icon stays inside password field.
+- Yellow helper panel wraps normally.
+- Cancel / Set Password stay together.
+- Move "Or send a reset link..." to its own row below the main buttons.
+- Maintain existing reset-password functionality.
+- Maintain existing email reset functionality.
+- Preserve loading/disabled/error states.
+- Responsive on desktop/tablet/mobile.
+- No horizontal overflow.
+
+==================================================
+2. STORAGE DROPDOWN — CLEAN STANDARD VALUES
+==================================================
+
+On Add Asset → Hardware Specifications → Storage:
+
+Replace the current inconsistent options with these standard values only:
+
+Not specified
+64 GB
+128 GB
+256 GB
+512 GB
+1 TB
+2 TB
+
+Use this ordering exactly.
+
+These Storage options should be usable for applicable asset types such as:
+- Laptop
+- Desktop
+- Mobile
+- CPU/system assets where the form currently exposes Storage
+
+Do not create duplicate values such as:
+64GB
+64 GB
+0.5 TB
+512GB
+
+Use one canonical display/value format.
+
+Preferred canonical values:
+
+not_specified
+64_gb
+128_gb
+256_gb
+512_gb
+1_tb
+2_tb
+
+But FIRST audit how the existing form stores these values.
+
+IMPORTANT:
+Do not silently break existing records.
+
+If existing assets store display strings, preserve backward compatibility.
+The UI may normalize new selections while continuing to display old stored values safely.
+
+==================================================
+3. RAM DROPDOWN — UPDATE VALUES
+==================================================
+
+Replace the current RAM options with:
+
+Not specified
+2 GB
+4 GB
+6 GB
+8 GB
+12 GB
+16 GB
+18 GB
+24 GB
+32 GB
+36 GB
+64 GB
+128 GB
+
+Use ascending order exactly as above.
+
+Do not keep duplicate or inconsistent variants.
+
+Again, audit existing stored values before changing option values.
+
+Do not run any bulk database update.
+
+New asset creation should use the standardized options.
+
+Existing assets must continue displaying their current RAM value correctly.
+
+==================================================
+4. OPERATING SYSTEM DROPDOWN — SIMPLIFY
+==================================================
+
+Current list contains versions such as:
+
+Windows 10
+Windows 11
+macOS Sonoma
+macOS Ventura
+macOS Monterey
+Ubuntu 22.04
+Ubuntu 20.04
+Chrome OS
+etc.
+
+REMOVE the version-specific choices from the Add Asset dropdown.
+
+The OS dropdown should contain ONLY:
+
+Not specified
+Windows
+macOS
+Ubuntu
+Linux
+Chrome OS
+
+Use this order exactly.
+
+Do NOT include:
+- Windows 10
+- Windows 11
+- macOS Sonoma
+- macOS Ventura
+- macOS Monterey
+- Ubuntu 20.04
+- Ubuntu 22.04
+- individual Linux distributions
+
+RATIONALE:
+
+The OS family belongs in this dropdown.
+Specific OS/version information can come from:
+- Device Agent telemetry
+- existing OS version fields
+- asset details
+
+Do not mix OS family and OS version in the same manual dropdown.
+
+IMPORTANT:
+Existing records containing old values such as "Windows 11" must NOT break.
+
+For editing an existing asset:
+- continue displaying the existing value safely, OR
+- map it to its family in the UI without modifying production data automatically.
+
+Examples:
+
+Windows 10 → Windows
+Windows 11 → Windows
+
+macOS Sonoma → macOS
+macOS Ventura → macOS
+macOS Monterey → macOS
+
+Ubuntu 20.04 → Ubuntu
+Ubuntu 22.04 → Ubuntu
+
+Do not perform a database migration unless absolutely necessary.
+
+==================================================
+5. FORM LAYOUT
+==================================================
+
+Review the entire Hardware Specifications section.
+
+Desired layout:
+
+HARDWARE SPECIFICATIONS
+
+Processor                         RAM
+[ Intel Core i5-1235U ]          [ 16 GB ▼ ]
+
+Storage                           Operating System
+[ 512 GB ▼ ]                     [ Windows ▼ ]
+
+Ensure:
+- equal column widths
+- labels aligned
+- dropdown heights match
+- no dropdown overlaps
+- menu remains inside viewport
+- mobile stacks into one column
+- consistent spacing with other form sections
+
+Do not allow dropdown menus to cover unrelated fields awkwardly when avoidable.
+
+==================================================
+6. OPTION SOURCE
+==================================================
+
+Audit whether Storage, RAM, and OS options are:
+
+- hardcoded directly inside AddAsset page
+- shared constants
+- enum/config file
+- reused by Edit Asset
+- reused elsewhere
+
+Prefer ONE shared source of truth.
+
+Example concept:
+
+ASSET_STORAGE_OPTIONS
+ASSET_RAM_OPTIONS
+ASSET_OS_OPTIONS
+
+Do not duplicate the same arrays in AddAsset and EditAsset.
+
+If Add Asset and Edit Asset share a form component/config already, update that instead.
+
+==================================================
+7. EXISTING DATA COMPATIBILITY
+==================================================
+
+Very important.
+
+Do not modify existing production asset rows just because the dropdown options changed.
+
+Existing records may contain:
+
+Windows 11
+Ubuntu 22.04
+macOS Sonoma
+512GB
+16GB
+
+The UI must remain able to display/edit those records safely.
+
+Create normalization helpers if appropriate.
+
+Examples:
+
+normalizeOsFamily("Windows 11") → "Windows"
+normalizeOsFamily("Ubuntu 22.04") → "Ubuntu"
+normalizeOsFamily("macOS Sonoma") → "macOS"
+
+Do NOT normalize unknown values destructively.
+
+==================================================
+8. TESTS
+==================================================
+
+Test Reset Password modal:
+- normal desktop
+- tablet
+- mobile
+- long user name/email
+- password visibility button
+- random password
+- reset-by-email action
+- loading state
+- disabled state
+
+Test Add/Edit Asset:
+- Storage dropdown
+- RAM dropdown
+- OS dropdown
+- correct option ordering
+- no duplicate values
+- existing legacy OS values
+- existing legacy RAM/storage values
+- create asset
+- edit asset
+- responsive layout
+
+Run:
+- TypeScript typecheck
+- relevant tests
+- production build
+- git diff --check
+
+==================================================
+FINAL REPORT
+==================================================
+
+Return:
+
+1. Root cause of Reset Password modal layout issue
+2. Exact files changed
+3. Final Storage options
+4. Final RAM options
+5. Final OS options
+6. How legacy stored values are handled
+7. Whether Add/Edit Asset share the same option source
+8. Responsive UI result
+9. Typecheck/tests/build results
+10. Preview screenshots if available
+
+DO NOT DEPLOY.
+DO NOT PUSH.
+DO NOT MODIFY PRODUCTION SUPABASE.
+
+Stop after local implementation and verification.
