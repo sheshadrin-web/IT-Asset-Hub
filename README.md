@@ -35,12 +35,11 @@
 8. [Role-Based Access](#-role-based-access)
 9. [Database Schema](#-database-schema)
 10. [Device Agent System](#-device-agent-system)
-11. [Remote Access](#-remote-access)
-12. [Screenshots](#-screenshots)
-13. [Deployment](#-deployment)
-14. [Future Enhancements](#-future-enhancements)
-15. [License](#-license)
-16. [Contact](#-contact)
+11. [Screenshots](#-screenshots)
+12. [Deployment](#-deployment)
+13. [Future Enhancements](#-future-enhancements)
+14. [License](#-license)
+15. [Contact](#-contact)
 
 ---
 
@@ -52,7 +51,7 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
 
 - 🎯 A single searchable inventory for **22+ asset categories** (laptops, monitors, mobiles, peripherals, network gear, fixed assets)
 - 🔐 **Role-based access** so super admins, IT admins, HR, helpdesk agents, and employees each see exactly what they need
-- 🤖 **Live device agent** — remotely lock, unlock, restart, manage wallpapers, and start remote access sessions on managed laptops
+- 🤖 **Live device agent** — remotely lock, unlock, restart, and manage wallpapers on managed laptops
 - 📝 A built-in **helpdesk** that links every ticket to a real asset
 - 📊 **Real-time reports** with one-click CSV / XLSX exports for finance & audit
 - 📨 **Assignment emails** with employee acknowledgement
@@ -79,15 +78,6 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
 - ✅ **Force remove agent** — unmanage a device from the portal
 - ✅ One-line install command generated per OS (Windows / macOS / Linux)
 
-### 🔌 Remote Access
-- ✅ **Assisted Access** — IT admin sends a request; a native OS dialog appears on the end-user's screen (Windows: MessageBoxW, macOS: osascript, Linux: zenity/kdialog); user clicks Allow or Deny; 60-second auto-deny timeout
-- ✅ **Unattended Access** — super_admin only; direct session without user approval
-- ✅ Session lifecycle: `requested → approved/denied → active → ended/failed`
-- ✅ Full audit log for every session transition
-- ✅ Per-asset session history panel with auto-polling every 5 seconds
-- ✅ Toast notifications on status changes
-- ✅ Pulsing indicator when a session is active
-
 ### 👥 Employee Allocations
 - ✅ One-click assign / un-assign with handover notes
 - ✅ Bulk assignment workflow
@@ -111,7 +101,7 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
 
 ### 🔐 Security
 - ✅ **Row-Level Security** on every Supabase table — users can only read/write rows they're allowed to
-- ✅ **SECURITY DEFINER RPCs** for sensitive operations (device commands, remote access, audit writes)
+- ✅ **SECURITY DEFINER RPCs** for sensitive operations (device commands and audit writes)
 - ✅ **Audit log** — every sensitive operation writes to `audit_logs` with actor, action, entity, and metadata
 - ✅ **Role-based access control** enforced at the DB level via Postgres role checks inside RLS policies
 
@@ -172,8 +162,6 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
               │  │  GET  /commands   POST /commands/status │  │
               │  │  GET  /wallpaper/active                 │  │
               │  │  POST /wallpaper/status                 │  │
-              │  │  GET  /remote-access          ← NEW     │  │
-              │  │  POST /remote-access/respond  ← NEW     │  │
               │  └─────────────────────────────────────────┘  │
               └────────────────────────────────────────────────┘
                                       ▲
@@ -183,9 +171,8 @@ Before IT Asset Hub, the Miles Education IT team was managing assets across **Ex
                        │   Runs on managed Windows /     │
                        │   macOS / Linux devices         │
                        │   Picks up commands → executes  │
-                       │   Polls for remote access       │
-                       │   → shows native Allow/Deny     │
-                       │     popup to end user           │
+                       │   Polls for commands and health │
+                       │   → enforces lock/unlock locally│
                        └─────────────────────────────────┘
 ```
 
@@ -205,8 +192,7 @@ IT-Asset-Hub/
 │   └── asset-desk/              # React + Vite SPA
 │       ├── src/
 │       │   ├── components/      # UI components
-│       │   │   ├── DeviceAgentCard.tsx   # Agent commands + Remote Access button
-│       │   │   ├── RemoteAccessModal.tsx # Assisted / Unattended sessions UI
+│       │   │   ├── DeviceAgentCard.tsx   # Agent commands + setup/repair UI
 │       │   │   ├── AssetForm.tsx         # Dynamic asset form (reads DB config)
 │       │   │   ├── AssetDetail.tsx       # Full asset detail page
 │       │   │   ├── WallpaperManager.tsx  # Push wallpapers to devices
@@ -227,9 +213,8 @@ IT-Asset-Hub/
 │   └── supabase/functions/agent-api/
 │       └── index.ts             # Supabase Edge Function (all agent routes)
 │
-├── migrations/
-│   ├── 001_schema_asset_types.sql   # Asset type/field config tables
-│   └── 002_remote_access_sessions.sql # Remote access table + RPCs
+├── artifacts/asset-desk/supabase/
+│   └── migrations/                  # Supabase schema and RPC migrations
 │
 └── README.md
 ```
@@ -259,14 +244,9 @@ cp artifacts/asset-desk/.env.example artifacts/asset-desk/.env.local
 
 ### 3. Run migrations
 
-Run all SQL files in `migrations/` in order against your Supabase project:
-
-```
-migrations/001_schema_asset_types.sql
-migrations/002_remote_access_sessions.sql
-```
-
-You can run them from the Supabase Dashboard → SQL Editor, or via the Supabase Management API.
+Run the migrations in `artifacts/asset-desk/supabase/migrations/` in timestamp order
+against the Supabase project. Review migrations before applying them; this repository
+does not silently replace or reset production data.
 
 ### 4. Deploy Edge Function
 
@@ -283,6 +263,13 @@ supabase functions deploy agent-api \
 ```bash
 pnpm --filter @workspace/asset-desk run dev
 ```
+
+### Agent repair
+
+For an already enrolled Windows or Ubuntu device, use the portal's
+**Repair current installation (no new key)** command. It reuses the existing
+local agent key, refreshes the privileged service, and preserves the device's
+portal record.
 
 ---
 
@@ -303,18 +290,18 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 Five roles are enforced at the database level (RLS policies check `profiles.role`):
 
-| Role            | Assets                         | Agent Commands                 | Remote Access                    | Reports       | Users          |
+| Role            | Assets                         | Agent Commands                 | Locking       | Reports       | Users          |
 |-----------------|--------------------------------|--------------------------------|----------------------------------|---------------|----------------|
-| 🟣 **super_admin** | Full CRUD + delete             | All commands + force remove    | Assisted + Unattended            | Full + export | Full CRUD      |
-| 🔵 **it_admin**    | Full CRUD, assign, import      | Read status, basic commands    | Assisted only                    | Full + export | Read           |
-| 🟠 **hr_admin**    | Read + assignment history      | —                              | —                                | HR-scoped     | Read           |
-| 🟢 **it_agent**    | Read + status update           | —                              | —                                | Read          | —              |
-| ⚪ **end_user**    | Read own assigned assets       | —                              | —                                | —             | —              |
+| **super_admin** | Full CRUD + delete | All commands + force remove | — | Full + export | Full CRUD |
+| **it_admin** | Full CRUD, assign, import | Read status, basic commands | — | Full + export | Read |
+| **hr_admin** | Read + assignment history | — | — | HR-scoped | Read |
+| **it_agent** | Read + status update | — | — | Read | — |
+| **end_user** | Read own assigned assets | — | — | — | — |
 
 RBAC is enforced at **three layers**:
 1. **Frontend** — UI elements are conditionally rendered by role
 2. **RLS policies** — `SELECT/INSERT/UPDATE/DELETE` on every table checks `auth.uid()` + `profiles.role`
-3. **SECURITY DEFINER RPCs** — sensitive operations (device commands, remote access) validate the caller's role inside the function body before executing
+3. **SECURITY DEFINER RPCs** — sensitive operations (device commands) validate the caller's role inside the function body before executing
 
 ---
 
@@ -339,7 +326,6 @@ RBAC is enforced at **three layers**:
 | `managed_devices`      | Live device status (hostname, OS, last_seen, is_managed)     |
 | `device_commands`      | Queue of commands (lock, unlock, restart, …) + status        |
 | `wallpaper_configs`    | Wallpaper assignments per device                             |
-| `remote_access_sessions` | Remote access session lifecycle + audit trail              |
 
 ### Schema config tables
 
@@ -358,9 +344,6 @@ RBAC is enforced at **three layers**:
 | `revoke_agent_token`           | super_admin          | Revokes a key and marks device inactive           |
 | `queue_device_command`         | super_admin          | Enqueues lock / unlock / restart / update command |
 | `force_remove_agent`           | super_admin          | Unmanages a device and writes audit log           |
-| `request_remote_access`        | super_admin/it_admin | Creates a remote access session                   |
-| `update_remote_access_session` | super_admin/it_admin | Transitions session status, writes audit log      |
-| `get_remote_access_sessions`   | super_admin/it_admin | Returns recent sessions for an asset              |
 | `get_audit_logs`               | hr_admin+            | Returns the audit log (read-only)                 |
 
 #### Agent-side (called by the Edge Function using the service role, keyed by agent token)
@@ -373,8 +356,6 @@ RBAC is enforced at **three layers**:
 | `agent_update_command`             | agent token       | Reports command result (completed / failed)                     |
 | `agent_get_active_wallpaper`       | agent token       | Returns the active wallpaper URL for this device                |
 | `agent_report_wallpaper`           | agent token       | Reports wallpaper apply result                                  |
-| `agent_get_pending_remote_access`  | agent token       | Returns `requested` sessions pending end-user approval          |
-| `agent_respond_remote_access`      | agent token       | Posts the end-user's Allow/Deny response, updates session       |
 
 All agent-side RPCs use `_auth_agent(p_token)` internally — if the token is invalid or revoked, the RPC returns `{ success: false }` without leaking any data.
 
@@ -390,18 +371,17 @@ The device agent is a Python script that runs as a background service on managed
 2. The portal shows a **one-line install command** (with the key embedded) for Windows / macOS / Linux
 3. The agent script is downloaded and started — it registers the device in `managed_devices`
 4. The agent **polls Supabase** (via the Edge Function) on an adaptive cadence:
-   - Fast (5 s) while commands are flowing or a remote access session is pending
+    - Fast (5 s) while commands are flowing
    - Slow (30 s) when idle — cuts edge-function invocations ~83%
 5. On receiving a command, the agent executes it locally (lock screen, restart, etc.) and reports back the result
-6. The agent also polls for **remote access approval requests** and shows a native dialog to the logged-in user
-7. The portal shows live status, last-seen time, and command history
+6. The portal shows live status, last-seen time, lock confirmation, and command history
 
 ### Supported commands
 
 | Command           | Effect on device                            |
 |-------------------|---------------------------------------------|
-| `lock_screen`     | Locks the Windows / macOS / Linux session   |
-| `unlock_screen`   | Unlocks the session                         |
+| `lock_screen`     | Enforces a Windows / macOS / Linux device lock |
+| `unlock_screen`   | Releases the device lock                    |
 | `force_restart`   | Initiates a system reboot                   |
 | `push_wallpaper`  | Downloads and sets a new wallpaper          |
 | `update_agent`    | Self-updates the agent script               |
@@ -418,74 +398,8 @@ All routes are authenticated via `X-Agent-Token` header.
 | POST   | `/commands/status`         | Report command result                             |
 | GET    | `/wallpaper/active`        | Get active wallpaper URL                          |
 | POST   | `/wallpaper/status`        | Report wallpaper apply result                     |
-| GET    | `/remote-access`           | Fetch pending Assisted Access sessions            |
-| POST   | `/remote-access/respond`   | Post end-user Allow/Deny response                 |
 
 ---
-
-## 🔌 Remote Access
-
-Remote access sessions are tracked with a full audit trail. The end-user approval popup runs natively on the managed device via the Python agent.
-
-### Session flow — Assisted Access
-
-```
-IT Admin clicks "Request Assisted Access" in portal
-         │
-         ▼
-  Portal calls request_remote_access RPC
-  → session created (status: requested)
-         │
-         ▼ (agent polls GET /remote-access every 5 s)
-  Python agent finds pending session
-         │
-         ▼
-  Native OS dialog appears on end-user's screen:
-  ┌─────────────────────────────────────────────────────┐
-  │  Miles IT — Remote Access Request                   │
-  │                                                     │
-  │  [Admin Name] is requesting remote access to        │
-  │  your computer.                                     │
-  │                                                     │
-  │  Click Allow to permit, or Deny to reject.          │
-  │  Auto-denied in 60 seconds if no response.          │
-  │                                                     │
-  │           [ Deny ]          [ Allow ]               │
-  └─────────────────────────────────────────────────────┘
-
-  Platform implementations:
-    Windows  — ctypes MessageBoxW (no extra packages)
-    macOS    — osascript display dialog
-    Linux    — zenity → kdialog fallback
-
-         │ user clicks Allow or Deny (or 60 s elapses)
-         ▼
-  Agent POSTs to /remote-access/respond
-  → session status: approved / denied
-  → audit log written
-         │
-         ▼
-  Portal modal polls every 5 s → updates status
-  → toast notification fires
-  → pulsing dot shows when session is active
-```
-
-### Session flow — Unattended Access
-
-```
-super_admin only — confirmation dialog in portal
-         │
-         ▼
-  Portal calls request_remote_access (mode: unattended)
-  → session status: active immediately (no user prompt)
-         │
-         ▼
-  Admin connects via remote desktop tool
-  Admin clicks "End Session" when done
-  → session status: ended + audit log
-```
-
-Every status transition writes to `audit_logs` via `_log_remote_access_audit()`.
 
 ---
 
@@ -542,7 +456,7 @@ supabase functions deploy agent-api \
 
 ### Database
 
-Supabase manages the PostgreSQL database, Auth, and Storage — no separate DB deployment needed. Run new migration files from `migrations/` in the Supabase SQL Editor after each schema change.
+Supabase manages the PostgreSQL database, Auth, and Storage — no separate DB deployment needed. Review and apply new migration files from `artifacts/asset-desk/supabase/migrations/` in timestamp order after each schema change.
 
 ---
 
