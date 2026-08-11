@@ -59,6 +59,11 @@ class FakeRun:
                 self.sessions.pop(cmd[2], None)
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             return subprocess.CompletedProcess(cmd, 1, "", "failed")
+        if cmd[:2] == ["loginctl", "kill-session"]:
+            if self.kill_ok:
+                self.sessions.pop(cmd[2], None)
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return subprocess.CompletedProcess(cmd, 1, "", "failed")
         if cmd[:2] == ["loginctl", "kill-user"]:
             if self.kill_ok:
                 for sid in list(self.sessions):
@@ -127,7 +132,10 @@ class LinuxLockTests(unittest.TestCase):
             unlock_calls.append(unlock.call_count)
         self.assertEqual(result[0], "failed")
         self.assertEqual(unlock_calls, [1])
-        self.assertIn(["loginctl", "kill-user", "sheshadri-n"], fake.calls)
+        self.assertIn(
+            ["loginctl", "kill-session", "2", "--kill-who=all", "--signal=SIGKILL"],
+            fake.calls,
+        )
 
     def test_no_graphical_session_is_not_confused_with_manager(self):
         fake = FakeRun(dict([session("3", cls="manager", typ="", seat="")]))

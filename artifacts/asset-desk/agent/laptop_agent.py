@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.5"
+AGENT_VERSION       = "0.9.6"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1717,6 +1717,42 @@ def _linux_user_has_session(user: str) -> bool:
     )
 
 
+def _linux_terminate_user_sessions(user: str) -> bool:
+    """Terminate only the user's interactive CLASS=user sessions.
+
+    A desktop session can survive a normal terminate request when a display
+    manager or a stubborn child process immediately keeps it alive. Escalate
+    against the specific session IDs with SIGKILL, never ``kill-user``: the
+    latter can also destroy the user's CLASS=manager service session.
+    """
+    sessions = _linux_user_sessions()
+    if sessions is None:
+        return False
+    targets = [
+        s for s in sessions
+        if s["user"] == user and s["class"] == "user"
+    ]
+    for session in targets:
+        subprocess.run(
+            ["loginctl", "terminate-session", session["id"]],
+            capture_output=True, text=True, timeout=15,
+        )
+
+    for _ in range(3):
+        if not _linux_user_has_session(user):
+            return True
+        remaining = _linux_user_sessions() or []
+        for session in remaining:
+            if session["user"] == user and session["class"] == "user":
+                subprocess.run(
+                    ["loginctl", "kill-session", session["id"],
+                     "--kill-who=all", "--signal=SIGKILL"],
+                    capture_output=True, text=True, timeout=15,
+                )
+        time.sleep(0.5)
+    return not _linux_user_has_session(user)
+
+
 def _linux_account_locked(user: str) -> bool | None:
     """Whether the account password is locked, via `passwd -S` (root-only).
     Returns True (locked), False (usable), or None if it cannot be determined."""
@@ -1899,19 +1935,8 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                         f"The lock command returned success but account '{user}' is "
                         f"still reported as unlocked, so the device was NOT locked.")
             # 2) Terminate only the employee's interactive CLASS=user sessions.
-            # The per-user CLASS=manager session is intentionally left alone;
-            # logind owns it and it is not a desktop the employee can use.
-            sessions = [s for s in (_linux_user_sessions() or [])
-                        if s["user"] == user and s["class"] == "user"]
-            for session in sessions:
-                subprocess.run(["loginctl", "terminate-session", session["id"]],
-                               capture_output=True, text=True, timeout=15)
-            if _linux_user_has_session(user):
-                # Escalate through logind for the specific employee only.
-                subprocess.run(["loginctl", "kill-user", user],
-                               capture_output=True, text=True, timeout=15)
-                time.sleep(1)
-            if _linux_user_has_session(user):
+            # The per-user CLASS=manager session is intentionally left alone.
+            if not _linux_terminate_user_sessions(user):
                 # Could not evict the live session. Roll the account lock back so the
                 # device is left in a consistent UNLOCKED state and report the truth —
                 # never a false "locked". Verify the rollback actually succeeded.
