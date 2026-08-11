@@ -98,9 +98,21 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WIN else 0
 # is written to this root-only (0600) file at install time and read back here.
 MAC_SYS_TOKEN_FILE = "/Library/Application Support/MilesAgent/agent.token"
 LIN_SYS_ENV_FILE = "/etc/miles-agent/agent.env"
+WIN_SYS_TOKEN_FILE = (
+    os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "MilesAgent", "agent.token")
+    if IS_WIN else ""
+)
 
 
 def _load_token() -> str:
+    if IS_WIN:
+        try:
+            with open(WIN_SYS_TOKEN_FILE, encoding="utf-8") as fh:
+                token = fh.read().strip()
+                if token:
+                    return token
+        except OSError:
+            pass
     t = os.environ.get("MILES_AGENT_TOKEN", "")
     if t:
         return t.strip()
@@ -2960,6 +2972,21 @@ def _install_service_windows_system() -> int:
     """Admin path: install the agent as a SYSTEM scheduled task that starts at boot.
     Files live under %ProgramData%\\MilesAgent (readable by LocalSystem)."""
     os.makedirs(WIN_SYS_DIR, exist_ok=True)
+    # Do not rely only on the environment inherited by Task Scheduler. A
+    # machine-scope environment change can be stale in an already-running
+    # SYSTEM task. Persist the current enrollment key and restrict the file to
+    # SYSTEM and local Administrators; _load_token prefers this file on Windows.
+    try:
+        with open(WIN_SYS_TOKEN_FILE, "w", encoding="utf-8") as fh:
+            fh.write(TOKEN + "\n")
+        subprocess.run(
+            ["icacls", WIN_SYS_TOKEN_FILE, "/inheritance:r",
+             "/grant:r", "*S-1-5-18:F", "*S-1-5-32-544:F"],
+            capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW,
+        )
+    except Exception as e:
+        print(f"ERROR: could not persist the SYSTEM enrollment key: {e}", file=sys.stderr)
+        return 1
 
     if getattr(sys, "frozen", False):
         exe = os.path.abspath(sys.argv[0])

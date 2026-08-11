@@ -203,8 +203,10 @@ Write-Log 'Dependencies installed.' 'OK'
 
 # ── 4. Save the agent key ───────────────────────────────────────────────────
 # Persist at MACHINE scope so the LocalSystem service can read the token/url/api
-# (a User-scope var is invisible to SYSTEM). We also set the current process env
-# so register/sync below work in this same elevated session.
+# (a User-scope var is invisible to SYSTEM). The agent also writes a protected
+# token file while installing the SYSTEM task, because Task Scheduler can retain
+# a stale environment block across task restarts. We also set the current process
+# env so register/sync below work in this same elevated session.
 [Environment]::SetEnvironmentVariable('MILES_AGENT_TOKEN', $Token, 'Machine')
 $env:MILES_AGENT_TOKEN = $Token
 if (-not [string]::IsNullOrWhiteSpace($ApiBase)) {
