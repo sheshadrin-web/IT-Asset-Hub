@@ -1674,17 +1674,43 @@ def _linux_console_user() -> str | None:
     """Best-effort: the human user logged into the graphical/console session —
     the one a hard lock must lock out. Only meaningful when running as root."""
     try:
-        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
-                             capture_output=True, text=True, timeout=10).stdout
+        r = subprocess.run(
+            ["loginctl", "--no-pager", "--no-legend", "list-sessions"],
+            capture_output=True, text=True, timeout=10,
+            env=dict(os.environ, LC_ALL="C", LANG="C"),
+        )
+        if r.returncode != 0:
+            raise RuntimeError("loginctl list-sessions failed")
+        out = r.stdout
+        candidates: list[tuple[str, str]] = []
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 3:
                 uid, user = parts[1], parts[2]
                 try:
                     if int(uid) >= 1000 and user != "root":
-                        return user
+                        candidates.append((parts[0], user))
                 except ValueError:
                     continue
+        # Prefer an active local graphical session. This avoids selecting a
+        # stale SSH/TTY session when the agent runs as a root system service.
+        for session_id, user in candidates:
+            props = subprocess.run(
+                ["loginctl", "show-session", session_id,
+                 "-p", "Active", "-p", "Remote", "-p", "Type", "-p", "Class"],
+                capture_output=True, text=True, timeout=10,
+                env=dict(os.environ, LC_ALL="C", LANG="C"),
+            ).stdout
+            values = dict(
+                line.split("=", 1) for line in props.splitlines() if "=" in line
+            )
+            if (values.get("Active") == "yes"
+                    and values.get("Remote") != "yes"
+                    and values.get("Class") in ("user", "greeter")
+                    and values.get("Type") in ("wayland", "x11", "mir")):
+                return user
+        if candidates:
+            return candidates[0][1]
     except Exception:
         pass
     try:
@@ -1699,7 +1725,7 @@ def _linux_console_user() -> str | None:
     return su if su and su != "root" else None
 
 
-def _linux_user_sessions(user: str) -> list[str]:
+def _linux_user_sessions(user: str) -> list[str] | None:
     """Return active logind session IDs owned by `user`.
 
     `loginctl terminate-user` is not reliable enough on every Ubuntu desktop
@@ -1709,22 +1735,34 @@ def _linux_user_sessions(user: str) -> list[str]:
     """
     sessions: list[str] = []
     try:
-        out = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
-                             capture_output=True, text=True, timeout=10).stdout
+        # Keep parsing independent of the user's locale and avoid the pager
+        # ever being inherited by a non-interactive systemd service.
+        r = subprocess.run(
+            ["loginctl", "--no-pager", "--no-legend", "list-sessions"],
+            capture_output=True, text=True, timeout=10,
+            env=dict(os.environ, LC_ALL="C", LANG="C"),
+        )
+        if r.returncode != 0:
+            return None
+        out = r.stdout
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 3 and parts[2] == user:
                 sessions.append(parts[0])
     except Exception:
-        # The caller treats an empty result as unknown only when the command
-        # itself failed; preserve that distinction with a sentinel.
-        return ["__unknown__"]
+        # None means the session state is unknown. An empty list means the
+        # query completed successfully and the user has no active sessions.
+        return None
     return sessions
 
 
 def _linux_user_has_session(user: str) -> bool:
     """True if `user` still has an active login session (root-only check)."""
-    return bool(_linux_user_sessions(user))
+    sessions = _linux_user_sessions(user)
+    # Fail closed: never claim a hard lock when session state cannot be
+    # verified. The caller reports a failed lock and rolls the account lock
+    # back instead of leaving the device in an ambiguous state.
+    return sessions is None or bool(sessions)
 
 
 def _linux_terminate_user_sessions(user: str) -> None:
@@ -1736,7 +1774,7 @@ def _linux_terminate_user_sessions(user: str) -> None:
     `_linux_user_has_session` before claiming the device is locked.
     """
     session_ids = _linux_user_sessions(user)
-    if "__unknown__" not in session_ids:
+    if session_ids is not None:
         for session_id in session_ids:
             subprocess.run(["loginctl", "terminate-session", session_id],
                            capture_output=True, text=True, timeout=15)
@@ -1746,7 +1784,7 @@ def _linux_terminate_user_sessions(user: str) -> None:
     time.sleep(1)
 
     session_ids = _linux_user_sessions(user)
-    if "__unknown__" not in session_ids:
+    if session_ids is not None:
         for session_id in session_ids:
             subprocess.run(["loginctl", "kill-session", session_id, "--signal=KILL"],
                            capture_output=True, text=True, timeout=15)
