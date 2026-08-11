@@ -1,0 +1,200 @@
+The Phase 1 network-location implementation is approved conceptually,
+but DO NOT deploy it yet.
+
+There is a production scalability issue that must be fixed first.
+
+Current heavy sync runs every 5 minutes.
+
+The selected IP geolocation provider has a limited request quota.
+We must NOT call the external geolocation provider on every agent sync.
+
+Implement backend-side location caching and refresh rules.
+
+DO NOT:
+- change agent command polling
+- change lock/unlock
+- change enrollment keys
+- add OS location services
+- deploy
+- apply the migration
+
+==================================================
+REQUIRED LOCATION REFRESH POLICY
+==================================================
+
+The agent may continue sending:
+
+location_request = "network"
+
+during heavy sync.
+
+However, the Edge Function must decide whether an external lookup
+is actually necessary.
+
+For each managed device:
+
+1. Determine the current public IP.
+
+2. Read the device's existing:
+   - location_public_ip
+   - location_captured_at
+   - latest valid location
+
+3. If public IP is unchanged AND existing location is still fresh:
+   DO NOT call the external provider.
+   Preserve the existing location.
+
+4. If public IP changed:
+   perform a location lookup immediately.
+
+5. If public IP is unchanged but location is stale:
+   refresh it.
+
+Recommended initial TTL:
+
+24 hours
+
+Make this configurable or defined centrally so it can be changed later.
+
+==================================================
+SHARED PUBLIC-IP CACHE
+==================================================
+
+Also avoid repeating lookups for multiple devices sharing the same
+public IP.
+
+Example:
+
+100 office laptops
+→ all public IP = X
+→ geolocate X once
+→ reuse the result for all devices
+
+Design a small server-side cache keyed by public IP.
+
+Prefer one of:
+
+A. Existing suitable database/cache infrastructure, if already present
+
+or
+
+B. A small table such as:
+
+network_location_cache
+
+public_ip
+city
+region
+postal_code
+country
+latitude
+longitude
+accuracy_m
+provider
+captured_at
+expires_at
+
+Do not create this table blindly.
+
+First audit whether an existing cache/data structure can support this.
+
+If a new table is needed, provide the migration but DO NOT apply it.
+
+==================================================
+FAILURE BEHAVIOR
+==================================================
+
+Provider timeout/failure must NEVER fail /sync.
+
+If provider fails:
+
+- continue normal sync
+- preserve last known valid device location
+- do not overwrite it with null
+- do not repeatedly retry every 5 minutes
+
+Implement retry/backoff.
+
+For example:
+
+temporary provider failure
+→ retry after a reasonable backoff
+→ not on every heartbeat
+
+==================================================
+IP VALIDATION
+==================================================
+
+Do not geolocate:
+
+- RFC1918/private addresses
+- loopback
+- link-local
+- invalid addresses
+- known proxy/internal addresses
+
+Carefully audit which forwarding header is trusted in Supabase Edge
+Functions.
+
+Do not blindly trust an arbitrary client-supplied X-Forwarded-For value.
+
+Use the platform-trusted request metadata/header strategy.
+
+==================================================
+PRIVACY / UI
+==================================================
+
+Keep the existing disclaimer:
+
+"Location is estimated from the device's public network/IP and may not
+represent the exact physical location."
+
+Do not call this GPS or exact location.
+
+Keep:
+- source
+- freshness
+- stale indicator
+- captured timestamp
+
+No employee movement/history UI.
+
+==================================================
+TESTS
+==================================================
+
+Add tests proving:
+
+1. First IP → provider called
+2. Same IP + fresh location → provider NOT called
+3. Same IP + stale location → provider called
+4. Changed IP → provider called
+5. Two devices same public IP → one provider lookup reused
+6. Provider timeout → sync still succeeds
+7. Failure preserves previous location
+8. Invalid/private IP → provider not called
+9. Malformed provider data rejected
+10. Provider rate limit response handled
+11. Retry/backoff prevents repeated calls
+12. Command polling remains untouched
+13. Lock/unlock tests remain unchanged
+
+==================================================
+FINAL REPORT
+==================================================
+
+Return:
+
+- final request flow
+- cache architecture
+- TTL decision
+- expected provider requests per day
+- exact files changed
+- migrations, if any
+- tests
+- failure behavior
+- rollout plan
+
+DO NOT DEPLOY.
+DO NOT APPLY MIGRATIONS.
+STOP FOR APPROVAL.
