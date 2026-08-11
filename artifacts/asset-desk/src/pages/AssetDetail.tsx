@@ -710,6 +710,7 @@ export default function AssetDetail() {
 
           {/* ── Activity timeline ─────────────────────────────────────────── */}
           <AssetActivityTimeline
+            key={id}
             history={history}
             commands={commands}
             agentInstalledAt={(device?.created_at as string | null | undefined) ?? null}

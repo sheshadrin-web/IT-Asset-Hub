@@ -1,0 +1,180 @@
+Update the Activity Timeline on the Asset Details page.
+
+CURRENT ISSUE:
+The Activity Timeline can become very long when there are many events such as:
+- Device Locked
+- Device Unlocked
+- Agent Removed
+- Restart commands
+- Agent actions
+- Other asset/device activity
+
+This makes the Asset Details page unnecessarily long.
+
+REQUIRED UI:
+
+Show a maximum of 20 Activity Timeline records per page.
+
+At the bottom of the Activity Timeline card, add pagination similar to the existing Assets table pagination.
+
+Example:
+
+Activity Timeline                         145 events
+
+| event 1  |
+| event 2  |
+| ...      |
+| event 20 |
+
+---------------------------------------------------
+Rows per page: [20 ▼]     Showing 1–20 of 145
+
+                     ‹‹   ‹   Page 1 of 8   ›   ››
+---------------------------------------------------
+
+REQUIREMENTS:
+
+1. Default page size:
+   20 events
+
+2. Add "Rows per page" selector.
+
+Options:
+- 10
+- 20
+- 50
+
+Default:
+20
+
+3. Show pagination information:
+
+Showing 1–20 of 145 events
+
+Then for page 2:
+
+Showing 21–40 of 145 events
+
+4. Add navigation controls:
+
+First page  ‹‹
+Previous    ‹
+Page X of Y
+Next        ›
+Last page   ››
+
+5. Disable First/Previous when already on page 1.
+
+6. Disable Next/Last when already on the final page.
+
+7. Keep Activity Timeline sorted newest first.
+
+8. Do NOT load/render hundreds of timeline DOM items unnecessarily.
+
+AUDIT THE CURRENT IMPLEMENTATION FIRST.
+
+Determine whether Activity Timeline data is:
+
+A. already fully loaded and filtered in the frontend
+or
+B. fetched from Supabase/backend.
+
+If the backend currently returns the entire timeline and the number can grow significantly, prefer server-side pagination using:
+
+limit
+offset
+
+and retrieve the total count.
+
+If changing the backend would introduce unnecessary risk right now and the timeline is already loaded as part of the asset query, implement safe frontend pagination first and clearly report this limitation.
+
+IMPORTANT:
+Do not change the meaning or creation of activity events.
+
+Do NOT modify:
+- Device Agent
+- lock/unlock workflow
+- Recovery workflow
+- agent keys
+- polling
+- Supabase migrations unless pagination genuinely requires one
+- agent commands
+- self-update
+- device status logic
+
+This is primarily an Asset Details UI/data-pagination improvement.
+
+DESIGN:
+
+Reuse the existing Assets-table pagination styling/components where practical.
+
+The pagination should be INSIDE the Activity Timeline card at its bottom.
+
+Do not create a horizontal scrollbar just for the timeline pagination.
+
+Keep it responsive.
+
+Desktop:
+Rows per page and "Showing..." can appear on the left/middle,
+navigation on the right.
+
+Mobile:
+Allow controls to wrap cleanly.
+
+IMPORTANT EVENT COUNT:
+
+The Activity Timeline heading should continue showing the TOTAL number of events, not only the current page count.
+
+Example:
+
+Activity Timeline                         145 events
+
+even though only 20 are displayed.
+
+PAGE RESET:
+
+If rows-per-page changes:
+reset to page 1.
+
+If the user navigates to another asset:
+reset timeline pagination to page 1.
+
+If new timeline data arrives and the current page becomes invalid:
+move to the nearest valid page.
+
+TEST:
+
+Verify:
+- 0 events
+- 1 event
+- exactly 20 events
+- 21 events
+- 50 events
+- more than 100 events
+- first page
+- middle page
+- last page
+- rows per page changes
+- switching between assets
+- newest-first ordering remains correct
+
+Run:
+- TypeScript typecheck
+- relevant tests
+- production build
+- git diff --check
+
+FINAL REPORT:
+
+1. Current Activity Timeline data flow
+2. Whether pagination is frontend or server-side
+3. Exact files changed
+4. Default page size
+5. Available page sizes
+6. How total event count is calculated
+7. Tests/build results
+8. Screenshot/preview confirmation if available
+
+Do NOT deploy yet.
+Do NOT modify production Supabase.
+STOP after local implementation and verification.

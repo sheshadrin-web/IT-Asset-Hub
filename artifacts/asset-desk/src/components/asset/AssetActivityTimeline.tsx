@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import TablePagination from "@/components/TablePagination";
 import {
   UserPlus, RotateCcw, Lock, Unlock, RefreshCw, Image as ImageIcon,
   Trash2, KeyRound, Power, Activity, Cpu,
@@ -82,45 +84,60 @@ export default function AssetActivityTimeline({
   agentInstalledAt?: string | null;
   loading?: boolean;
 }) {
-  const events: TimelineEvent[] = [];
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
 
-  for (const h of history) {
-    const assigned = h.event_type === "assigned";
-    events.push({
-      id: `h-${h.id}`,
-      ts: new Date(h.created_at).getTime(),
-      whenIso: h.created_at,
-      title: assigned ? "Asset Assigned" : "Asset Returned",
-      detail: [
-        assigned ? h.user_name : h.user_name ? `from ${h.user_name}` : null,
-        h.event_by_name ? `by ${h.event_by_name}` : null,
-      ].filter(Boolean).join(" · ") || (assigned ? "Assigned" : "Returned"),
-      Icon: assigned ? UserPlus : RotateCcw,
-      tone: assigned ? "blue" : "emerald",
-    });
-  }
+  const events = useMemo(() => {
+    const nextEvents: TimelineEvent[] = [];
 
-  for (const c of commands) {
-    const m = mapCommand(c);
-    if (!m) continue;
-    const when = c.completed_at ?? c.executed_at ?? c.requested_at;
-    if (!when) continue;
-    events.push({ id: `c-${c.id}`, ts: new Date(when).getTime(), whenIso: when, ...m });
-  }
+    for (const h of history) {
+      const assigned = h.event_type === "assigned";
+      nextEvents.push({
+        id: `h-${h.id}`,
+        ts: new Date(h.created_at).getTime(),
+        whenIso: h.created_at,
+        title: assigned ? "Asset Assigned" : "Asset Returned",
+        detail: [
+          assigned ? h.user_name : h.user_name ? `from ${h.user_name}` : null,
+          h.event_by_name ? `by ${h.event_by_name}` : null,
+        ].filter(Boolean).join(" · ") || (assigned ? "Assigned" : "Returned"),
+        Icon: assigned ? UserPlus : RotateCcw,
+        tone: assigned ? "blue" : "emerald",
+      });
+    }
 
-  if (agentInstalledAt) {
-    events.push({
-      id: "agent-installed",
-      ts: new Date(agentInstalledAt).getTime(),
-      whenIso: agentInstalledAt,
-      title: "Agent Installed",
-      detail: "Device brought under management",
-      Icon: KeyRound,
-      tone: "violet",
-    });
-  }
+    for (const c of commands) {
+      const m = mapCommand(c);
+      if (!m) continue;
+      const when = c.completed_at ?? c.executed_at ?? c.requested_at;
+      if (!when) continue;
+      nextEvents.push({ id: `c-${c.id}`, ts: new Date(when).getTime(), whenIso: when, ...m });
+    }
 
-  events.sort((a, b) => b.ts - a.ts);
+    if (agentInstalledAt) {
+      nextEvents.push({
+        id: "agent-installed",
+        ts: new Date(agentInstalledAt).getTime(),
+        whenIso: agentInstalledAt,
+        title: "Agent Installed",
+        detail: "Device brought under management",
+        Icon: KeyRound,
+        tone: "violet",
+      });
+    }
+
+    nextEvents.sort((a, b) => b.ts - a.ts);
+    return nextEvents;
+  }, [history, commands, agentInstalledAt]);
+
+  const totalPages = Math.max(1, Math.ceil(events.length / rowsPerPage));
+  const visibleEvents = events.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
+  // Keep the current page valid when refreshed data shrinks or a page-size
+  // change makes the old page number out of range.
+  useEffect(() => {
+    setPage(current => Math.min(current, totalPages));
+  }, [totalPages]);
 
   return (
     <Card>
@@ -141,7 +158,7 @@ export default function AssetActivityTimeline({
         ) : (
           <ol className="relative space-y-4">
             <span className="absolute left-[15px] top-1 bottom-1 w-px bg-border" aria-hidden />
-            {events.map((e) => (
+            {visibleEvents.map((e) => (
               <li key={e.id} className="relative flex gap-3">
                 <span className={cn("relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-4 ring-background", TONE_CLS[e.tone])}>
                   <e.Icon className="h-4 w-4" />
@@ -156,6 +173,17 @@ export default function AssetActivityTimeline({
           </ol>
         )}
       </CardContent>
+      {!loading && events.length > 0 && (
+        <TablePagination
+          total={events.length}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          onPageChange={setPage}
+          onRowsPerPageChange={setRowsPerPage}
+          noun="events"
+          rowsOptions={[10, 20, 50]}
+        />
+      )}
     </Card>
   );
 }
