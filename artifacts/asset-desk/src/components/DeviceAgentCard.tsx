@@ -486,13 +486,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   // reporting) needs a recent agent. Older agents either ignore the command,
   // show a dismissable overlay, or lock the screen only once (the user types
   // their password and is back in while the portal still shows Locked).
-  //   * Windows/Linux: v0.4.3+ (re-asserts / account-locks so it persists).
+  //   * Windows/Linux: v0.9.5+ (discovers the real interactive account on
+  //     Windows and uses authoritative CLASS=user sessions on Ubuntu).
   //   * macOS: v0.5.0+ — the TRUE login-window lock (disable the account + IT
   //     banner, run as a root LaunchDaemon) only exists from 0.5.0. Earlier mac
   //     agents could not truly lock, so they must be reinstalled.
   // Detect the mismatch and warn IT to update the agent.
   const isMac = /mac|os\s*x|darwin/i.test(device?.os_name ?? "");
-  const LOCK_MIN_VERSION = isMac ? [0, 5, 0] : [0, 4, 3];
+  const LOCK_MIN_VERSION = isMac ? [0, 5, 0] : [0, 9, 5];
   const parseVer = (v: string | null | undefined): number[] =>
     (v ?? "").trim().split(".").map((n) => parseInt(n, 10) || 0);
   const lockEnforceable = (() => {
