@@ -434,12 +434,14 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
 
   // ── Ubuntu / Linux (Terminal) — systemd --user service ─────────────────────
   // Clean Ubuntu has no `curl`, so the download is done with python3 itself
-  // (always present — it's required to run the agent). The venv step self-heals
-  // if the `python3-venv` package is missing (PEP-668 / Debian split package).
+  // (always present — it's required to run the agent). The explicit User-Agent
+  // is required because the production edge rejects urllib's default
+  // `Python-urllib/...` User-Agent with HTTP 403. The venv step self-heals if
+  // the `python3-venv` package is missing (PEP-668 / Debian split package).
   const installCmdLinux = (tok: string) => {
     const install = [
       `mkdir -p ~/.miles-agent`,
-      `python3 -c "import urllib.request,os; urllib.request.urlretrieve('${agentUrl}', os.path.expanduser('~/.miles-agent/laptop_agent.py'))"`,
+      `python3 -c "import urllib.request,os; r=urllib.request.Request('${agentUrl}', headers={'User-Agent':'miles-agent-bootstrap/Linux'}); d=os.path.expanduser('~/.miles-agent/laptop_agent.py'); open(d,'wb').write(urllib.request.urlopen(r, timeout=30).read())"`,
       `(python3 -m venv ~/.miles-agent/venv || { sudo apt-get update && sudo apt-get install -y python3-venv && python3 -m venv ~/.miles-agent/venv; })`,
       `~/.miles-agent/venv/bin/python -m pip install -q --upgrade pip requests`,
       `export MILES_AGENT_TOKEN="${tok}"`,
@@ -495,7 +497,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     `test -n "$TOKEN"`,
     `API_BASE="$(sed -n "s/^MILES_AGENT_API_BASE=//p" "$ENV_FILE" 2>/dev/null || true)"`,
     `mkdir -p /opt/miles-agent`,
-    `python3 -c "import urllib.request; urllib.request.urlretrieve('${agentUrl}', '/opt/miles-agent/laptop_agent.py')"`,
+    `python3 -c "import urllib.request; r=urllib.request.Request('${agentUrl}', headers={'User-Agent':'miles-agent-bootstrap/Linux'}); open('/opt/miles-agent/laptop_agent.py','wb').write(urllib.request.urlopen(r, timeout=30).read())"`,
     `PY="$(sed -n "s/^ExecStart=\\([^ ]*\\).*/\\1/p" /etc/systemd/system/miles-agent.service 2>/dev/null | head -n1)"`,
     `test -x "$PY"`,
     `MILES_AGENT_TOKEN="$TOKEN" MILES_AGENT_API_BASE="$API_BASE" "$PY" /opt/miles-agent/laptop_agent.py install-service`,
