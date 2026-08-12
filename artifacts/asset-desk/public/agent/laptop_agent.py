@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.7"
+AGENT_VERSION       = "0.9.8"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1211,8 +1211,12 @@ def _win_is_admin() -> bool:
 
 
 def _win_account_exists(user: str) -> bool:
+    # `quser` may return DOMAIN\user. `net user` must receive the local
+    # account name; this also prevents a domain-qualified session name from
+    # making a valid local account look missing.
+    account = user.strip().rsplit("\\", 1)[-1]
     try:
-        r = subprocess.run(["net", "user", user], capture_output=True, text=True,
+        r = subprocess.run(["net", "user", account], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
         return r.returncode == 0
     except Exception:
@@ -1242,7 +1246,7 @@ def _win_account_disabled(user: str) -> bool | None:
         if cim == "ENABLED":
             return False
     try:
-        r = subprocess.run(["net", "user", user], capture_output=True, text=True,
+        r = subprocess.run(["net", "user", leaf], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
         if r.returncode != 0:
             return None
@@ -1264,38 +1268,56 @@ def _win_interactive_users() -> list[str]:
     The agent runs as SYSTEM, so USERNAME is not the console employee. `quser`
     is authoritative for the active interactive session.
     """
+    users: list[str] = []
+
+    def add_user(raw: str) -> None:
+        account = raw.strip().lstrip(">").rsplit("\\", 1)[-1]
+        normalized = account.lower()
+        if not account or normalized in WIN_SYSTEM_ACCOUNTS:
+            return
+        if all(existing.lower() != normalized for existing in users):
+            users.append(account)
+
+    # Win32_ComputerSystem gives the console identity without parsing localized
+    # `quser` state words. It is available while a user is signed in.
+    console = _ps("(Get-CimInstance Win32_ComputerSystem).UserName").strip()
+    if console:
+        add_user(console)
+
+    lines: list[str] = []
     try:
         r = subprocess.run(["quser"], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
-        users: list[str] = []
         lines = r.stdout.splitlines()[1:] if r.returncode == 0 else []
-        # Some Windows editions do not ship quser, while query user exposes the
-        # same session table. Keep the fallback here because a SYSTEM service
-        # must discover the console user without relying on USERNAME.
-        if not lines:
+    except Exception:
+        pass
+
+    # Some Windows editions do not ship quser, while query user exposes the
+    # same session table. Keep both paths because this runs as SYSTEM.
+    if not lines:
+        try:
             fallback = subprocess.run(["query", "user"], capture_output=True, text=True,
                                       timeout=15, creationflags=_NO_WINDOW)
             lines = fallback.stdout.splitlines()[1:] if fallback.returncode == 0 else []
-        for line in lines:
-            parts = line.strip().lstrip(">").split()
-            if not parts:
-                continue
-            state_index = next(
-                (i for i, value in enumerate(parts)
-                 if value.lower() in ("active", "disc", "idle")),
-                None,
-            )
-            if state_index is None or parts[state_index].lower() != "active":
-                continue
-            user = parts[0]
-            normalized = user.rsplit("\\", 1)[-1].lower()
-            if normalized in WIN_SYSTEM_ACCOUNTS:
-                continue
-            if user not in users:
-                users.append(user)
-        return users
-    except Exception:
-        return []
+        except Exception:
+            pass
+
+    for line in lines:
+        parts = line.strip().lstrip(">").split()
+        if not parts:
+            continue
+        state_index = next(
+            (i for i, value in enumerate(parts)
+             if value.lower() in ("active", "disc", "idle")),
+            None,
+        )
+        # `Active` is English-only. If the state is localized, the console
+        # identity above or the configured-account fallback below still finds
+        # the employee account safely.
+        if state_index is not None and parts[state_index].lower() == "active":
+            add_user(parts[0])
+
+    return users
 
 
 def _win_disable_lock_accounts(users: list[str] | None = None) -> list[str]:
@@ -1306,18 +1328,27 @@ def _win_disable_lock_accounts(users: list[str] | None = None) -> list[str]:
     """
     disabled: list[str] = []
     me = (os.environ.get("USERNAME") or "").strip().lower()
-    targets = users if users is not None else _win_interactive_users()
+    if users is not None:
+        targets = users
+    else:
+        discovered = _win_interactive_users()
+        # Only use the configured break-glass/end-user names when Windows has
+        # no discoverable console session (for example, after reboot at the
+        # sign-in screen). Never disable unrelated configured accounts while a
+        # different active employee account was positively discovered.
+        targets = discovered or WIN_LOCK_USERS
     for u in targets:
-        normalized = u.strip().rsplit("\\", 1)[-1].lower()
+        account = u.strip().rsplit("\\", 1)[-1]
+        normalized = account.lower()
         if normalized == me or normalized in WIN_SYSTEM_ACCOUNTS:
             continue
-        if not _win_account_exists(u):
+        if not _win_account_exists(account):
             continue
         try:
-            r = subprocess.run(["net", "user", u, "/active:no"], capture_output=True,
+            r = subprocess.run(["net", "user", account, "/active:no"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            if r.returncode == 0 and _win_account_disabled(u) is True:
-                disabled.append(u)
+            if r.returncode == 0 and _win_account_disabled(account) is True:
+                disabled.append(account)
         except Exception:
             pass
     return disabled
@@ -1329,13 +1360,14 @@ def _win_enable_lock_accounts(users: list[str] | None = None) -> list[str]:
     an honest unlock status instead of silently swallowing a permission error."""
     failed: list[str] = []
     for u in (users or WIN_LOCK_USERS):
-        if not _win_account_exists(u):
+        account = u.strip().rsplit("\\", 1)[-1]
+        if not _win_account_exists(account):
             continue
         try:
-            r = subprocess.run(["net", "user", u, "/active:yes"], capture_output=True,
+            r = subprocess.run(["net", "user", account, "/active:yes"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            if r.returncode != 0 or _win_account_disabled(u) is not False:
-                failed.append(u)
+            if r.returncode != 0 or _win_account_disabled(account) is not False:
+                failed.append(account)
         except Exception:
             failed.append(u)
     return failed
