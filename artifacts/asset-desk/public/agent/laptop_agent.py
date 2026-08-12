@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.8"
+AGENT_VERSION       = "0.9.7"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -227,7 +227,9 @@ def _read_file(path: str) -> str:
 
 # ── self-update ──────────────────────────────────────────────────────────────
 # The agent stores this module path at startup so it can atomically replace
-# itself and restart when a newer version is available on the portal.
+# itself and restart when the portal has a changed copy. The version is a
+# compatibility label, not a release counter: repairs rewrite the same agent
+# in place instead of forcing 0.9.7 → 0.9.8 → 0.9.9.
 _AGENT_SCRIPT_PATH   = os.path.abspath(__file__)
 _last_update_check   = 0.0   # monotonic time of the last version check
 
@@ -265,12 +267,12 @@ def _parse_version(src: str) -> tuple[int, ...]:
 
 
 def _self_update(force: bool = False) -> tuple[bool, str]:
-    """Check for a newer agent script and apply it if one exists.
+    """Check for a changed agent script and apply it if one exists.
 
     Steps:
       1. Rate-limit to SELF_UPDATE_INTERVAL_SEC (skipped when force=True).
       2. Download the remote script to a temp file.
-      3. Parse its AGENT_VERSION — skip if not strictly newer.
+      3. Reject an older version; compare content when the version is equal.
       4. Compile-check the download so a truncated/corrupt file never replaces us.
       5. Atomically replace the local script with os.replace().
       6. os.execv() to restart the current process in-place with the new code.
@@ -310,7 +312,18 @@ def _self_update(force: bool = False) -> tuple[bool, str]:
 
         new_ver = _parse_version(new_src)
         cur_ver = _parse_version(f'AGENT_VERSION = "{AGENT_VERSION}"')
-        if new_ver <= cur_ver:
+        if new_ver < cur_ver:
+            os.remove(tmp_path)
+            return (False, f"downloaded agent is older than local={AGENT_VERSION}")
+
+        current_digest = None
+        try:
+            with open(_AGENT_SCRIPT_PATH, "rb") as fh:
+                current_digest = hashlib.sha256(fh.read()).digest()
+        except OSError:
+            pass
+        remote_digest = hashlib.sha256(new_src.encode("utf-8")).digest()
+        if new_ver == cur_ver and current_digest == remote_digest:
             os.remove(tmp_path)
             return (False, f"already up to date (local={AGENT_VERSION})")
 
