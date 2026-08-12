@@ -102,6 +102,10 @@ WIN_SYS_TOKEN_FILE = (
     os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "MilesAgent", "agent.token")
     if IS_WIN else ""
 )
+WIN_RUNTIME_LOG = (
+    os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "MilesAgent", "agent.log")
+    if IS_WIN else ""
+)
 
 
 def _load_token() -> str:
@@ -1187,6 +1191,26 @@ def _is_root() -> bool:
         return hasattr(os, "geteuid") and os.geteuid() == 0
     except Exception:
         return False
+
+
+def _enable_runtime_log() -> None:
+    """Capture SYSTEM-task startup and command errors where IT can inspect them.
+
+    Task Scheduler runs the Windows agent without a console. Without redirecting
+    stdout/stderr, an import failure, missing token, or API error looks exactly
+    like a task that never ran.
+    """
+    if not IS_WIN:
+        return
+    try:
+        os.makedirs(os.path.dirname(WIN_RUNTIME_LOG), exist_ok=True)
+        handle = open(WIN_RUNTIME_LOG, "a", encoding="utf-8", buffering=1)
+        sys.stdout = handle
+        sys.stderr = handle
+        print(f"[{datetime.now(timezone.utc).isoformat()}] agent process starting "
+              f"version={AGENT_VERSION} pid={os.getpid()} token={'yes' if TOKEN else 'no'}")
+    except Exception:
+        pass
 
 
 # ── Branded full-screen lock kiosk + Windows account hardening ──────────────
@@ -2692,6 +2716,7 @@ def _acquire_singleton() -> bool:
 
 
 def run_loop() -> int:
+    _enable_runtime_log()
     if not TOKEN:
         print("ERROR: MILES_AGENT_TOKEN is not set", file=sys.stderr); return 2
     if not _acquire_singleton():
@@ -2744,6 +2769,8 @@ def run_loop() -> int:
             # window is left running.
             revoked, processed = poll_commands()
             if processed > 0:
+                print(f"[{datetime.now(timezone.utc).isoformat()}] processed "
+                      f"{processed} command(s)")
                 last_activity = now  # activity → snap back to the fast cadence
             if revoked:
                 revoked_strikes += 1
