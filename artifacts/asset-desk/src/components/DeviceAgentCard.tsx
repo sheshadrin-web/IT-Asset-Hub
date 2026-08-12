@@ -391,7 +391,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
 
   // Agent source is public and intentionally hosted outside the authenticated
   // portal. Keep this URL aligned with DEFAULT_AGENT_URL in laptop_agent.py.
-  const agentUrl = "https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py";
+  const agentUrl = "https://it.assets.mileseducation.org/agent/laptop_agent.py";
 
   // Asset tag (e.g. MILES-LAP-579) baked into the install command so the machine's
   // system hostname is renamed to it. Hostnames allow letters/digits/hyphens, so
@@ -462,7 +462,7 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
   // and writes a full log to %ProgramData%\MilesAgent\install.log — instead
   // of a brittle one-liner where one failed step cascades into confusing
   // "path not found" errors. Config is passed via env vars the script reads.
-  const installPsUrl = "https://it-asset-hub-a7rf.onrender.com/agent/install.ps1";
+  const installPsUrl = "https://it.assets.mileseducation.org/agent/install.ps1";
 
   // Command Prompt: launch PowerShell to fetch and run the installer.
   const installCmdCmd = (tok: string) =>

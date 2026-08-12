@@ -64,7 +64,7 @@ API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # from the service context (e.g. a root/SYSTEM service that did not inherit a
 # user-scope env var). Without a working default the update check 404s silently
 # and the device stays pinned to whatever version it was installed with.
-DEFAULT_AGENT_URL   = "https://it-asset-hub-a7rf.onrender.com/agent/laptop_agent.py"
+DEFAULT_AGENT_URL   = "https://it.assets.mileseducation.org/agent/laptop_agent.py"
 SYNC_INTERVAL_SEC   = int(os.environ.get("MILES_AGENT_SYNC_INTERVAL", "300"))  # 5 min
 # Self-update: check once every 24 h. Set to 0 to disable.
 SELF_UPDATE_INTERVAL_SEC = int(os.environ.get("MILES_AGENT_UPDATE_INTERVAL", "86400"))

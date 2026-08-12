@@ -22,7 +22,7 @@ export const supabaseConfigured = !!supabaseUrl && !!supabaseAnon;
 
 // Production URL of the deployed portal. Password-reset / recovery emails must
 // always point users here — NEVER at an admin's local dev origin.
-const PRODUCTION_SITE_URL = "https://it-asset-hub-a7rf.onrender.com";
+const PRODUCTION_SITE_URL = "https://it.assets.mileseducation.org";
 
 // Resolve the public site URL used for auth redirect links (e.g. password
 // reset). Admins frequently trigger resets from a local dev build, where

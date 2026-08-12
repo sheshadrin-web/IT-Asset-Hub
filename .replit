@@ -23,7 +23,7 @@ timeoutMs = 20000
 
 [userenv.shared]
 VITE_SUPABASE_URL = "https://dimbgprindvmzoylzyud.supabase.co"
-VITE_PUBLIC_SITE_URL = "https://ef9a07a0-06cb-4cde-99db-48e1dc0761ff-00-2hhrqybccfd10.sisko.replit.dev"
+VITE_PUBLIC_SITE_URL = "https://it.assets.mileseducation.org"
 
 [nix]
 channel = "stable-25_05"

@@ -1,7 +1,7 @@
 # IT Asset Hub — Miles Education Pvt Ltd
 
 Internal IT Asset Management & Helpdesk portal for Miles Education.
-Live: **https://it-asset-hub-a7rf.onrender.com**
+Live: **https://it.assets.mileseducation.org**
 
 Track laptops, mobiles and 20 other asset categories across the org, assign them
 to employees, manage helpdesk tickets, and pull rich CSV / XLSX reports.
@@ -141,7 +141,7 @@ Auto-deploys to **Render** on every push to `main`:
 - Publish directory: `artifacts/asset-desk/dist`
 - SPA rewrites: `/*` → `/index.html`
 
-Live URL: https://it-asset-hub-a7rf.onrender.com
+Live URL: https://it.assets.mileseducation.org
 
 ---
 

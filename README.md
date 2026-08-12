@@ -13,9 +13,9 @@
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase\&logoColor=white)](https://supabase.com)
 [![Render](https://img.shields.io/badge/Deployed_on-Render-46E3B7?logo=render\&logoColor=white)](https://render.com)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#-license)
-[![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://it-asset-hub-a7rf.onrender.com)
+[![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://it.assets.mileseducation.org)
 
-[🌐 Live Portal](https://it-asset-hub-a7rf.onrender.com) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-quick-start) · [👥 Roles](#-role-based-access)
+[🌐 Live Portal](https://it.assets.mileseducation.org) · [📸 Screenshots](#-screenshots) · [🚀 Quick Start](#-quick-start) · [👥 Roles](#-role-based-access)
 
 `Internal tool · Miles Education Pvt Ltd · Bengaluru, India 🇮🇳`
 
@@ -405,7 +405,7 @@ All routes are authenticated via `X-Agent-Token` header.
 
 ## 📸 Screenshots
 
-> Live portal: **[it-asset-hub-a7rf.onrender.com](https://it-asset-hub-a7rf.onrender.com)**
+> Live portal: **[it.assets.mileseducation.org](https://it.assets.mileseducation.org)**
 
 <table>
   <tr>
@@ -501,6 +501,6 @@ IT Asset Management Lead · **Miles Education Pvt Ltd** · [mileseducation.com](
 
 [![Email](https://img.shields.io/badge/Email-sheshadri.n%40mileseducation.com-D14836?logo=gmail\&logoColor=white)](mailto:sheshadri.n@mileseducation.com)
 [![GitHub](https://img.shields.io/badge/GitHub-sheshadrin--web-181717?logo=github\&logoColor=white)](https://github.com/sheshadrin-web)
-[![Live Demo](https://img.shields.io/badge/Live-Demo-success?logo=render\&logoColor=white)](https://it-asset-hub-a7rf.onrender.com)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-success?logo=render\&logoColor=white)](https://it.assets.mileseducation.org)
 
 </div>
