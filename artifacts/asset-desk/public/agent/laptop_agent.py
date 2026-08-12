@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.6"
+AGENT_VERSION       = "0.9.7"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1105,6 +1105,70 @@ def _write_lock_state(state: dict) -> None:
         pass
 
 
+COMMAND_STATUS_OUTBOX_FILE = (
+    os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "MilesAgent", "command-status.json")
+    if IS_WIN
+    else os.path.join(os.path.expanduser("~"), ".miles-agent", "command-status.json")
+)
+
+
+def _read_command_status_outbox() -> list[dict]:
+    try:
+        with open(COMMAND_STATUS_OUTBOX_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_command_status_outbox(items: list[dict]) -> None:
+    try:
+        os.makedirs(os.path.dirname(COMMAND_STATUS_OUTBOX_FILE), exist_ok=True)
+        tmp = COMMAND_STATUS_OUTBOX_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(items[-100:], fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, COMMAND_STATUS_OUTBOX_FILE)
+    except Exception:
+        pass
+
+
+def _flush_command_status_outbox() -> None:
+    """Retry terminal command updates that failed because the network was down.
+
+    The API marks a command running before returning it. Without this small
+    durable outbox, a transient failure after claiming a lock command leaves it
+    running forever and the portal never reconciles is_locked.
+    """
+    pending = _read_command_status_outbox()
+    if not pending:
+        return
+    remaining: list[dict] = []
+    for body in pending:
+        try:
+            response = _post("/commands/status", body)
+            if not isinstance(response, dict) or not response.get("success"):
+                remaining.append(body)
+        except Exception:
+            remaining.append(body)
+    _write_command_status_outbox(remaining)
+
+
+def _post_command_status(body: dict) -> None:
+    try:
+        response = _post("/commands/status", body)
+        if isinstance(response, dict) and response.get("success"):
+            return
+    except Exception:
+        pass
+    pending = _read_command_status_outbox()
+    command_id = body.get("id")
+    pending = [item for item in pending if item.get("id") != command_id]
+    pending.append(body)
+    _write_command_status_outbox(pending)
+
+
 def _is_root() -> bool:
     try:
         return hasattr(os, "geteuid") and os.geteuid() == 0
@@ -1163,6 +1227,20 @@ def _win_account_disabled(user: str) -> bool | None:
     verification is unavailable; a successful command alone is not enough to
     claim that sign-in is blocked.
     """
+    # PowerShell/CIM exposes the invariant boolean property even on localized
+    # Windows, unlike parsing the localized `net user` text.
+    leaf = user.strip().rsplit("\\", 1)[-1]
+    if "\\" not in user and "@" not in user:
+        safe_leaf = leaf.replace("'", "''")
+        cim = _ps(
+            f"$u=Get-CimInstance Win32_UserAccount -Filter "
+            f"\"LocalAccount=True AND Name='{safe_leaf}'\" | Select-Object -First 1;"
+            "if($u){if($u.Disabled){'DISABLED'}else{'ENABLED'}}"
+        ).strip().upper()
+        if cim == "DISABLED":
+            return True
+        if cim == "ENABLED":
+            return False
     try:
         r = subprocess.run(["net", "user", user], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
@@ -1189,10 +1267,16 @@ def _win_interactive_users() -> list[str]:
     try:
         r = subprocess.run(["quser"], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
-        if r.returncode != 0:
-            return []
         users: list[str] = []
-        for line in r.stdout.splitlines()[1:]:
+        lines = r.stdout.splitlines()[1:] if r.returncode == 0 else []
+        # Some Windows editions do not ship quser, while query user exposes the
+        # same session table. Keep the fallback here because a SYSTEM service
+        # must discover the console user without relying on USERNAME.
+        if not lines:
+            fallback = subprocess.run(["query", "user"], capture_output=True, text=True,
+                                      timeout=15, creationflags=_NO_WINDOW)
+            lines = fallback.stdout.splitlines()[1:] if fallback.returncode == 0 else []
+        for line in lines:
             parts = line.strip().lstrip(">").split()
             if not parts:
                 continue
@@ -1250,7 +1334,7 @@ def _win_enable_lock_accounts(users: list[str] | None = None) -> list[str]:
         try:
             r = subprocess.run(["net", "user", u, "/active:yes"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
-            if r.returncode != 0:
+            if r.returncode != 0 or _win_account_disabled(u) is not False:
                 failed.append(u)
         except Exception:
             failed.append(u)
@@ -1659,8 +1743,8 @@ def _linux_user_sessions() -> list[dict[str, str]] | None:
                 continue
             sid = parts[0]
             details = subprocess.run(
-                ["loginctl", "show-session", sid, "-p", "User", "-p", "Name",
-                 "-p", "Class", "-p", "Type", "-p", "Seat"],
+                 ["loginctl", "show-session", sid, "-p", "User", "-p", "Name",
+                  "-p", "Class", "-p", "Type", "-p", "Seat", "-p", "Active"],
                 capture_output=True, text=True, timeout=10,
             )
             if details.returncode != 0:
@@ -1681,6 +1765,7 @@ def _linux_user_sessions() -> list[dict[str, str]] | None:
                 "class": values.get("Class", ""),
                 "type": values.get("Type", ""),
                 "seat": values.get("Seat", ""),
+                "active": values.get("Active", ""),
             })
     except Exception:
         return None
@@ -1688,12 +1773,27 @@ def _linux_user_sessions() -> list[dict[str, str]] | None:
 
 
 def _linux_console_user() -> str | None:
-    """Return the human user owning an interactive CLASS=user session."""
+    """Return the human user owning the graphical console session.
+
+    SSH/TTY sessions are CLASS=user on some Ubuntu/logind combinations, but they
+    have no seat. Prefer an active graphical seat so a root service never locks
+    an SSH operator instead of the person using the laptop.
+    """
     sessions = _linux_user_sessions()
     if sessions is not None:
-        for session in sessions:
-            if session["class"] == "user":
-                return session["user"]
+        candidates = [
+            s for s in sessions
+            if s["class"] == "user" and s["seat"]
+            and s["type"].lower() in ("x11", "wayland", "mir")
+        ]
+        if not candidates:
+            candidates = [
+                s for s in sessions
+                if s["class"] == "user" and s["seat"] and s["type"]
+            ]
+        if candidates:
+            active = [s for s in candidates if s.get("active", "").lower() == "yes"]
+            return (active or candidates)[0]["user"]
         return None
     # Only use legacy fallbacks when logind is unavailable, not when it
     # successfully reports sessions. This avoids selecting gdm/system users.
@@ -1709,11 +1809,20 @@ def _linux_console_user() -> str | None:
     return su if su and su != "root" else None
 
 
+def _linux_is_graphical_session(session: dict[str, str]) -> bool:
+    return (
+        session.get("class") == "user"
+        and bool(session.get("seat"))
+        and bool(session.get("type"))
+        and session.get("type", "").lower() in ("x11", "wayland", "mir")
+    )
+
+
 def _linux_user_has_session(user: str) -> bool:
-    """True if `user` still owns an interactive CLASS=user session."""
+    """True if `user` still owns the graphical laptop session."""
     sessions = _linux_user_sessions()
     return sessions is None or any(
-        s["user"] == user and s["class"] == "user" for s in sessions
+        s["user"] == user and _linux_is_graphical_session(s) for s in sessions
     )
 
 
@@ -1730,7 +1839,7 @@ def _linux_terminate_user_sessions(user: str) -> bool:
         return False
     targets = [
         s for s in sessions
-        if s["user"] == user and s["class"] == "user"
+        if s["user"] == user and _linux_is_graphical_session(s)
     ]
     for session in targets:
         subprocess.run(
@@ -1743,7 +1852,7 @@ def _linux_terminate_user_sessions(user: str) -> bool:
             return True
         remaining = _linux_user_sessions() or []
         for session in remaining:
-            if session["user"] == user and session["class"] == "user":
+            if session["user"] == user and _linux_is_graphical_session(session):
                 subprocess.run(
                     ["loginctl", "kill-session", session["id"],
                      "--kill-who=all", "--signal=SIGKILL"],
@@ -1767,6 +1876,21 @@ def _linux_account_locked(user: str) -> bool | None:
     except Exception:
         return None
     return None
+
+
+def _linux_lock_account(user: str) -> tuple[bool, str]:
+    """Lock an account and require a positive `passwd -S` verification."""
+    detail = "usermod --lock"
+    try:
+        r = subprocess.run(["usermod", "--lock", user], capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            detail = "passwd -l"
+            r = subprocess.run(["passwd", "-l", user], capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            return (False, (r.stderr or r.stdout or "account lock command failed").strip())
+    except Exception as exc:
+        return (False, str(exc))
+    return (_linux_account_locked(user) is True, detail)
 
 
 def _linux_unlock_account(user: str) -> tuple[bool, str]:
@@ -1920,20 +2044,14 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             user = _linux_console_user()
             if not user:
                 return ("failed", None, "Could not determine the logged-in user to lock.")
-            # 1) Password-lock the account so the user cannot log back in.
-            r = subprocess.run(["usermod", "--lock", user], capture_output=True, text=True, timeout=15)
-            if r.returncode != 0:
-                r = subprocess.run(["passwd", "-l", user], capture_output=True, text=True, timeout=15)
-                if r.returncode != 0:
-                    return ("failed", None,
-                            f"Failed to lock account '{user}': {r.stderr.strip()}")
-            # Positively verify the account is actually locked — never trust the exit
-            # code alone. If verification explicitly says it is NOT locked, report a
-            # failure rather than a false "Locked".
-            if _linux_account_locked(user) is False:
+            # 1) Password-lock the account so the user cannot log back in. A
+            # missing/ambiguous passwd status is a failure, not a success.
+            locked_ok, lock_detail = _linux_lock_account(user)
+            if not locked_ok:
+                locked_state = _linux_account_locked(user)
                 return ("failed", None,
-                        f"The lock command returned success but account '{user}' is "
-                        f"still reported as unlocked, so the device was NOT locked.")
+                        f"Failed to positively verify the lock for account '{user}' "
+                        f"({lock_detail}; status={locked_state}). The device was NOT locked.")
             # 2) Terminate only the employee's interactive CLASS=user sessions.
             # The per-user CLASS=manager session is intentionally left alone.
             if not _linux_terminate_user_sessions(user):
@@ -2402,13 +2520,14 @@ def poll_commands() -> tuple[bool, int]:
       - `processed` number of commands executed this poll — drives adaptive
                     polling, since any command means we should keep the fast
                     cadence so follow-up actions still apply within seconds."""
+    _flush_command_status_outbox()
     resp = _get("/commands")
     if not resp.get("success"):
         return _looks_revoked(resp), 0
     processed = 0
     for cmd in resp.get("commands", []):
         status, result, err = execute_command(cmd)
-        _post("/commands/status", {
+        _post_command_status({
             "id":     cmd["id"],
             "status": status,
             "result": result,

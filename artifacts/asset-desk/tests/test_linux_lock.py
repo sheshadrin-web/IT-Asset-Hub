@@ -52,6 +52,7 @@ class FakeRun:
                 f"Class={data['class']}",
                 f"Type={data.get('type', '')}",
                 f"Seat={data.get('seat', '')}",
+                f"Active={data.get('active', 'yes')}",
             ]
             return subprocess.CompletedProcess(cmd, 0, "\n".join(props), "")
         if cmd[:2] == ["loginctl", "terminate-session"]:
@@ -83,7 +84,7 @@ class FakeRun:
 
 
 def session(sid, user="sheshadri-n", cls="user", typ="wayland", seat="seat0"):
-    return sid, {"uid": "1000", "user": user, "class": cls, "type": typ, "seat": seat}
+    return sid, {"uid": "1000", "user": user, "class": cls, "type": typ, "seat": seat, "active": "yes"}
 
 
 class LinuxLockTests(unittest.TestCase):
@@ -148,6 +149,22 @@ class LinuxLockTests(unittest.TestCase):
         with patch.object(agent.subprocess, "run", side_effect=OSError("loginctl unavailable")):
             self.assertIsNone(agent._linux_console_user())
             self.assertTrue(agent._linux_user_has_session("sheshadri-n"))
+
+    def test_ssh_session_is_not_selected_over_graphical_session(self):
+        fake = FakeRun(dict([
+            session("10", user="ssh-user", typ="tty", seat=""),
+            session("11", user="desktop-user", typ="wayland", seat="seat0"),
+        ]))
+        with patch.object(agent.subprocess, "run", side_effect=fake):
+            self.assertEqual(agent._linux_console_user(), "desktop-user")
+
+    def test_lock_verification_unknown_fails_closed(self):
+        fake = FakeRun(dict([session("2")]))
+        with patch.object(agent.subprocess, "run", side_effect=fake), \
+             patch.object(agent, "_linux_account_locked", return_value=None):
+            result = agent._apply_hard_lock()
+        self.assertEqual(result[0], "failed")
+        self.assertNotIn(["loginctl", "terminate-session", "2"], fake.calls)
 
     def test_unlock_targets_saved_employee_only(self):
         fake = FakeRun({})
