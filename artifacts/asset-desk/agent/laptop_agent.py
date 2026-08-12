@@ -1413,37 +1413,75 @@ def _win_clear_legalnotice() -> bool:
     return ok
 
 
-def _win_force_logoff(disabled: list[str]) -> None:
+def _win_force_logoff(disabled: list[str]) -> bool:
     """From a SYSTEM/admin context, log off the interactive sessions of the accounts
     we just disabled so the user is dropped to the (now-blocked) sign-in screen
     immediately instead of keeping their current session. Best-effort and silent —
     only touches sessions belonging to a disabled account, never other users."""
     if not disabled:
-        return
+        return False
     targets = {u.strip().lower() for u in disabled}
+    session_ids: list[str] = []
     try:
         out = subprocess.run(["quser"], capture_output=True, text=True, timeout=15,
                              creationflags=_NO_WINDOW).stdout
     except Exception:
-        return
-    for line in out.splitlines()[1:]:
+        out = ""
+    # A few Windows editions omit the quser header or return a localized
+    # session table. query session is a compatible fallback.
+    if not out.strip():
+        try:
+            out = subprocess.run(["query", "session"], capture_output=True, text=True,
+                                 timeout=15, creationflags=_NO_WINDOW).stdout
+        except Exception:
+            out = ""
+    for line in out.splitlines():
         # quser rows: ">miles  console  1  Active ..." — the active session is
         # prefixed with '>'. Columns are whitespace-separated; the session ID is
         # the first standalone integer on the row.
         parts = line.replace(">", " ").split()
         if not parts:
             continue
-        uname = parts[0].strip().lower()
+        uname = parts[0].strip().rsplit("\\", 1)[-1].lower()
         if uname not in targets:
             continue
         sid = next((t for t in parts if t.isdigit()), None)
         if not sid:
             continue
+        session_ids.append(sid)
         try:
             subprocess.run(["logoff", sid], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
         except Exception:
             pass
+    if not session_ids:
+        # No session means the user is already at the sign-in screen. That is
+        # a valid enforced state after a reboot or an earlier successful logoff.
+        return True
+    # Do not claim a completed hard lock until every session we targeted is
+    # gone. A SYSTEM task can disable the account successfully while failing
+    # to evict the interactive session; in that case the desktop remains usable.
+    time.sleep(1)
+    try:
+        verify = subprocess.run(["quser"], capture_output=True, text=True, timeout=15,
+                                creationflags=_NO_WINDOW).stdout
+    except Exception:
+        verify = ""
+    if not verify.strip():
+        try:
+            verify = subprocess.run(["query", "session"], capture_output=True,
+                                    text=True, timeout=15, creationflags=_NO_WINDOW).stdout
+        except Exception:
+            verify = ""
+    for line in verify.splitlines():
+        parts = line.replace(">", " ").split()
+        if not parts:
+            continue
+        uname = parts[0].strip().rsplit("\\", 1)[-1].lower()
+        sid = next((t for t in parts if t.isdigit()), None)
+        if uname in targets and sid in session_ids:
+            return False
+    return True
 
 
 def _lock_screen_running() -> bool:
@@ -2016,7 +2054,23 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             # Drop the just-disabled user(s) to the sign-in screen so the lock takes
             # effect now, not only after the next reboot. Their account is disabled,
             # so the login attempt is rejected and the legal-notice banner shows.
-            _win_force_logoff(disabled)
+            if not _win_force_logoff(disabled):
+                # Account disabling is persistent, but the live desktop would
+                # remain usable if logoff failed. Roll back rather than report
+                # a false success; the portal will show the IT-admin recovery
+                # message and the command can be retried safely.
+                _win_enable_lock_accounts(disabled)
+                _win_clear_legalnotice()
+                _write_lock_state({"locked": False, "platform": "windows",
+                                   "asset_tag": asset_tag})
+                return (
+                    "failed",
+                    None,
+                    "Windows account sign-in was disabled, but the active session "
+                    "could not be logged off and the desktop may still be usable. "
+                    "The temporary lock was rolled back. Please contact the IT "
+                    "administrator or retry from a SYSTEM agent.",
+                )
             ws = "workstation locked" if ok else "workstation lock call failed (sign-in already blocked)"
             return ("completed",
                     f"Sign-in disabled for {','.join(disabled)}; {ws}; active session signed "
