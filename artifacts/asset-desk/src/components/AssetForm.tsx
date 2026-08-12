@@ -118,6 +118,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 const MONITOR_SIZES      = ['17"', '19"', '21"', '22"', '24"', '27"', '32"', 'Other'];
+const BUILT_IN_FORM_TYPES = new Set(["Laptop", "Desktop", "CPU", "Mobile", "Tab", "Sim Card"]);
 
 
 // ── Dynamic field renderer ────────────────────────────────────────────────────
@@ -396,8 +397,8 @@ export default function AssetForm({
   const isSimCard = assetType === "Sim Card";
   const showComputerSpecs = isLaptop || isCPU || isDesktop;
 
-  // Whether DB config is available for this type
-  const hasDynamicConfig = configFields.length > 0;
+  // Built-in types use their intentional layouts; custom types use DB config.
+  const hasDynamicConfig = configFields.length > 0 && !BUILT_IN_FORM_TYPES.has(assetType);
 
   return (
     <Form {...form}>
@@ -678,7 +679,7 @@ export default function AssetForm({
                     <FormField control={form.control} name="simProvider" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Provider</FormLabel>
-                        <Select value={optionValueForCurrent(osOptions, field.value)} onValueChange={v => field.onChange(v === "not_specified" || v === "__none__" ? "" : v)}>
+                        <Select value={field.value || "__none__"} onValueChange={v => field.onChange(v === "__none__" ? "" : v)}>
                           <FormControl><SelectTrigger data-testid="select-sim-provider"><SelectValue placeholder="Select provider" /></SelectTrigger></FormControl>
                           <SelectContent>
                             <SelectItem value="__none__">Not specified</SelectItem>
