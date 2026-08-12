@@ -220,6 +220,25 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
     await load();
   }
 
+  async function clearLockPending() {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("clear_device_lock_pending", { p_asset_id: assetId });
+    setBusy(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Could not clear pending lock",
+        description: error?.message ?? data?.error ?? "The command may already be executing.",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: "Pending lock cleared",
+      description: "The unstarted lock request was cancelled. The device remains unlocked.",
+    });
+    await load();
+  }
+
   // Restart actions. None of these restart silently: notify only messages the
   // user; schedule/force always warn the user first and wait a 10-minute grace
   // period (enforced agent-side) so work can be saved.
@@ -722,6 +741,18 @@ export default function DeviceAgentCard({ assetId, assetTag }: Props) {
                     Lock requested — waiting for the device agent to apply it and confirm. The device is
                     <b> not yet locked</b>. This page updates once the agent reports back (next sync).
                   </p>
+                  {isAdmin && latestLockCmd?.status === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-7 gap-1.5 text-[11px] text-sky-800 border-sky-300 hover:bg-sky-100"
+                      onClick={() => void clearLockPending()}
+                      disabled={busy}
+                      data-testid="button-clear-lock-pending"
+                    >
+                      <X className="h-3.5 w-3.5" /> Clear Pending
+                    </Button>
+                  )}
                 </div>
               </div>
             )}

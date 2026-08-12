@@ -120,6 +120,7 @@ export default function AssetDetail() {
   const [device,           setDevice]            = useState<ManagedDevice | null>(null);
   const [commands,         setCommands]          = useState<TimelineCommand[]>([]);
   const [deviceLoading,    setDeviceLoading]     = useState(false);
+  const [timelineClearing, setTimelineClearing]  = useState(false);
   const [resendState,      setResendState]       = useState<"idle" | "sending" | "sent" | "error">("idle");
   // Single-flight guard for assign/status/unassign mutations — prevents
   // double-submit and freezes the relevant buttons while a write is in flight.
@@ -174,6 +175,29 @@ export default function AssetDetail() {
   const asset          = getAsset(id);
   const relatedTickets = tickets.filter(t => t.assetId === id);
   const isAdmin        = currentUser?.role === "super_admin" || currentUser?.role === "it_admin";
+
+  const clearActivityTimeline = async () => {
+    if (!assetUuid || timelineClearing) return;
+    if (!window.confirm(
+      "Clear this device's command activity from the timeline? Assignment history and the security audit log will be preserved.",
+    )) return;
+    setTimelineClearing(true);
+    const { data, error } = await supabase.rpc("clear_device_activity", { p_asset_id: assetUuid });
+    setTimelineClearing(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Could not clear activity",
+        description: error?.message ?? data?.error ?? "Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setCommands([]);
+    toast({
+      title: "Activity timeline cleared",
+      description: "Device command history was cleared. Assignment history and security audit records remain available.",
+    });
+  };
 
   const resendAckEmail = async () => {
     if (!asset || !asset.assignedEmail || !asset.ackToken) return;
@@ -715,6 +739,7 @@ export default function AssetDetail() {
             commands={commands}
             agentInstalledAt={(device?.created_at as string | null | undefined) ?? null}
             loading={historyLoading || deviceLoading}
+            onClear={isAdmin && !timelineClearing ? () => void clearActivityTimeline() : undefined}
           />
         </div>
 

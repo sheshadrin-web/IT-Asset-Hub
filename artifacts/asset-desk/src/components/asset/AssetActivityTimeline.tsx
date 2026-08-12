@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import TablePagination from "@/components/TablePagination";
@@ -78,11 +79,13 @@ function mapCommand(c: TimelineCommand): Omit<TimelineEvent, "id" | "ts" | "when
 
 export default function AssetActivityTimeline({
   history, commands, agentInstalledAt, loading,
+  onClear,
 }: {
   history: TimelineHistoryRow[];
   commands: TimelineCommand[];
   agentInstalledAt?: string | null;
   loading?: boolean;
+  onClear?: () => void;
 }) {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -146,7 +149,21 @@ export default function AssetActivityTimeline({
           <Activity className="h-4 w-4 text-muted-foreground" />
           Activity Timeline
           {events.length > 0 && (
-            <span className="ml-auto text-xs font-normal text-muted-foreground">{events.length} events</span>
+            <span className="ml-auto flex items-center gap-2">
+              <span className="text-xs font-normal text-muted-foreground">{events.length} events</span>
+              {onClear && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-red-600"
+                  onClick={onClear}
+                  data-testid="button-clear-activity-timeline"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Clear
+                </Button>
+              )}
+            </span>
           )}
         </CardTitle>
       </CardHeader>
