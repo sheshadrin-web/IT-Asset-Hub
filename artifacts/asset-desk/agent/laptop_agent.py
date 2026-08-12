@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.7"
+AGENT_VERSION       = "0.9.8"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -78,6 +78,8 @@ COMMAND_POLL_SEC    = max(2, int(os.environ.get("MILES_AGENT_COMMAND_POLL", "5")
 IDLE_POLL_SEC       = max(COMMAND_POLL_SEC, int(os.environ.get("MILES_AGENT_IDLE_POLL", "30")))
 BURST_WINDOW_SEC    = max(0, int(os.environ.get("MILES_AGENT_BURST_WINDOW", "60")))
 HTTP_TIMEOUT_SEC    = 30
+COMMAND_RETRY_BACKOFF_MIN_SEC = 5
+COMMAND_RETRY_BACKOFF_MAX_SEC = 120
 
 EMPLOYEE_EMAIL      = os.environ.get("MILES_EMPLOYEE_EMAIL", "")
 EMPLOYEE_ECODE      = os.environ.get("MILES_EMPLOYEE_ECODE", "")
@@ -660,19 +662,51 @@ def _headers() -> dict:
 
 
 def _post(path: str, body: dict) -> dict:
-    r = requests.post(f"{API_BASE}{path}", json=body, headers=_headers(), timeout=HTTP_TIMEOUT_SEC)
     try:
-        return r.json()
+        r = requests.post(
+            f"{API_BASE}{path}", json=body, headers=_headers(), timeout=HTTP_TIMEOUT_SEC
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"temporary communication failure during POST {path}: "
+                      f"{type(exc).__name__}: {exc}",
+        }
+    try:
+        response = r.json()
+        _win_log(f"HTTP POST {path} status={r.status_code} success={response.get('success') if isinstance(response, dict) else 'unknown'}")
+        return response
     except Exception:
-        return {"success": False, "error": f"http {r.status_code}: {r.text[:200]}"}
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"http {r.status_code}: {r.text[:200]}",
+        }
 
 
 def _get(path: str) -> dict:
-    r = requests.get(f"{API_BASE}{path}", headers=_headers(), timeout=HTTP_TIMEOUT_SEC)
     try:
-        return r.json()
+        r = requests.get(
+            f"{API_BASE}{path}", headers=_headers(), timeout=HTTP_TIMEOUT_SEC
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"temporary communication failure during GET {path}: "
+                      f"{type(exc).__name__}: {exc}",
+        }
+    try:
+        response = r.json()
+        _win_log(f"HTTP GET {path} status={r.status_code} success={response.get('success') if isinstance(response, dict) else 'unknown'}")
+        return response
     except Exception:
-        return {"success": False, "error": f"http {r.status_code}: {r.text[:200]}"}
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"http {r.status_code}: {r.text[:200]}",
+        }
 
 
 # ── wallpaper (cross-platform) ──────────────────────────────────────────────
@@ -1213,6 +1247,15 @@ def _enable_runtime_log() -> None:
         pass
 
 
+def _win_log(message: str) -> None:
+    """Write safe Windows diagnostics after stdout is redirected to agent.log."""
+    if IS_WIN:
+        try:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] {message}", flush=True)
+        except Exception:
+            pass
+
+
 # ── Branded full-screen lock kiosk + Windows account hardening ──────────────
 # On a hard-locked Windows device the re-asserted workstation lock is dismissed
 # the moment the user types their password, so we also paint an unmissable,
@@ -1230,11 +1273,18 @@ LOCK_SCREEN_ACCENT  = "#9db8ff"
 WIN_LOCK_CAPTION    = "Device Locked — Miles Education IT"
 # Standard end-user accounts disabled on a Windows hard lock. The account the
 # agent itself runs as is NEVER disabled (break-glass + keeps enforcement alive).
-WIN_LOCK_USERS      = ["Miles", "Miles-IT-Support"]
 WIN_SYSTEM_ACCOUNTS = {
     "system", "localsystem", "local service", "network service",
     "administrator", "defaultaccount", "defaultuser0", "wdagutilityaccount",
 }
+WIN_PROTECTED_ACCOUNTS = {
+    name.strip().lower()
+    for name in os.environ.get("MILES_PROTECTED_WINDOWS_USERS", "").split(",")
+    if name.strip()
+}
+_win_last_lock_error = ""
+_command_poll_degraded = False
+_command_retry_delay = 0
 
 
 def _win_is_admin() -> bool:
@@ -1251,13 +1301,46 @@ def _win_account_exists(user: str) -> bool:
     # `quser` may return DOMAIN\user. `net user` must receive the local
     # account name; this also prevents a domain-qualified session name from
     # making a valid local account look missing.
-    account = user.strip().rsplit("\\", 1)[-1]
+    account = _win_local_account_name(user)
+    if not account:
+        return False
     try:
         r = subprocess.run(["net", "user", account], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
         return r.returncode == 0
     except Exception:
         return False
+
+
+def _win_local_account_name(user: str) -> str | None:
+    """Resolve a Windows identity to a local SAM account, if it is one.
+
+    Win32_ComputerSystem.UserName returns COMPUTERNAME\\user for local
+    accounts. That is safe to administer when the qualifier is this machine;
+    DOMAIN\\user, AzureAD\\user, and Microsoft-account identities are not.
+    """
+    raw = (user or "").strip().lstrip(">")
+    if not raw or "@" in raw:
+        return None
+    if "\\" not in raw:
+        return raw
+    prefix, leaf = raw.split("\\", 1)
+    local_names = {
+        ".",
+        (os.environ.get("COMPUTERNAME") or "").strip().lower(),
+        socket.gethostname().strip().lower(),
+    }
+    return leaf if prefix.strip().lower() in local_names and leaf.strip() else None
+
+
+def _win_is_protected_account(user: str) -> bool:
+    leaf = user.strip().rsplit("\\", 1)[-1].lower()
+    return leaf in WIN_SYSTEM_ACCOUNTS or leaf in WIN_PROTECTED_ACCOUNTS
+
+
+def _win_is_local_account(user: str) -> bool:
+    account = _win_local_account_name(user)
+    return bool(account) and _win_account_exists(account)
 
 
 def _win_account_disabled(user: str) -> bool | None:
@@ -1270,8 +1353,8 @@ def _win_account_disabled(user: str) -> bool | None:
     """
     # PowerShell/CIM exposes the invariant boolean property even on localized
     # Windows, unlike parsing the localized `net user` text.
-    leaf = user.strip().rsplit("\\", 1)[-1]
-    if "\\" not in user and "@" not in user:
+    leaf = _win_local_account_name(user)
+    if leaf:
         safe_leaf = leaf.replace("'", "''")
         cim = _ps(
             f"$u=Get-CimInstance Win32_UserAccount -Filter "
@@ -1282,6 +1365,8 @@ def _win_account_disabled(user: str) -> bool | None:
             return True
         if cim == "ENABLED":
             return False
+    if not leaf:
+        return None
     try:
         r = subprocess.run(["net", "user", leaf], capture_output=True, text=True,
                            timeout=15, creationflags=_NO_WINDOW)
@@ -1308,17 +1393,18 @@ def _win_interactive_users() -> list[str]:
     users: list[str] = []
 
     def add_user(raw: str) -> None:
-        account = raw.strip().lstrip(">").rsplit("\\", 1)[-1]
-        normalized = account.lower()
-        if not account or normalized in WIN_SYSTEM_ACCOUNTS:
+        account = raw.strip().lstrip(">")
+        normalized = account.rsplit("\\", 1)[-1].lower()
+        if not account or _win_is_protected_account(account):
             return
-        if all(existing.lower() != normalized for existing in users):
+        if all(existing.rsplit("\\", 1)[-1].lower() != normalized for existing in users):
             users.append(account)
 
     # Win32_ComputerSystem gives the console identity without parsing localized
     # `quser` state words. It is available while a user is signed in.
     console = _ps("(Get-CimInstance Win32_ComputerSystem).UserName").strip()
     if console:
+        _win_log(f"Windows console identity discovered: {console}")
         add_user(console)
 
     lines: list[str] = []
@@ -1349,11 +1435,11 @@ def _win_interactive_users() -> list[str]:
             None,
         )
         # `Active` is English-only. If the state is localized, the console
-        # identity above or the configured-account fallback below still finds
-        # the employee account safely.
+        # identity above remains the only safe fallback.
         if state_index is not None and parts[state_index].lower() == "active":
             add_user(parts[0])
 
+    _win_log(f"Windows interactive users discovered: {users}")
     return users
 
 
@@ -1363,31 +1449,46 @@ def _win_disable_lock_accounts(users: list[str] | None = None) -> list[str]:
     A fresh lock discovers active users. Reassertion passes the persisted list,
     allowing the same accounts to remain disabled after reboot at sign-in.
     """
+    global _win_last_lock_error
+    _win_last_lock_error = ""
     disabled: list[str] = []
     me = (os.environ.get("USERNAME") or "").strip().lower()
     if users is not None:
         targets = users
     else:
         discovered = _win_interactive_users()
-        # Only use the configured break-glass/end-user names when Windows has
-        # no discoverable console session (for example, after reboot at the
-        # sign-in screen). Never disable unrelated configured accounts while a
-        # different active employee account was positively discovered.
-        targets = discovered or WIN_LOCK_USERS
+        # Never guess an employee account at the sign-in screen.
+        targets = discovered
     for u in targets:
-        account = u.strip().rsplit("\\", 1)[-1]
+        account = _win_local_account_name(u)
+        if not account:
+            _win_last_lock_error = (
+                f"Windows account '{u}' is not a local account; "
+                "Microsoft/Azure AD/domain sign-in cannot be blocked by local "
+                "net user administration."
+            )
+            continue
         normalized = account.lower()
-        if normalized == me or normalized in WIN_SYSTEM_ACCOUNTS:
+        if normalized == me or _win_is_protected_account(u):
             continue
-        if not _win_account_exists(account):
+        if not _win_is_local_account(u):
+            _win_last_lock_error = (
+                f"Windows account '{u}' is not a local account; "
+                "Microsoft/Azure AD/domain sign-in cannot be blocked by local "
+                "net user administration."
+            )
             continue
+        _win_log(f"Windows account disable attempt account={account}")
         try:
             r = subprocess.run(["net", "user", account, "/active:no"], capture_output=True,
                                text=True, timeout=15, creationflags=_NO_WINDOW)
             if r.returncode == 0 and _win_account_disabled(account) is True:
                 disabled.append(account)
+                _win_log(f"Windows account disabled and verified account={account}")
+            else:
+                _win_log(f"Windows account disable verification failed account={account} exit={r.returncode}")
         except Exception:
-            pass
+            _win_log(f"Windows account disable exception account={account}")
     return disabled
 
 
@@ -1396,7 +1497,7 @@ def _win_enable_lock_accounts(users: list[str] | None = None) -> list[str]:
     re-enable (still exist but could not be reactivated) so the caller can report
     an honest unlock status instead of silently swallowing a permission error."""
     failed: list[str] = []
-    for u in (users or WIN_LOCK_USERS):
+    for u in (users or []):
         account = u.strip().rsplit("\\", 1)[-1]
         if not _win_account_exists(account):
             continue
@@ -1444,6 +1545,7 @@ def _win_force_logoff(disabled: list[str]) -> bool:
     only touches sessions belonging to a disabled account, never other users."""
     if not disabled:
         return False
+    _win_log(f"Windows logoff attempt accounts={disabled}")
     targets = {u.strip().lower() for u in disabled}
     session_ids: list[str] = []
     try:
@@ -1474,8 +1576,9 @@ def _win_force_logoff(disabled: list[str]) -> bool:
             continue
         session_ids.append(sid)
         try:
-            subprocess.run(["logoff", sid], capture_output=True, text=True,
-                           timeout=15, creationflags=_NO_WINDOW)
+            result = subprocess.run(["logoff", sid], capture_output=True, text=True,
+                                    timeout=15, creationflags=_NO_WINDOW)
+            _win_log(f"Windows logoff session={sid} exit={result.returncode}")
         except Exception:
             pass
     if not session_ids:
@@ -1505,6 +1608,7 @@ def _win_force_logoff(disabled: list[str]) -> bool:
         sid = next((t for t in parts if t.isdigit()), None)
         if uname in targets and sid in session_ids:
             return False
+    _win_log(f"Windows session disappearance verified sessions={session_ids}")
     return True
 
 
@@ -2051,7 +2155,9 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
             # account we report 'requires_admin', change NOTHING, and never write a
             # 'locked' state the server can't confirm (so reconcile won't fight us).
             admin = _win_is_admin()
+            _win_log(f"Windows lock execution privilege admin={admin}")
             disabled = _win_disable_lock_accounts() if admin else []
+            _win_log(f"Windows lock accounts changed={disabled}")
             if not disabled:
                 if not admin:
                     msg = ("Cannot enforce the lock: blocking Windows sign-in requires the "
@@ -2060,10 +2166,11 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                            "service, then retry the lock.")
                 else:
                     msg = ("Cannot enforce the lock: no active interactive Windows account "
-                           "could be identified and disabled. The agent will not guess an "
-                           "account or disable SYSTEM/service accounts. Sign in to the "
-                           "employee account, ensure the agent is installed as the SYSTEM "
-                           "task, then retry the lock.")
+                           "could be identified and disabled. "
+                           + (_win_last_lock_error + " " if _win_last_lock_error else "")
+                           + "The agent will not guess an account or disable SYSTEM/service "
+                           "accounts. Sign in to the employee account, ensure the agent is "
+                           "installed as the SYSTEM task, then retry the lock.")
                 return ("requires_admin", None, msg)
             # At least one sign-in account was disabled → real enforcement.
             state = {"locked": True, "platform": "windows", "asset_tag": asset_tag,
@@ -2073,6 +2180,7 @@ def _apply_hard_lock(payload: dict | None = None) -> tuple[str, str | None, str 
                 state["screen_pid"] = _prev["screen_pid"]
             _win_set_legalnotice(WIN_LOCK_CAPTION, lock_msg)
             _write_lock_state(state)
+            _win_log(f"Windows lock state persisted disabled_users={disabled}")
             ok, _err = _win_lock_now()
             _spawn_lock_screen()
             # Drop the just-disabled user(s) to the sign-in screen so the lock takes
@@ -2604,7 +2712,7 @@ def _looks_revoked(resp: dict) -> bool:
     Force-Removed this device), never for a transient network/5xx error.
     agent_sync / agent_fetch_commands return success:false with this exact
     message once the token row is revoked."""
-    if not isinstance(resp, dict) or resp.get("success"):
+    if not isinstance(resp, dict) or resp.get("success") or resp.get("retryable"):
         return False
     err = str(resp.get("error", "")).lower()
     return "revoked token" in err or "invalid or revoked" in err
@@ -2643,19 +2751,53 @@ def poll_commands() -> tuple[bool, int]:
       - `processed` number of commands executed this poll — drives adaptive
                     polling, since any command means we should keep the fast
                     cadence so follow-up actions still apply within seconds."""
+    global _command_poll_degraded, _command_retry_delay
     _flush_command_status_outbox()
     resp = _get("/commands")
     if not resp.get("success"):
+        _win_log(f"command poll failed: {resp.get('error', 'unknown error')}")
+        if _looks_revoked(resp):
+            _win_log("agent token rejected: explicit revocation response")
+        if resp.get("retryable"):
+            if not _command_poll_degraded:
+                _win_log("temporary communication failure; agent remains installed")
+            _command_poll_degraded = True
+            _command_retry_delay = min(
+                COMMAND_RETRY_BACKOFF_MAX_SEC,
+                max(COMMAND_RETRY_BACKOFF_MIN_SEC, _command_retry_delay * 2 or COMMAND_RETRY_BACKOFF_MIN_SEC),
+            )
+            _win_log(f"retry scheduled in {_command_retry_delay}s")
         return _looks_revoked(resp), 0
+    if _command_poll_degraded:
+        _win_log("command poll recovered")
+    _win_log("agent token accepted; command poll response received")
+    _command_poll_degraded = False
+    _command_retry_delay = 0
     processed = 0
-    for cmd in resp.get("commands", []):
-        status, result, err = execute_command(cmd)
+    commands = resp.get("commands", [])
+    _win_log(f"commands fetched: {len(commands)}")
+    for cmd in commands:
+        command_id = str(cmd.get("id", "unknown"))
+        command_type = str(cmd.get("type", "unknown"))
+        _win_log(f"command fetched id={command_id} type={command_type}")
+        _win_log(f"command claim result=claimed id={command_id}")
+        try:
+            _win_log(f"command execution started id={command_id} type={command_type}")
+            status, result, err = execute_command(cmd)
+        except Exception as exc:
+            status, result, err = ("failed", None, f"{type(exc).__name__}: {exc}")
+            _win_log(f"command execution exception id={command_id}: {err}")
+        _win_log(
+            f"command execution finished id={command_id} status={status}"
+            + (f" error={err}" if err else "")
+        )
         _post_command_status({
             "id":     cmd["id"],
             "status": status,
             "result": result,
             "error":  err,
         })
+        _win_log(f"command status queued id={command_id} status={status}")
         processed += 1
         # A confirmed uninstall is terminal: the local files/token are gone, so
         # never run any further command claimed in the same batch. The run loop
@@ -2810,7 +2952,8 @@ def run_loop() -> int:
         # case more follow — then fall back to the cheap IDLE_POLL_SEC tick. This
         # is what cuts idle Edge Function invocations ~83% (5s → 30s).
         active = (time.monotonic() - last_activity) < BURST_WINDOW_SEC
-        time.sleep(active_sec if active else idle_sec)
+        normal_sleep = active_sec if active else idle_sec
+        time.sleep(max(normal_sleep, _command_retry_delay))
 
 
 # ── service install (auto-start after reboot) ───────────────────────────────
