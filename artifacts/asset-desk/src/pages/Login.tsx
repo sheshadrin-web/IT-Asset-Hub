@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, AlertCircle, CheckCircle2, Mail } from "lucide-react";
 import milesLogo from "/miles-logo.png";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabaseClient";
+import { getSiteUrl } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function Login() {
   const { signIn, configError } = useAuth();
@@ -16,6 +21,11 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState("");
+  const [forgotOpen,   setForgotOpen]   = useState(false);
+  const [forgotEmail,  setForgotEmail]  = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent,   setForgotSent]   = useState(false);
+  const [forgotError,  setForgotError]  = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +48,40 @@ export default function Login() {
       console.log("[Login] signIn success → navigating to /");
       setLocation("/");
     }
+  };
+
+  const openForgotPassword = () => {
+    setForgotEmail(email.trim());
+    setForgotError("");
+    setForgotSent(false);
+    setForgotOpen(true);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const requestedEmail = forgotEmail.trim();
+    if (!requestedEmail) {
+      setForgotError("Please enter your email address.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail)) {
+      setForgotError("Please enter a valid email address.");
+      return;
+    }
+
+    setForgotLoading(true);
+    setForgotError("");
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(requestedEmail, {
+      redirectTo: `${getSiteUrl()}/login`,
+    });
+    setForgotLoading(false);
+
+    if (resetError) {
+      setForgotError("We couldn't send the reset email right now. Please contact your IT Admin.");
+      return;
+    }
+
+    setForgotSent(true);
   };
 
   return (
@@ -112,7 +156,7 @@ export default function Login() {
                     type="button"
                     className="text-xs text-blue-600 hover:text-blue-700 font-medium hover:underline"
                     data-testid="link-forgot-password"
-                    onClick={() => setError("Please contact your IT Admin to reset your password.")}
+                    onClick={openForgotPassword}
                   >
                     Forgot password?
                   </button>
@@ -176,6 +220,85 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={forgotOpen}
+        onOpenChange={(open) => {
+          if (!forgotLoading) {
+            setForgotOpen(open);
+            if (!open) {
+              setForgotError("");
+              setForgotSent(false);
+            }
+          }
+        }}
+      >
+        <DialogContent className="w-[min(92vw,440px)] max-w-[440px]">
+          {forgotSent ? (
+            <>
+              <DialogHeader>
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                </div>
+                <DialogTitle className="text-center">Check your email</DialogTitle>
+                <DialogDescription className="text-center">
+                  If an account exists for <strong className="break-all text-foreground">{forgotEmail.trim()}</strong>, we sent a password-reset link.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
+                The link will take you to a secure page where you can create a new password. If you do not receive it, please contact your IT Admin.
+              </div>
+              <DialogFooter>
+                <Button type="button" className="w-full" onClick={() => setForgotOpen(false)}>
+                  Return to sign in
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50">
+                  <Mail className="h-6 w-6 text-blue-600" />
+                </div>
+                <DialogTitle className="text-center">Reset your password</DialogTitle>
+                <DialogDescription className="text-center">
+                  Enter your account email and we’ll send you a secure password-reset link.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleForgotPassword} className="space-y-4" noValidate>
+                <div className="space-y-1.5">
+                  <Label htmlFor="forgot-email">Email address</Label>
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => { setForgotEmail(e.target.value); setForgotError(""); }}
+                    placeholder="you@mileseducation.com"
+                    autoComplete="email"
+                    autoFocus
+                    disabled={forgotLoading}
+                    data-testid="input-forgot-email"
+                  />
+                </div>
+                {forgotError && (
+                  <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+                    <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500" />
+                    <p className="text-xs leading-relaxed text-red-700">{forgotError}</p>
+                  </div>
+                )}
+                <DialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+                  <Button type="submit" className="w-full" disabled={forgotLoading}>
+                    {forgotLoading ? "Sending reset link…" : "Send reset link"}
+                  </Button>
+                  <Button type="button" variant="ghost" className="w-full" onClick={() => setForgotOpen(false)} disabled={forgotLoading}>
+                    Cancel
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
