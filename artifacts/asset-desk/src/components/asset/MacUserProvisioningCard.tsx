@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 type ProvisioningStatus = "not_provisioned" | "pending" | "provisioning" | "provisioned" | "failed";
+type CredentialStatus = "prepared" | "available" | "consumed" | "expired" | "revoked";
 
 interface ProvisioningState {
   provisioning_status?: ProvisioningStatus;
@@ -22,6 +23,8 @@ interface ProvisioningState {
   requested_at?: string | null;
   provisioned_at?: string | null;
   last_error?: string | null;
+  credential_status?: CredentialStatus | null;
+  credential_expires_at?: string | null;
 }
 
 interface Props {
@@ -52,6 +55,10 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
+  const [revealBusy, setRevealBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabaseConfigured || !assetId) {
@@ -102,6 +109,26 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
     await load();
   }
 
+  async function revealCredential() {
+    setRevealBusy(true);
+    const { data, error } = await supabase.functions.invoke("provisioning-credentials", {
+      body: { asset_id: assetId },
+    });
+    setRevealBusy(false);
+    setRevealOpen(false);
+    if (error || !data?.success || typeof data.password !== "string") {
+      toast({
+        title: "Temporary password unavailable",
+        description: error?.message ?? data?.error ?? "The credential may have expired or already been consumed.",
+        variant: "destructive",
+      });
+      await load();
+      return;
+    }
+    setRevealedPassword(data.password);
+    setPasswordOpen(true);
+  }
+
   if (!isMac(device) && !state) return null;
 
   return (
@@ -146,6 +173,24 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
                     <CheckCircle2 className="h-4 w-4" /> User Provisioned
                   </p>
                   <p className="mt-1 text-[11px]">Provisioned at {formatDate(state?.provisioned_at)}.</p>
+                  <div className="mt-3 border-t border-emerald-200 pt-2">
+                    <p className="text-[11px] uppercase tracking-wide text-emerald-700">Temporary Login Password</p>
+                    {state?.credential_status === "available" ? (
+                      <Button
+                        size="sm"
+                        className="mt-1 h-8 gap-1.5"
+                        onClick={() => setRevealOpen(true)}
+                        disabled={revealBusy}
+                        data-testid="button-reveal-credential"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" /> Reveal Once
+                      </Button>
+                    ) : (
+                      <p className="mt-1 text-xs font-semibold text-emerald-800">
+                        {state?.credential_status === "expired" ? "Expired" : "Revealed / Consumed"}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : status === "failed" ? (
                 <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
@@ -210,7 +255,7 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
             </div>
           </div>
           <p className="text-xs text-amber-700">
-            The current agent channel does not yet provide secure one-time password delivery. The agent will fail closed rather than create an account with an unsafe or undisclosed password.
+            A strong temporary password will be generated locally by the Mac agent and made available to an authorized IT administrator exactly once after successful provisioning.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
@@ -218,6 +263,53 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Push User
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revealOpen} onOpenChange={setRevealOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reveal temporary password once?</DialogTitle>
+            <DialogDescription>
+              This temporary password will only be displayed once. Copy it now and provide it securely to the employee.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
+            Revealing consumes the credential immediately. It cannot be retrieved again after this action.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevealOpen(false)}>Cancel</Button>
+            <Button onClick={() => void revealCredential()} disabled={revealBusy}>
+              {revealBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Reveal Once
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={passwordOpen}
+        onOpenChange={(open) => {
+          setPasswordOpen(open);
+          if (!open) {
+            setRevealedPassword(null);
+            void load();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Temporary Login Password</DialogTitle>
+            <DialogDescription>
+              Copy this password now and provide it securely to the employee. It will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="select-all rounded-md border border-emerald-200 bg-emerald-50 px-4 py-4 text-center font-mono text-lg font-semibold tracking-wide text-emerald-900">
+            {revealedPassword}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setPasswordOpen(false)}>Done — Password Copied</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

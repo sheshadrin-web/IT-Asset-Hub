@@ -1,0 +1,59 @@
+"""Static contract checks for the credential boundary.
+
+Database/Edge integration tests require a Supabase test project and are not run
+against production from this workspace. These checks ensure future edits do not
+silently move plaintext into the command or audit paths.
+"""
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).parents[1]
+MIGRATION = (ROOT / "supabase/migrations/20260816000000_mac_user_provisioning.sql").read_text()
+AGENT = (ROOT / "agent/laptop_agent.py").read_text()
+AGENT_API = (ROOT / "supabase/functions/agent-api/index.ts").read_text()
+REVEAL_API = (ROOT / "supabase/functions/provisioning-credentials/index.ts").read_text()
+
+
+class MacProvisioningCredentialContractTests(unittest.TestCase):
+    def test_command_payload_has_no_password_field(self):
+        command_section = MIGRATION.split("INSERT INTO public.device_commands", 1)[1]
+        self.assertNotIn("'password'", command_section.split("RETURNING id", 1)[0])
+        self.assertIn("'employee_code'", command_section)
+        self.assertIn("'display_name'", command_section)
+        self.assertIn("'email'", command_section)
+
+    def test_agent_result_is_non_secret(self):
+        self.assertIn("Provisioned standard macOS user {username}", AGENT)
+        status_fn = AGENT.split("def _post_command_status", 1)[1].split("def _is_root", 1)[0]
+        self.assertNotIn("password", status_fn.lower())
+        self.assertNotIn("'password': result", status_fn)
+
+    def test_secret_has_dedicated_encrypted_transport(self):
+        self.assertIn("/credentials/prepare", AGENT_API)
+        self.assertIn("AES-GCM", AGENT_API)
+        self.assertIn("ciphertext", AGENT_API)
+        self.assertIn("device_user_credentials", MIGRATION)
+
+    def test_reveal_is_one_time_and_expiring(self):
+        self.assertIn("credential_status = 'consumed'", MIGRATION)
+        self.assertIn("credential_status = 'expired'", MIGRATION)
+        self.assertIn("credential_status = 'available'", MIGRATION)
+        self.assertIn("expires_at > now()", MIGRATION)
+        self.assertIn("reveal_provisioning_credential", REVEAL_API)
+
+    def test_reveal_requires_it_admin_and_never_returns_ciphertext_to_browser(self):
+        reveal_fn = MIGRATION.split("CREATE OR REPLACE FUNCTION public.reveal_provisioning_credential", 1)[1]
+        self.assertIn("super_admin','it_admin", reveal_fn)
+        self.assertIn("consumed_by", reveal_fn)
+        self.assertIn("await decryptCredential(result.data.ciphertext)", REVEAL_API)
+        self.assertNotIn("ciphertext });", REVEAL_API)
+
+    def test_protected_account_and_standard_role_contract_remain(self):
+        self.assertIn("miles-it-support", AGENT)
+        self.assertIn('"-role", "standard"', AGENT)
+        self.assertIn("dseditgroup", AGENT)
+
+
+if __name__ == "__main__":
+    unittest.main()

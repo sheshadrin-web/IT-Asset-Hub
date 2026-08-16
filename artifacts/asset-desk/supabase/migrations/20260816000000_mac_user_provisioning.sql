@@ -3,7 +3,8 @@
 --
 -- Asset assignment remains the ownership source of truth. This table only
 -- records the state of the local OS account requested for that assignment.
--- No password is accepted, stored, returned, or written to command/audit data.
+-- Passwords are stored only as Edge-Function-encrypted ciphertext in the
+-- dedicated credential table and are never returned by normal asset APIs.
 -- ============================================================================
 
 ALTER TABLE public.device_commands
@@ -41,6 +42,25 @@ CREATE TABLE IF NOT EXISTS public.device_user_provisioning (
   updated_at          timestamptz NOT NULL DEFAULT now(),
   UNIQUE (asset_id)
 );
+
+CREATE TABLE IF NOT EXISTS public.device_user_credentials (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provisioning_id   uuid NOT NULL UNIQUE REFERENCES public.device_user_provisioning(id) ON DELETE CASCADE,
+  command_id        uuid NOT NULL UNIQUE REFERENCES public.device_commands(id) ON DELETE CASCADE,
+  asset_id          uuid NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
+  employee_code     text NOT NULL,
+  os_username       text NOT NULL,
+  ciphertext        text NOT NULL,
+  credential_status text NOT NULL DEFAULT 'prepared'
+                    CHECK (credential_status IN ('prepared','available','consumed','expired','revoked')),
+  expires_at        timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+  revealed_at       timestamptz,
+  consumed_by       uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS device_user_credentials_expiry_idx
+  ON public.device_user_credentials(expires_at, credential_status);
+ALTER TABLE public.device_user_credentials ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS device_user_provisioning_status_idx
   ON public.device_user_provisioning(provisioning_status);
@@ -100,7 +120,21 @@ BEGIN
     'provisioned_at', v_row.provisioned_at,
     'last_error', v_row.last_error,
     'command_id', v_row.command_id,
-    'updated_at', v_row.updated_at
+    'updated_at', v_row.updated_at,
+    'credential_status', (
+      SELECT CASE
+        WHEN c.credential_status IN ('prepared','available')
+             AND c.expires_at <= now() THEN 'expired'
+        ELSE c.credential_status
+      END
+      FROM public.device_user_credentials c
+      WHERE c.provisioning_id = v_row.id
+    ),
+    'credential_expires_at', (
+      SELECT c.expires_at
+      FROM public.device_user_credentials c
+      WHERE c.provisioning_id = v_row.id
+    )
   );
 END $$;
 
@@ -188,12 +222,8 @@ BEGIN
     v_device.id, 'provision_user',
     jsonb_build_object(
       'employee_code', upper(v_profile.ecode),
-      'employee_name', v_profile.full_name,
-      'employee_email', v_profile.email,
-      'os_username', v_username,
-      'account_type', 'standard',
-      'permanent_it_admin', 'miles-it-support',
-      'credential_mode', 'secure_one_time_required'
+      'display_name', v_profile.full_name,
+      'email', v_profile.email
     ),
     v_uid
   ) RETURNING id INTO v_command;
@@ -246,6 +276,140 @@ BEGIN
   RETURN jsonb_build_object(
     'success', true, 'command_id', v_command, 'provisioning_id', v_row_id,
     'provisioning_status', 'pending', 'os_username', v_username
+  );
+END $$;
+
+CREATE OR REPLACE FUNCTION public.agent_prepare_provisioning_credential(
+  p_token text, p_command_id uuid, p_employee_code text,
+  p_os_username text, p_ciphertext text
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_asset_id uuid;
+  v_provisioning public.device_user_provisioning;
+  v_type text;
+BEGIN
+  v_asset_id := public._auth_agent(p_token);
+  IF v_asset_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'invalid or revoked token');
+  END IF;
+  IF p_ciphertext IS NULL OR length(p_ciphertext) < 24 OR length(p_ciphertext) > 4096 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'invalid credential envelope');
+  END IF;
+
+  SELECT command_type INTO v_type
+    FROM public.device_commands dc
+    JOIN public.managed_devices md ON md.id = dc.managed_device_id
+   WHERE dc.id = p_command_id AND md.laptop_asset_id = v_asset_id;
+  IF v_type <> 'provision_user' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'invalid provisioning command');
+  END IF;
+
+  SELECT * INTO v_provisioning
+    FROM public.device_user_provisioning
+   WHERE command_id = p_command_id
+     AND asset_id = v_asset_id
+     AND employee_code = upper(btrim(p_employee_code))
+     AND os_username = lower(btrim(p_os_username))
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'provisioning request mismatch');
+  END IF;
+
+  INSERT INTO public.device_user_credentials (
+    provisioning_id, command_id, asset_id, employee_code, os_username, ciphertext
+  ) VALUES (
+    v_provisioning.id, p_command_id, v_asset_id,
+    upper(btrim(p_employee_code)), lower(btrim(p_os_username)), p_ciphertext
+  )
+  ON CONFLICT (provisioning_id) DO UPDATE SET
+    ciphertext = EXCLUDED.ciphertext,
+    credential_status = 'prepared',
+    expires_at = now() + interval '24 hours',
+    revealed_at = NULL,
+    consumed_by = NULL;
+  RETURN jsonb_build_object('success', true);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.agent_confirm_provisioning_credential(
+  p_token text, p_command_id uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_asset_id uuid; v_changed integer;
+BEGIN
+  v_asset_id := public._auth_agent(p_token);
+  IF v_asset_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'invalid or revoked token');
+  END IF;
+  UPDATE public.device_user_credentials c
+     SET credential_status = 'available'
+    FROM public.device_user_provisioning p
+   WHERE c.command_id = p_command_id AND c.provisioning_id = p.id
+     AND c.asset_id = v_asset_id AND c.expires_at > now()
+     AND c.credential_status = 'prepared';
+  GET DIAGNOSTICS v_changed = ROW_COUNT;
+  IF v_changed = 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'credential not prepared');
+  END IF;
+  RETURN jsonb_build_object('success', true);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.agent_revoke_provisioning_credential(
+  p_token text, p_command_id uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_asset_id uuid;
+BEGIN
+  v_asset_id := public._auth_agent(p_token);
+  IF v_asset_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'invalid or revoked token');
+  END IF;
+  UPDATE public.device_user_credentials
+     SET credential_status = 'revoked'
+   WHERE command_id = p_command_id AND asset_id = v_asset_id
+     AND credential_status IN ('prepared','available');
+  RETURN jsonb_build_object('success', true);
+END $$;
+
+-- This is called only by the dedicated credential Edge Function. The
+-- ciphertext is atomically consumed before it leaves the database.
+CREATE OR REPLACE FUNCTION public.reveal_provisioning_credential(
+  p_actor_user_id uuid, p_asset_id uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_role text;
+  v_credential public.device_user_credentials;
+BEGIN
+  SELECT role INTO v_role
+    FROM public.profiles
+   WHERE id = p_actor_user_id AND status = 'active';
+  IF v_role NOT IN ('super_admin','it_admin') THEN
+    RAISE EXCEPTION 'forbidden: super_admin or it_admin required';
+  END IF;
+
+  UPDATE public.device_user_credentials
+     SET credential_status = 'expired'
+   WHERE asset_id = p_asset_id
+     AND credential_status IN ('prepared','available')
+     AND expires_at <= now();
+
+  SELECT * INTO v_credential
+    FROM public.device_user_credentials
+   WHERE asset_id = p_asset_id
+     AND credential_status = 'available'
+     AND expires_at > now()
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'credential unavailable or already consumed');
+  END IF;
+
+  UPDATE public.device_user_credentials
+     SET credential_status = 'consumed',
+         revealed_at = now(),
+         consumed_by = p_actor_user_id
+   WHERE id = v_credential.id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'ciphertext', v_credential.ciphertext,
+    'expires_at', v_credential.expires_at
   );
 END $$;
 
@@ -342,6 +506,12 @@ BEGIN
   END IF;
 
   IF v_ctype = 'provision_user' THEN
+    IF p_status IN ('failed','requires_admin') THEN
+      UPDATE public.device_user_credentials
+         SET credential_status = 'revoked'
+       WHERE command_id = p_command_id
+         AND credential_status IN ('prepared','available');
+    END IF;
     UPDATE public.device_user_provisioning
        SET provisioning_status = CASE
              WHEN p_status = 'completed' THEN 'provisioned'

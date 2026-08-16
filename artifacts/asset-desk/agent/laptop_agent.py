@@ -51,6 +51,8 @@ import shlex
 import tempfile
 import uuid
 import hashlib
+import secrets
+import string
 import threading
 from datetime import datetime, timezone
 
@@ -660,11 +662,30 @@ def _headers() -> dict:
 
 
 def _post(path: str, body: dict) -> dict:
-    r = requests.post(f"{API_BASE}{path}", json=body, headers=_headers(), timeout=HTTP_TIMEOUT_SEC)
     try:
-        return r.json()
+        r = requests.post(
+            f"{API_BASE}{path}", json=body, headers=_headers(), timeout=HTTP_TIMEOUT_SEC
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"temporary communication failure during POST {path}: "
+                     f"{type(exc).__name__}: {exc}",
+        }
+    try:
+        response = r.json()
+        _win_log(
+            f"HTTP POST {path} status={r.status_code} "
+            f"success={response.get('success') if isinstance(response, dict) else 'unknown'}"
+        )
+        return response
     except Exception:
-        return {"success": False, "error": f"http {r.status_code}: {r.text[:200]}"}
+        return {
+            "success": False,
+            "retryable": True,
+            "error": f"http {getattr(r, 'status_code', 'unknown')}: malformed response",
+        }
 
 
 def _get(path: str) -> dict:
@@ -1717,14 +1738,28 @@ MAC_PROTECTED_ACCOUNTS = frozenset({
 })
 
 
-def _mac_provision_user(payload: dict) -> tuple[str, str | None, str | None]:
+def _mac_temporary_password() -> str:
+    """Generate a strong password without using predictable process state."""
+    alphabet = string.ascii_letters + string.digits + "!#$%+,-.:=@^_"
+    required = [
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.digits),
+        secrets.choice("!#$%+,-.:=@^_"),
+    ]
+    required.extend(secrets.choice(alphabet) for _ in range(20))
+    secrets.SystemRandom().shuffle(required)
+    return "".join(required)
+
+
+def _mac_provision_user(
+    payload: dict, command_id: str | None = None,
+) -> tuple[str, str | None, str | None]:
     """Validate and (when safe credential delivery exists) create one standard user.
 
-    Phase 1 intentionally does not accept a password in a command payload. A
-    macOS account cannot be created for interactive use without a password,
-    and the current portal has no secure one-time secret delivery channel.
-    Failing before any account mutation is safer than generating an unknown
-    password or persisting a plaintext secret.
+    The password is generated locally and is never returned to the command
+    status path. It is sent only to the dedicated credential endpoint, then
+    passed to sysadminctl over stdin rather than as a process argument.
     """
     if not IS_MAC:
         return ("failed", None, "provision_user is macOS only; no account was changed")
@@ -1784,14 +1819,73 @@ def _mac_provision_user(payload: dict) -> tuple[str, str | None, str | None]:
             return ("failed", None, "existing username is not a compatible Miles employee account")
         return ("completed", f"standard employee account {username} already exists", None)
 
-    # No password is ever accepted from the server. Do this check before
-    # sysadminctl so a failed credential handoff can never leave a half-created
-    # account. The future secure handoff must be local to this helper and must
-    # not be added to command payloads, result messages, or logs.
-    return (
-        "failed", None,
-        "secure one-time credential delivery is not configured; no account was created",
-    )
+    if not command_id:
+        return ("failed", None, "provisioning command id is missing")
+
+    password = _mac_temporary_password()
+    try:
+        prepared = _post("/credentials/prepare", {
+            "command_id": command_id,
+            "employee_code": raw_code.upper(),
+            "os_username": username,
+            "password": password,
+        })
+        if not isinstance(prepared, dict) or not prepared.get("success"):
+            return ("failed", None, "secure credential preparation failed; no account was created")
+
+        # `-password -` makes sysadminctl read from stdin. The password never
+        # appears in argv, shell history, stdout/stderr, command result, or log.
+        display_name = str(payload.get("display_name") or raw_code).strip()[:200]
+        created = subprocess.run(
+            [
+                "sysadminctl", "-addUser", username,
+                "-fullName", display_name,
+                "-role", "standard",
+                "-password", "-",
+            ],
+            input=(password + "\n").encode("utf-8"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            creationflags=_NO_WINDOW,
+        )
+        if created.returncode != 0:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS standard account creation failed")
+
+        marker = subprocess.run(
+            ["dscl", ".", "-create", f"/Users/{username}",
+             "milesEmployeeCode", raw_code.upper()],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=15, creationflags=_NO_WINDOW,
+        )
+        if marker.returncode != 0:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS employee identity marker could not be recorded")
+
+        try:
+            import pwd
+            pwd.getpwnam(username)
+        except Exception:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS account creation could not be verified")
+
+        admin_check = subprocess.run(
+            ["dseditgroup", "-o", "checkmember", "-m", username, "admin"],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+        if "yes" in (admin_check.stdout or "").lower():
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "created employee account unexpectedly has admin privileges")
+
+        confirmed = _post("/credentials/confirm", {"command_id": command_id})
+        if not isinstance(confirmed, dict) or not confirmed.get("success"):
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "secure credential publication could not be confirmed")
+        return ("completed", f"Provisioned standard macOS user {username}", None)
+    finally:
+        # Remove the local reference as soon as the command path is complete.
+        password = ""
 
 
 def _mac_gui_argv(argv: list[str]) -> list[str]:
@@ -2522,7 +2616,7 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         with _lock_mutex:
             return _release_lock()
     if ctype == "provision_user":
-        return _mac_provision_user(cmd.get("payload") or {})
+        return _mac_provision_user(cmd.get("payload") or {}, str(cmd.get("id") or ""))
     if ctype == "notify_restart":
         payload = cmd.get("payload") or {}
         days = payload.get("uptime_days")

@@ -35,14 +35,24 @@ class MacUserProvisioningTests(unittest.TestCase):
         self.addCleanup(self.lin.stop)
 
     def test_employee_code_derives_lowercase_username(self):
-        with patch.object(agent, "_is_root", return_value=True):
+        with patch.object(agent, "_is_root", return_value=True), \
+             patch.object(agent, "_post", return_value={"success": False}):
             status, _, error = agent._mac_provision_user({
                 "employee_code": "MPE1340",
-                "os_username": "mpe1340",
                 "employee_name": "Test Employee",
-            })
+            }, "command-1")
         self.assertEqual(status, "failed")
-        self.assertIn("secure one-time credential", (error or "").lower())
+        self.assertIn("secure credential preparation", (error or "").lower())
+
+    def test_password_is_strong_and_cryptographically_random(self):
+        first = agent._mac_temporary_password()
+        second = agent._mac_temporary_password()
+        self.assertEqual(len(first), 24)
+        self.assertNotEqual(first, second)
+        self.assertRegex(first, r"[a-z]")
+        self.assertRegex(first, r"[A-Z]")
+        self.assertRegex(first, r"[0-9]")
+        self.assertRegex(first, r"[!#$%+,\-.:=@^_]")
 
     def test_invalid_employee_code_rejected(self):
         status, _, error = agent._mac_provision_user({
@@ -81,12 +91,13 @@ class MacUserProvisioningTests(unittest.TestCase):
 
     def test_no_plaintext_password_is_returned_or_logged(self):
         password = "NeverPutThisInACommand"
-        with patch.object(agent, "_is_root", return_value=True):
+        with patch.object(agent, "_is_root", return_value=True), \
+             patch.object(agent, "_post", return_value={"success": False}):
             status, result, error = agent._mac_provision_user({
                 "employee_code": "MPE1340",
-                "os_username": "mpe1340",
+                "display_name": "Test Employee",
                 "temporary_password": password,
-            })
+            }, "command-1")
         self.assertNotIn(password, result or "")
         self.assertNotIn(password, error or "")
         self.assertEqual(status, "failed")
