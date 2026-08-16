@@ -1707,6 +1707,93 @@ def _mac_human_users() -> list[str]:
     return users
 
 
+# These names are centrally protected for every macOS account operation. The
+# IT service account is deliberately included alongside Apple/system accounts:
+# User Push must never turn it into an employee account or alter its role.
+MAC_PROTECTED_ACCOUNTS = frozenset({
+    "root", "daemon", "nobody", "miles-it-support", "administrator",
+    "system", "loginwindow", "_windowserver", "_mbsetupuser", "_spotlight",
+    "_windowserver", "_coreaudiod", "_networkd", "_appleevents",
+})
+
+
+def _mac_provision_user(payload: dict) -> tuple[str, str | None, str | None]:
+    """Validate and (when safe credential delivery exists) create one standard user.
+
+    Phase 1 intentionally does not accept a password in a command payload. A
+    macOS account cannot be created for interactive use without a password,
+    and the current portal has no secure one-time secret delivery channel.
+    Failing before any account mutation is safer than generating an unknown
+    password or persisting a plaintext secret.
+    """
+    if not IS_MAC:
+        return ("failed", None, "provision_user is macOS only; no account was changed")
+
+    raw_code = str(payload.get("employee_code") or "").strip()
+    username = raw_code.lower()
+    if (
+        not raw_code
+        or len(raw_code) > 32
+        or not raw_code[0].isalpha()
+        or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for ch in raw_code)
+        or not username
+        or username in MAC_PROTECTED_ACCOUNTS
+    ):
+        return ("failed", None, "invalid or protected macOS employee username")
+
+    supplied_username = str(payload.get("os_username") or "").strip().lower()
+    if supplied_username and supplied_username != username:
+        return ("failed", None, "Employee Code and macOS username do not match")
+    if str(payload.get("account_type") or "standard").lower() != "standard":
+        return ("failed", None, "employee account must be a Standard User")
+    if username == "miles-it-support":
+        return ("failed", None, "protected account miles-it-support cannot be modified")
+    if not _is_root():
+        return (
+            "requires_admin", None,
+            "macOS user provisioning requires the agent to run as root",
+        )
+
+    # Check compatibility without changing an existing account. A local user
+    # lacking our marker is a conflict, not permission to take ownership.
+    try:
+        import pwd
+        existing = pwd.getpwnam(username)
+    except KeyError:
+        existing = None
+    except Exception as exc:
+        return ("failed", None, f"could not inspect macOS account: {type(exc).__name__}")
+
+    if existing is not None:
+        if username in MAC_PROTECTED_ACCOUNTS:
+            return ("failed", None, "protected macOS account cannot be modified")
+        try:
+            admin_check = subprocess.run(
+                ["dseditgroup", "-o", "checkmember", "-m", username, "admin"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "yes" in (admin_check.stdout or "").lower():
+                return ("failed", None, "existing username is an administrator; refusing conflict")
+        except Exception:
+            return ("failed", None, "could not verify existing account role safely")
+        marker = subprocess.run(
+            ["dscl", ".", "-read", f"/Users/{username}", "milesEmployeeCode"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if marker.returncode != 0 or raw_code.lower() not in marker.stdout.lower():
+            return ("failed", None, "existing username is not a compatible Miles employee account")
+        return ("completed", f"standard employee account {username} already exists", None)
+
+    # No password is ever accepted from the server. Do this check before
+    # sysadminctl so a failed credential handoff can never leave a half-created
+    # account. The future secure handoff must be local to this helper and must
+    # not be added to command payloads, result messages, or logs.
+    return (
+        "failed", None,
+        "secure one-time credential delivery is not configured; no account was created",
+    )
+
+
 def _mac_gui_argv(argv: list[str]) -> list[str]:
     """Wrap argv so it executes inside the console user's Aqua GUI session when the
     agent runs as root (a LaunchDaemon). NSWorkspace / osascript / killall must run
@@ -2434,6 +2521,8 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
     if ctype == "unlock":
         with _lock_mutex:
             return _release_lock()
+    if ctype == "provision_user":
+        return _mac_provision_user(cmd.get("payload") or {})
     if ctype == "notify_restart":
         payload = cmd.get("payload") or {}
         days = payload.get("uptime_days")

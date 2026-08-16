@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { supabase, supabaseConfigured } from "@/lib/supabaseClient";
 import DeviceAgentCard from "@/components/DeviceAgentCard";
+import MacUserProvisioningCard from "@/components/asset/MacUserProvisioningCard";
 import RecoveryCard from "@/components/asset/RecoveryCard";
 import AssetKpiCards from "@/components/asset/AssetKpiCards";
 import AssetActivityTimeline, {
@@ -950,6 +951,18 @@ export default function AssetDetail() {
           </Card>
 
           {/* ── Device Agent (Laptops only) ───────────────── */}
+          {asset.assetType === "Laptop" && asset.id && (
+            <MacUserProvisioningCard
+              assetId={asset.id}
+              assignedUser={{
+                name: asset.assignedTo,
+                email: asset.assignedEmail,
+                ecode: asset.assignedEcode,
+              }}
+              device={device}
+              isAdmin={isAdmin}
+            />
+          )}
           {(asset.assetType === "Laptop" || asset.assetType === "Desktop") && asset.id && <DeviceAgentCard assetId={asset.id} assetTag={asset.assetId} />}
 
           {/* ── Asset Recovery (only when a recovery is in progress) ─────── */}

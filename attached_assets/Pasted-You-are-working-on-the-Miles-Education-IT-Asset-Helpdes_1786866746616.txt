@@ -1,0 +1,645 @@
+You are working on the Miles Education IT Asset & Helpdesk Portal.
+
+I want you to build Phase 1 of a new feature called:
+
+USER PUSH / EMPLOYEE OS ACCOUNT PROVISIONING
+
+This first phase is for macOS only.
+
+IMPORTANT:
+Do not redesign the full portal.
+Do not break existing features.
+Do not change current acknowledgement behavior.
+Do not modify current Lock, Unlock, Restart, Wallpaper, Agent Update, Agent Registration, Agent Removal, Zoho integration, Asset Recovery, Windows agent behavior, or Ubuntu agent behavior unless a very small shared change is strictly required for this feature.
+
+==================================================
+BUSINESS GOAL
+==================================================
+
+IT prepares the laptop first.
+
+For macOS:
+
+1. IT installs macOS.
+2. IT creates a permanent administrator account:
+   miles-it-support
+3. IT installs MilesAgent using admin privileges.
+4. The agent runs as a system LaunchDaemon.
+5. The laptop appears online in the Asset Portal.
+6. IT assigns the laptop to an employee through the existing asset assignment flow.
+7. The existing acknowledgement email is sent exactly as it works today.
+8. Acknowledgement is independent from OS account provisioning.
+9. IT then explicitly clicks:
+   Push User to Device
+10. The portal sends a new command to MilesAgent.
+11. MilesAgent creates the assigned employee's macOS account.
+12. The employee account must be a Standard User.
+13. miles-it-support must remain Administrator and must never be modified.
+14. The portal shows whether provisioning succeeded or failed.
+
+Do NOT automatically acknowledge the asset when the employee logs into the Mac.
+
+Do NOT require acknowledgement before User Push.
+
+Do NOT automatically run User Push immediately after assignment.
+
+User Push must be an explicit IT action.
+
+==================================================
+IDENTITY DESIGN
+==================================================
+
+Employee Code must be the canonical identity.
+
+Do NOT use employee name as the unique identity because names may duplicate.
+
+Example:
+
+Employee Code:
+MPE1340
+
+Display Name:
+employee's full name
+
+Email:
+employee official company email
+
+macOS short username:
+mpe1340
+
+Rules:
+
+- derive the local username from Employee Code
+- convert Employee Code to lowercase
+- validate allowed username characters
+- reject invalid or malformed Employee Codes
+- never derive the actual OS username from employee display name
+- store Employee Code with the device-user provisioning record
+- employee display name is only display metadata
+
+==================================================
+PERMANENT PROTECTED IT ACCOUNT
+==================================================
+
+The permanent local IT admin account is:
+
+miles-it-support
+
+This account must be protected.
+
+The agent must NEVER:
+
+- delete it
+- disable it
+- rename it
+- demote it
+- change its home directory
+- overwrite it
+- treat it as the employee account
+- include it in employee lifecycle cleanup
+
+Also protect macOS system/service accounts such as:
+
+root
+daemon
+nobody
+and other normal macOS protected/system users
+
+Create centralized protected-account validation.
+
+==================================================
+CURRENT macOS AGENT MODEL
+==================================================
+
+The macOS agent is already installed as a system LaunchDaemon.
+
+Existing label:
+com.miles.agent
+
+The current laptop agent uses the existing command polling and execute_command() infrastructure.
+
+Add the new functionality through the same architecture.
+
+Do NOT build a second command channel.
+
+==================================================
+NEW AGENT COMMAND
+==================================================
+
+Add a new command type:
+
+provision_user
+
+Example logical payload:
+
+{
+  "employee_code": "MPE1340",
+  "display_name": "Employee Full Name",
+  "email": "employee@mileseducation.com"
+}
+
+The agent should derive the macOS username itself from Employee Code.
+
+Example:
+
+MPE1340
+->
+mpe1340
+
+Do not blindly trust a username sent by the frontend.
+
+==================================================
+SERVER-SIDE SECURITY
+==================================================
+
+The frontend must NOT be allowed to submit arbitrary employee data or arbitrary usernames.
+
+When IT clicks:
+
+Push User to Device
+
+the backend should:
+
+1. identify the asset
+2. identify the current assigned employee
+3. verify that assignment still exists
+4. fetch employee data from the existing Users table
+5. fetch Employee Code from the Users table
+6. build the command server-side
+7. send the command to the correct device agent
+
+The backend should reject provisioning if:
+
+- asset is unassigned
+- employee is inactive
+- Employee Code is missing
+- agent is not installed
+- asset is not macOS for Phase 1
+- another provisioning command is already pending
+- employee assignment changed while the request was being created
+
+==================================================
+macOS ACCOUNT CREATION
+==================================================
+
+Implement a dedicated macOS helper function for provisioning.
+
+Do not put the entire implementation directly inside execute_command().
+
+The employee account must be created as:
+
+Short username:
+lowercase Employee Code
+
+Real/display name:
+employee full name
+
+Account type:
+Standard User
+
+Home directory:
+normal macOS user home directory
+
+Shell:
+normal interactive shell
+
+The employee account must NOT belong to the admin group.
+
+Do not grant sudo/admin rights.
+
+The provisioning logic must:
+
+- verify the agent is running with root/system privileges
+- determine a safe unused local UID
+- never assume a fixed UID
+- verify the username does not already exist
+- verify there is no protected-account collision
+- create the local account safely
+- create/configure the home directory correctly
+- return a meaningful status to the portal
+
+If root/system privileges are unavailable, return:
+
+requires_admin
+
+Do not partially provision the user.
+
+==================================================
+IDEMPOTENCY
+==================================================
+
+Provision User must be safe to retry.
+
+Scenario:
+
+The account is created successfully but the portal misses the response due to a network issue.
+
+The same command is retried.
+
+The agent must not create a duplicate account.
+
+If the expected local account already exists and matches the same Employee Code provisioning mapping:
+
+return success such as:
+
+User already provisioned
+
+If the same username exists but belongs to a different identity:
+
+return failed
+
+Do not overwrite the existing account.
+
+==================================================
+PASSWORD DESIGN
+==================================================
+
+Do not use the employee's corporate password.
+
+Do not fetch or store Google, Zoho, Microsoft, Miles email, SSO, or any other employee password.
+
+For Phase 1 use a secure temporary local login credential design.
+
+Requirements:
+
+- do not log plaintext password
+- do not save plaintext password in command logs
+- do not include password in inventory sync
+- do not permanently store plaintext password in Supabase
+- use cryptographically secure random generation
+- if shown to IT, treat it as one-time sensitive information
+- clearly separate pilot behavior from production credential management
+
+If the existing architecture does not support secure one-time secret delivery, implement the provisioning framework safely and document the credential limitation instead of inventing a weak password scheme.
+
+==================================================
+DATABASE / PROVISIONING STATE
+==================================================
+
+Add the minimal database structure required to track device-user provisioning.
+
+Reuse existing assignment records wherever possible.
+
+Do not duplicate the whole asset assignment model.
+
+We need to track at least:
+
+asset
+assigned user
+employee_code
+platform
+os_username
+provisioning_status
+requested_at
+requested_by
+provisioned_at
+last_error
+related agent command if useful
+
+Suggested provisioning statuses:
+
+not_provisioned
+pending
+provisioning
+provisioned
+failed
+
+Use existing naming conventions if the project already has a similar pattern.
+
+Asset Assignment remains the source of truth for ownership/allocation.
+
+User Provisioning only represents the local OS account state.
+
+==================================================
+PORTAL UI
+==================================================
+
+Add an Employee OS Account / User Provisioning section to the Asset Detail page.
+
+Do not replace the existing User Assignment section.
+
+Do not mix acknowledgement and provisioning into one state.
+
+Show both independently.
+
+Example:
+
+Acknowledgement:
+Pending
+
+User Provisioning:
+Not Provisioned
+
+For an assigned macOS device with an eligible online agent:
+
+show:
+
+EMPLOYEE OS ACCOUNT
+
+Assigned Employee
+<Employee Name>
+
+Employee Code
+MPE1340
+
+macOS Username
+mpe1340
+
+Provisioning Status
+Not Provisioned
+
+[ Push User to Device ]
+
+==================================================
+CONFIRMATION DIALOG
+==================================================
+
+When IT clicks Push User to Device, show a confirmation dialog:
+
+Create employee account on this Mac?
+
+Employee:
+<Employee Full Name>
+
+Employee Code:
+MPE1340
+
+macOS Username:
+mpe1340
+
+Account Type:
+Standard User
+
+Permanent IT Administrator:
+miles-it-support
+
+Message:
+
+This will create a standard local employee account on the Mac.
+The Miles IT Support administrator account will not be modified.
+
+Buttons:
+
+Cancel
+Push User
+
+==================================================
+UI STATES
+==================================================
+
+NOT PROVISIONED
+
+Show:
+Push User to Device
+
+
+PENDING / PROVISIONING
+
+Show:
+Provisioning employee account...
+Waiting for device agent.
+
+Disable repeated clicks.
+
+
+PROVISIONED
+
+Show:
+
+User Provisioned
+
+Employee:
+<Employee Name>
+
+Employee Code:
+MPE1340
+
+OS Username:
+mpe1340
+
+Account Type:
+Standard User
+
+Provisioned At:
+<timestamp>
+
+
+FAILED
+
+Show:
+
+User Provisioning Failed
+
+Reason:
+<agent error>
+
+[ Retry User Push ]
+
+==================================================
+ACKNOWLEDGEMENT
+==================================================
+
+Do not modify the existing acknowledgement flow.
+
+Current desired behavior:
+
+Asset assigned
+->
+acknowledgement email sent
+
+The employee may acknowledge from the email.
+
+User Push is separate.
+
+Acknowledgement may still be Pending while the OS user has already been provisioned.
+
+Do not automatically acknowledge on login.
+
+Do not block User Push while acknowledgement is Pending.
+
+==================================================
+AUDIT LOG
+==================================================
+
+Add User Push / Provision User activity to the existing audit trail.
+
+Record:
+
+asset
+employee name
+employee code
+os username
+requested by
+requested timestamp
+agent result
+completion timestamp
+failure reason if any
+
+Never record plaintext passwords.
+
+==================================================
+PHASE 1 PLATFORM LIMIT
+==================================================
+
+For Phase 1:
+
+macOS only.
+
+If provision_user reaches Windows or Linux:
+
+return a clear unsupported-platform result.
+
+Do not implement Windows provisioning yet.
+
+Do not implement Ubuntu provisioning yet.
+
+==================================================
+DO NOT IMPLEMENT YET
+==================================================
+
+Do not implement:
+
+- employee deprovisioning
+- employee account deletion
+- automatic cleanup when asset becomes Available
+- HR separation-triggered user deletion
+- recovery-stage profile cleanup
+- Windows User Push
+- Ubuntu User Push
+
+Those belong to later phases.
+
+==================================================
+TEST DEVICE
+==================================================
+
+Use this as the first manual pilot target:
+
+Asset:
+MILES-LAP-752
+
+Platform:
+macOS
+
+Architecture:
+Apple Silicon arm64
+
+Permanent administrator:
+miles-it-support
+
+Test Employee Code:
+MPE1340
+
+Expected macOS username:
+mpe1340
+
+Before provisioning:
+
+miles-it-support exists
+mpe1340 does not exist
+
+After provisioning:
+
+miles-it-support must still exist and remain Administrator
+
+mpe1340 must exist
+
+mpe1340 must be a Standard User
+
+mpe1340 must be able to log in
+
+==================================================
+AUTOMATED TESTS
+==================================================
+
+Add tests for:
+
+1. MPE1340 converts to mpe1340
+2. invalid Employee Code is rejected
+3. miles-it-support is protected
+4. root is protected
+5. provision_user requires root/system privileges
+6. provisioned employee is not admin
+7. correct existing user returns idempotent success
+8. conflicting existing username fails safely
+9. unassigned asset cannot queue User Push
+10. inactive employee cannot be provisioned
+11. asset assignment must match employee at command creation time
+12. duplicate pending User Push commands are prevented
+13. Windows returns unsupported for this command
+14. Linux returns unsupported for this command
+15. current Lock tests still pass
+16. current Unlock tests still pass
+17. current Restart tests still pass
+18. acknowledgement tests remain unchanged and passing
+19. plaintext passwords never appear in logs or audit data
+
+==================================================
+AGENT SOURCE COPIES
+==================================================
+
+The repository may contain more than one distributed copy of laptop_agent.py.
+
+Inspect the existing repository structure first.
+
+Identify the source-of-truth agent file.
+
+If both the internal and public/downloadable copies must remain identical, update them consistently and add/check a validation mechanism to prevent drift.
+
+Do not manually allow copies to diverge.
+
+==================================================
+IMPLEMENTATION APPROACH
+==================================================
+
+Before editing:
+
+1. inspect the existing schema
+2. inspect asset assignment flow
+3. inspect Users/Employee Code fields
+4. inspect agent command table/API
+5. inspect command completion reporting
+6. inspect Asset Detail page
+7. inspect audit log
+8. inspect macOS helpers in laptop_agent.py
+9. identify the correct agent source-of-truth
+10. make a concise implementation plan
+
+Then implement this feature as an additive change.
+
+Avoid unrelated refactoring.
+
+==================================================
+FINAL VALIDATION
+==================================================
+
+Before declaring the work complete:
+
+- run existing tests
+- run new provisioning tests
+- run TypeScript build
+- run lint if configured
+- run Python syntax/tests
+- verify migrations
+- verify no unrelated changes
+- verify protected-account logic
+- verify employee account cannot become admin
+- verify acknowledgement behavior did not change
+- verify Lock/Unlock behavior did not change
+
+Then give me a final implementation report containing:
+
+1. files changed
+2. database migrations added
+3. backend/API changes
+4. new provision_user command flow
+5. macOS account creation logic
+6. protected account logic
+7. UI changes
+8. tests added
+9. manual test procedure for MILES-LAP-752 / MPE1340
+10. rollback procedure
+11. anything deferred to Phase 2
+
+Do not deploy automatically.
+Finish implementation and testing first, then wait for approval.
