@@ -1,0 +1,331 @@
+Continue from the existing macOS User Push implementation. Do NOT redesign or rebuild the feature.
+
+We are now ready for controlled end-to-end testing.
+
+TEST DEVICE
+Asset: MILES-LAP-752
+Platform: macOS / Apple Silicon arm64
+IT admin account that must remain protected: miles-it-support
+Test employee code: MPE1340
+Expected macOS username: mpe1340
+Expected account type: Standard User
+
+IMPORTANT BUSINESS FLOW
+
+IT prepares the Mac and creates/retains the permanent local administrator:
+    miles-it-support
+
+The Miles Agent is installed and runs under system/root management.
+
+After an asset is assigned to an employee in the Asset Hub portal, IT can separately click:
+    Push User to Device
+
+This action is independent from asset acknowledgement.
+
+DO NOT:
+- automatically acknowledge the asset
+- make acknowledgement depend on macOS login
+- change existing assignment/acknowledgement logic
+- modify miles-it-support
+- remove existing device lock/unlock behavior
+- make fleet-wide agent changes during this pilot
+
+Employee Code is the unique identity.
+
+For MPE1340:
+    macOS username = mpe1340
+
+==================================================
+PHASE 1 — VERIFY CURRENT IMPLEMENTATION
+==================================================
+
+Before deploying anything, inspect the current repository and report whether all required pieces from the previous implementation still exist and are internally consistent.
+
+Verify:
+
+1. Migration:
+   supabase/migrations/20260816000000_mac_user_provisioning.sql
+
+2. RPC:
+   public.request_user_provisioning(p_asset_id uuid)
+
+3. Provisioning tables:
+   device_user_provisioning
+   device_user_credentials
+
+4. device_commands supports:
+   provision_user
+
+5. Portal component:
+   MacUserProvisioningCard.tsx
+
+6. Agent supports:
+   provision_user
+
+7. Edge Functions:
+   agent-api
+   provisioning-credentials
+
+8. Required secret:
+   PROVISIONING_CREDENTIAL_KEY
+
+9. Source/public agent copies are synchronized.
+
+10. Existing assignment, acknowledgement, lock/unlock, recovery, audit, and agent functionality remains intact.
+
+Do not modify anything yet.
+
+Report PASS/FAIL for every item.
+
+==================================================
+PHASE 2 — VERIFY DEPLOYMENT STATE
+==================================================
+
+Inspect the current GitHub/Render/Supabase deployment configuration.
+
+Determine exactly which parts are automatically deployed after a GitHub commit:
+
+- Render application
+- Supabase database migrations
+- agent-api Edge Function
+- provisioning-credentials Edge Function
+- agent updates
+
+Do not assume Render deploys Supabase changes.
+
+Explicitly report what is automatic and what requires a separate deployment.
+
+Also verify whether the currently connected Supabase environment is production/live or a testing environment.
+
+Do NOT apply database changes until this is established.
+
+==================================================
+PHASE 3 — DATABASE READINESS
+==================================================
+
+Check whether the connected Supabase database already contains:
+
+public.request_user_provisioning(uuid)
+
+device_user_provisioning
+
+device_user_credentials
+
+provision_user support in device_commands
+
+If they already exist, do not recreate them.
+
+If they do not exist, identify the exact pending migration required.
+
+The previous preview error was:
+
+Could not find the function
+public.request_user_provisioning(p_asset_id)
+in the schema cache
+
+Therefore verify the actual remote database, not only the local migration file.
+
+If the migration must be applied, show me exactly what will change BEFORE applying it.
+
+Do not apply unrelated migrations.
+
+==================================================
+PHASE 4 — EDGE FUNCTION / SECRET READINESS
+==================================================
+
+Verify both Edge Functions are ready:
+
+agent-api
+provisioning-credentials
+
+Verify that:
+
+PROVISIONING_CREDENTIAL_KEY
+
+is configured securely in the target Supabase environment.
+
+Never display the value of this secret.
+
+If missing, stop and tell me that configuration is required.
+
+Never place this secret in:
+- source code
+- GitHub
+- frontend environment variables
+- command payloads
+- logs
+- audit records
+
+==================================================
+PHASE 5 — SECURITY CHECK
+==================================================
+
+Before testing, verify:
+
+miles-it-support is protected.
+
+The provisioning flow must NEVER:
+- delete it
+- rename it
+- disable it
+- demote it
+- change its password
+- lock the account as part of User Push
+
+Also protect:
+root
+daemon
+nobody
+
+The employee account must be a STANDARD macOS account.
+
+No administrator privileges.
+
+Password must:
+- be generated locally by the Mac agent
+- be cryptographically random
+- never appear in device_commands
+- never appear in command results
+- never appear in logs
+- never appear in audit/activity timeline
+- never be stored plaintext in Supabase
+- be encrypted before database storage
+- be revealable only once by authorized IT admins
+- expire according to the existing implementation
+
+==================================================
+PHASE 6 — PRE-TEST VALIDATION
+==================================================
+
+Before allowing the Push User button to execute, verify that MILES-LAP-752 is:
+
+- assigned to MPE1340
+- assigned employee is active
+- macOS
+- managed by agent
+- online
+- reporting a compatible agent version
+- not already provisioned for MPE1340
+
+Expected portal display:
+
+Employee Code:
+MPE1340
+
+macOS Username:
+mpe1340
+
+Account Type:
+Standard User
+
+Status:
+Not Provisioned
+
+Do not use employee name as the local username.
+
+==================================================
+PHASE 7 — CONTROLLED PILOT
+==================================================
+
+Do NOT automatically execute User Push.
+
+Prepare everything until the portal is ready for me to manually click:
+
+Push User to Device
+
+Then STOP and tell me:
+
+READY FOR MILES-LAP-752 PILOT
+
+I will manually click the button.
+
+After I click it, inspect the command/provisioning state and help me validate each stage.
+
+Expected sequence:
+
+requested
+→ command queued
+→ agent receives provision_user
+→ credential prepared securely
+→ local standard user mpe1340 created
+→ Employee Code marker stored
+→ account verified
+→ credential confirmed
+→ provisioning status = provisioned
+→ temporary password available for one-time IT reveal
+
+==================================================
+PHASE 8 — POST-PUSH VALIDATION
+==================================================
+
+After the command completes, verify:
+
+1. mpe1340 exists on MILES-LAP-752.
+2. Display name matches assigned employee.
+3. Account is Standard User.
+4. Account is NOT administrator.
+5. miles-it-support still exists.
+6. miles-it-support remains administrator.
+7. Existing agent remains running.
+8. Device remains managed and online.
+9. Asset assignment remains MPE1340.
+10. Asset acknowledgement status is UNCHANGED.
+11. No plaintext temporary password exists in logs/database/audit/commands.
+12. Portal shows Provisioned.
+13. Reveal Once is available only to authorized IT.
+14. Second reveal is rejected after first consumption.
+
+==================================================
+FAIL-CLOSED RULE
+==================================================
+
+If ANY prerequisite fails:
+
+DO NOT create the employee account.
+
+Do not weaken security to make the test pass.
+
+Instead report:
+
+BLOCKED
+Reason:
+Exact failing component:
+Required correction:
+
+Do not silently patch production data.
+
+==================================================
+CHANGE CONTROL
+==================================================
+
+Do not redesign the portal.
+
+Do not change unrelated code.
+
+Do not change Windows or Ubuntu behavior.
+
+Do not deploy fleet-wide agent updates.
+
+Do not delete existing migrations.
+
+Do not reset the Supabase database.
+
+Do not use db reset.
+
+Do not expose credentials.
+
+Do not modify miles-it-support.
+
+Do not alter acknowledgement logic.
+
+Before any production database migration, Edge Function deployment, or other irreversible/live operation, STOP and show me:
+
+1. What will be changed
+2. Target environment
+3. Exact migration/function involved
+4. Rollback considerations
+5. Why it is required
+
+Wait for my approval before performing that live operation.
+
+Start with PHASE 1 and PHASE 2 only.
