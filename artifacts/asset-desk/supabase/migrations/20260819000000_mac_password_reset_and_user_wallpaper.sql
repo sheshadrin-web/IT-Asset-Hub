@@ -158,10 +158,13 @@ END $$;
 CREATE OR REPLACE FUNCTION public.reveal_user_password_reset(
   p_actor_user_id uuid, p_asset_id uuid
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_role text; v_row record;
+DECLARE v_uid uuid := auth.uid(); v_role text; v_row record;
 BEGIN
+  IF v_uid IS NULL OR p_actor_user_id IS DISTINCT FROM v_uid THEN
+    RAISE EXCEPTION 'caller identity mismatch';
+  END IF;
   SELECT role INTO v_role FROM public.profiles
-   WHERE id = p_actor_user_id AND status = 'active';
+   WHERE id = v_uid AND status = 'active';
   IF v_role NOT IN ('super_admin','it_admin') THEN RAISE EXCEPTION 'forbidden: super_admin or it_admin required'; END IF;
   UPDATE public.device_user_password_resets SET reset_status = 'expired'
    WHERE asset_id = p_asset_id AND reset_status = 'available' AND expires_at <= now();
@@ -170,7 +173,7 @@ BEGIN
      AND expires_at > now() ORDER BY created_at DESC LIMIT 1 FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'reset credential unavailable or already consumed'); END IF;
   UPDATE public.device_user_password_resets
-     SET reset_status = 'consumed', revealed_at = now(), consumed_by = p_actor_user_id
+     SET reset_status = 'consumed', revealed_at = now(), consumed_by = v_uid
    WHERE id = v_row.id;
   RETURN jsonb_build_object('success', true, 'ciphertext', v_row.ciphertext,
                             'expires_at', v_row.expires_at);
@@ -355,4 +358,17 @@ BEGIN
   RETURN jsonb_build_object('success', true);
 END $$;
 
+REVOKE ALL ON FUNCTION public.request_user_password_reset(uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.request_user_password_reset(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.reveal_user_password_reset(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.reveal_user_password_reset(uuid, uuid) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.agent_reveal_password_reset(text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.agent_reveal_password_reset(text, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.agent_confirm_password_reset(text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.agent_confirm_password_reset(text, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.agent_report_user_wallpaper(text, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.agent_report_user_wallpaper(text, text, text, text) TO service_role;

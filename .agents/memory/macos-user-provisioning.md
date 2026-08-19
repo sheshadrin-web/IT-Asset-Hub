@@ -14,3 +14,9 @@ Password resets should use a separate encrypted reset credential record linked t
 **Why:** A reset credential must not conflict with the one-time provisioning credential, and revealing it before a successful reset could expose a password that was never applied.
 
 **How to apply:** Keep reset plaintext out of command payloads, audit metadata, and database columns; validate assignment/provisioning identity server-side and independently revalidate marker, account completeness, UID/home, and standard role on the Mac.
+
+Security-sensitive browser RPCs must bind authorization to `auth.uid()`; caller-supplied actor IDs are only compatibility inputs and must equal the authenticated identity. Agent-token RPCs should be executable only by the Edge Function's service role.
+
+**Why:** SECURITY DEFINER functions otherwise allow identity spoofing, and broad EXECUTE grants can bypass the intended Edge Function boundary.
+
+**How to apply:** Revoke PUBLIC/anon access to agent-only functions, restrict portal functions to authenticated callers with role checks, and set consumption/audit actor fields from `auth.uid()`.

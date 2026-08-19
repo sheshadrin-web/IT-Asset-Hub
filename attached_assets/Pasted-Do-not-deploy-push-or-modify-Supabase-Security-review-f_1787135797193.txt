@@ -1,0 +1,89 @@
+Do not deploy, push, or modify Supabase.
+
+Security review found a blocker in:
+
+20260819000000_mac_password_reset_and_user_wallpaper.sql
+
+The function:
+
+public.reveal_user_password_reset(
+  p_actor_user_id uuid,
+  p_asset_id uuid
+)
+
+currently trusts caller-supplied p_actor_user_id to look up the actor's role.
+
+That is unsafe for a SECURITY DEFINER credential reveal function.
+
+FIX REQUIRED
+
+1. Do not trust arbitrary p_actor_user_id.
+
+Preferred design:
+
+- remove p_actor_user_id from the function signature entirely
+- derive actor identity only from:
+
+  auth.uid()
+
+OR, if compatibility requires retaining p_actor_user_id:
+
+- require p_actor_user_id = auth.uid()
+- reject when they differ
+
+2. Authorization must be based on the authenticated caller only.
+
+Require active role:
+
+super_admin
+or
+it_admin
+
+3. consumed_by must be set using auth.uid(), not a caller-provided UUID.
+
+4. Review EXECUTE privileges for ALL new sensitive functions in this migration.
+
+Explicitly:
+
+REVOKE ALL ON FUNCTION ... FROM PUBLIC;
+REVOKE ALL ON FUNCTION ... FROM anon;
+
+Then grant only the minimum required role.
+
+The browser/authenticated portal should only be able to call the request/status operations it genuinely needs.
+
+Agent-only credential retrieval/confirmation functions must not be exposed more broadly than necessary.
+
+If reveal/decryption is intended to pass through the provisioning-credentials Edge Function, prefer keeping the raw ciphertext reveal RPC inaccessible directly to normal authenticated browser users and let the trusted backend/Edge Function invoke it through the appropriate privileged path.
+
+5. Do not weaken the existing agent-token checks.
+
+6. Keep existing lock/unlock branches exactly unchanged.
+
+7. Also verify that one user cannot consume another administrator's reset credential by supplying their UUID.
+
+ADD TESTS FOR:
+
+- normal user cannot reveal reset credential
+- it_admin can reveal own authorized reset
+- super_admin can reveal own authorized reset
+- caller cannot spoof another admin UUID
+- consumed_by always equals authenticated actor
+- second reveal fails
+- PUBLIC/anon cannot execute sensitive reset reveal functions
+- existing provisioning reveal remains unchanged
+
+Run:
+- focused tests
+- full suite
+- SQL/static contract checks
+- git diff --check
+
+Do not commit/push/deploy.
+
+Return the exact SQL privilege model for:
+- request_user_password_reset
+- agent_reveal_password_reset
+- agent_confirm_password_reset
+- reveal_user_password_reset
+- agent_report_user_wallpaper

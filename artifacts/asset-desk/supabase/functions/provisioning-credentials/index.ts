@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const url = Deno.env.get("SUPABASE_URL")!;
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 const db = createClient(url, serviceKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -55,12 +56,16 @@ Deno.serve(async (req) => {
     const { data: userData, error: userError } = await db.auth.getUser(jwt);
     if (userError || !userData.user) return json({ success: false, error: "authentication required" }, 401);
     const body = await req.json().catch(() => ({}));
+    const userDb = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    });
     if (body.purpose === "password_reset") {
       if (typeof body.password !== "string" || body.password.length < 20) {
         return json({ success: false, error: "invalid temporary password" }, 400);
       }
       const ciphertext = await encryptCredential(body.password);
-      const prepared = await db.rpc("request_user_password_reset", {
+      const prepared = await userDb.rpc("request_user_password_reset", {
         p_asset_id: body.asset_id,
         p_ciphertext: ciphertext,
       });
@@ -69,7 +74,12 @@ Deno.serve(async (req) => {
       }
       return json(prepared.data);
     }
-    const result = await db.rpc("reveal_provisioning_credential", {
+    const result = body.purpose === "password_reset"
+      ? await userDb.rpc("reveal_user_password_reset", {
+        p_actor_user_id: userData.user.id,
+        p_asset_id: body.asset_id,
+      })
+      : await db.rpc("reveal_provisioning_credential", {
       p_actor_user_id: userData.user.id,
       p_asset_id: body.asset_id,
     });
