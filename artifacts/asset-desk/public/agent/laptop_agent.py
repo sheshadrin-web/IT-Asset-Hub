@@ -1844,14 +1844,90 @@ def _mac_temporary_password() -> str:
     return "".join(required)
 
 
+_MAC_REQUIRED_ACCOUNT_FIELDS = (
+    "UniqueID", "PrimaryGroupID", "NFSHomeDirectory", "UserShell", "RealName",
+)
+
+
+def _mac_dscl_record(username: str) -> tuple[bool, str]:
+    """Read the fields needed to distinguish a complete account from a partial record."""
+    try:
+        result = subprocess.run(
+            ["dscl", ".", "-read", f"/Users/{username}", *_MAC_REQUIRED_ACCOUNT_FIELDS],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+    except OSError:
+        return False, ""
+    return (
+        result.returncode == 0
+        and all(f"{field}:" in (result.stdout or "") for field in _MAC_REQUIRED_ACCOUNT_FIELDS),
+        result.stdout or "",
+    )
+
+
+def _mac_employee_marker(username: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["dscl", ".", "-read", f"/Users/{username}", "milesEmployeeCode"],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("milesEmployeeCode:"):
+            return line.split(":", 1)[1].strip().upper()
+    return None
+
+
+def _mac_is_admin(username: str) -> bool | None:
+    try:
+        result = subprocess.run(
+            ["dseditgroup", "-o", "checkmember", "-m", username, "admin"],
+            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+        )
+    except OSError:
+        return None
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if result.returncode != 0 and "yes" not in output and "no" not in output:
+        return None
+    return "yes" in output and "no" not in output
+
+
+def _mac_cleanup_marked_partial(username: str) -> bool:
+    """Remove only a matching partial Directory Services record.
+
+    The home directory is deliberately never removed. A normal existing account
+    cannot reach this function because the caller requires the Miles marker and
+    incomplete account fields first.
+    """
+    try:
+        result = subprocess.run(
+            ["dscl", ".", "-delete", f"/Users/{username}"],
+            capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def _mac_safe_creation_reason(stderr: str, password: str) -> str:
+    """Return bounded diagnostics without allowing the temporary password through."""
+    reason = " ".join((stderr or "").split()).replace(password, "[redacted]")
+    return reason[:240] or "unknown sysadminctl error"
+
+
 def _mac_provision_user(
     payload: dict, command_id: str | None = None,
 ) -> tuple[str, str | None, str | None]:
-    """Validate and (when safe credential delivery exists) create one standard user.
+    """Validate and create one standard user with complete Directory Services fields.
 
-    The password is generated locally and is never returned to the command
-    status path. It is sent only to the dedicated credential endpoint, then
-    passed to sysadminctl over stdin rather than as a process argument.
+    macOS versions tested here do not document ``-password -`` as stdin input.
+    The supported sysadminctl form therefore receives the password as a direct
+    argument for the shortest possible subprocess lifetime. No shell is used,
+    so it cannot enter shell history; stdout/stderr and command results remain
+    sanitized and the credential is never sent in the device command.
     """
     if not IS_MAC:
         return ("failed", None, "provision_user is macOS only; no account was changed")
@@ -1883,6 +1959,7 @@ def _mac_provision_user(
 
     # Check compatibility without changing an existing account. A local user
     # lacking our marker is a conflict, not permission to take ownership.
+    partial_marked = False
     try:
         import pwd
         existing = pwd.getpwnam(username)
@@ -1891,25 +1968,37 @@ def _mac_provision_user(
     except Exception as exc:
         return ("failed", None, f"could not inspect macOS account: {type(exc).__name__}")
 
-    if existing is not None:
+    marker = _mac_employee_marker(username)
+    complete, _ = _mac_dscl_record(username)
+    if marker == raw_code.upper() and not complete:
+        partial_marked = True
+    elif existing is not None:
         if username in MAC_PROTECTED_ACCOUNTS:
             return ("failed", None, "protected macOS account cannot be modified")
-        try:
-            admin_check = subprocess.run(
-                ["dseditgroup", "-o", "checkmember", "-m", username, "admin"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if "yes" in (admin_check.stdout or "").lower():
-                return ("failed", None, "existing username is an administrator; refusing conflict")
-        except Exception:
+        admin_check = _mac_is_admin(username)
+        if admin_check is None:
             return ("failed", None, "could not verify existing account role safely")
-        marker = subprocess.run(
-            ["dscl", ".", "-read", f"/Users/{username}", "milesEmployeeCode"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if marker.returncode != 0 or raw_code.lower() not in marker.stdout.lower():
+        if admin_check:
+            return ("failed", None, "existing username is an administrator; refusing conflict")
+        if marker != raw_code.upper() or not complete:
             return ("failed", None, "existing username is not a compatible Miles employee account")
         return ("completed", f"standard employee account {username} already exists", None)
+
+    if partial_marked:
+        if not _mac_cleanup_marked_partial(username):
+            return (
+                "failed", None,
+                "matching partial Miles account found but its Directory Services record could not be safely removed",
+            )
+        try:
+            import pwd
+            existing = pwd.getpwnam(username)
+        except KeyError:
+            existing = None
+        except Exception:
+            return ("failed", None, "could not verify existing account role safely")
+        if existing is not None:
+            return ("failed", None, "matching partial Miles account cleanup did not remove the account record")
 
     if not command_id:
         return ("failed", None, "provisioning command id is missing")
@@ -1925,25 +2014,25 @@ def _mac_provision_user(
         if not isinstance(prepared, dict) or not prepared.get("success"):
             return ("failed", None, "secure credential preparation failed; no account was created")
 
-        # `-password -` makes sysadminctl read from stdin. The password never
-        # appears in argv, shell history, stdout/stderr, command result, or log.
         display_name = str(payload.get("display_name") or raw_code).strip()[:200]
         created = subprocess.run(
             [
                 "sysadminctl", "-addUser", username,
                 "-fullName", display_name,
-                "-role", "standard",
-                "-password", "-",
+                "-password", password,
             ],
-            input=(password + "\n").encode("utf-8"),
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
             timeout=60,
             creationflags=_NO_WINDOW,
         )
         if created.returncode != 0:
             _post("/credentials/revoke", {"command_id": command_id})
-            return ("failed", None, "macOS standard account creation failed")
+            return (
+                "failed", None,
+                f"sysadminctl account creation failed: {_mac_safe_creation_reason(created.stderr, password)}",
+            )
 
         marker = subprocess.run(
             ["dscl", ".", "-create", f"/Users/{username}",
@@ -1960,13 +2049,21 @@ def _mac_provision_user(
             pwd.getpwnam(username)
         except Exception:
             _post("/credentials/revoke", {"command_id": command_id})
-            return ("failed", None, "macOS account creation could not be verified")
+            return ("failed", None, "macOS account creation could not be verified: passwd record is incomplete")
 
-        admin_check = subprocess.run(
-            ["dseditgroup", "-o", "checkmember", "-m", username, "admin"],
-            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-        )
-        if "yes" in (admin_check.stdout or "").lower():
+        complete, _ = _mac_dscl_record(username)
+        if not complete:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS account creation could not be verified: Directory Services record is incomplete")
+        if _mac_employee_marker(username) != raw_code.upper():
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS employee identity marker could not be verified")
+
+        admin_check = _mac_is_admin(username)
+        if admin_check is None:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "macOS account role could not be verified safely")
+        if admin_check:
             _post("/credentials/revoke", {"command_id": command_id})
             return ("failed", None, "created employee account unexpectedly has admin privileges")
 

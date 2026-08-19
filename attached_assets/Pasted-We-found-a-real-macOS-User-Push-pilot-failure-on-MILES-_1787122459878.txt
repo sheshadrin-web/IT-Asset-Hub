@@ -1,0 +1,211 @@
+We found a real macOS User Push pilot failure on MILES-LAP-752.
+
+Do not deploy anything yet.
+Do not modify production Supabase.
+Do not trigger another User Push.
+Do not touch acknowledgement logic.
+
+CURRENT FAILURE
+
+Portal requested:
+
+Employee Code: MPE000
+macOS username: mpe000
+Account type: Standard User
+
+The latest agent received provision_user correctly, but returned:
+
+macOS account creation could not be verified
+
+On the Mac:
+
+dscl . -read /Users/mpe000
+
+shows a PARTIAL Directory Services record with:
+
+RecordName: mpe000
+milesEmployeeCode: MPE000
+GeneratedUID present
+
+But:
+
+id mpe000
+
+returns:
+
+id: mpe000: no such user
+
+And:
+
+dscl . -read /Users/mpe000 UniqueID PrimaryGroupID NFSHomeDirectory UserShell RealName
+
+returns missing keys for:
+
+UniqueID
+PrimaryGroupID
+NFSHomeDirectory
+UserShell
+RealName
+
+CURRENT AGENT IMPLEMENTATION
+
+_mac_provision_user currently runs:
+
+sysadminctl -addUser <username>
+-fullName <display_name>
+-role standard
+-password -
+
+with password sent over stdin.
+
+MACOS HELP OUTPUT
+
+sysadminctl -help reports:
+
+-addUser <user name>
+[-fullName <full name>]
+[-UID <user ID>]
+[-GID <group ID>]
+[-shell <path to shell>]
+[-password <user password>]
+[-hint <user hint>]
+[-home <full path to home>]
+[-admin]
+[-roleAccount]
+[-picture <full path to user image>]
+(interactive || -adminUser ...)
+
+Important observations:
+
+1. There is NO documented:
+-role standard
+
+Standard user appears to be the default when -admin is omitted.
+
+2. The help documents:
+-password <user password>
+
+It does NOT document:
+-password -
+as reading the password from stdin.
+
+TASK
+
+Trace and correct the macOS account creation implementation.
+
+Requirements:
+
+1. Remove the invalid:
+-role standard
+
+2. Do NOT add:
+-admin
+
+The employee account must remain a standard non-admin user.
+
+3. Determine a macOS-supported secure way for a root LaunchDaemon to create the account while keeping the generated temporary password out of:
+
+- command payload
+- command result
+- logs
+- audit records
+- Supabase plaintext
+- shell history
+- normal process arguments if technically possible
+
+Do not silently weaken the existing secret-security model.
+
+If sysadminctl cannot securely receive the password from stdin on this macOS version, explicitly identify that limitation and implement the safest supported mechanism.
+
+Prefer a real supported macOS account-creation method over constructing incomplete dscl records manually.
+
+4. A successfully created account must be a complete macOS account that passes ALL of:
+
+pwd.getpwnam(username)
+id username
+dscl . -read /Users/<username> UniqueID
+dscl . -read /Users/<username> PrimaryGroupID
+dscl . -read /Users/<username> NFSHomeDirectory
+dscl . -read /Users/<username> UserShell
+dscl . -read /Users/<username> RealName
+
+5. Verify it is NOT an admin:
+
+dseditgroup -o checkmember -m <username> admin
+
+must report not a member.
+
+6. Preserve and verify:
+
+milesEmployeeCode marker
+
+7. Handle partial-account failure safely.
+
+The current test machine already has a broken partial record:
+
+/Users/mpe000
+
+Do NOT automatically take ownership of arbitrary existing local users.
+
+Add detection distinguishing:
+
+A. Valid compatible Miles employee account
+B. Existing normal conflicting account
+C. Partial failed Miles provisioning record carrying our matching milesEmployeeCode marker
+
+For case C only, define a safe cleanup/retry path.
+
+Do not delete a legitimate user or home directory.
+
+8. Improve diagnostics.
+
+The current code suppresses stdout/stderr from sysadminctl, which hid the root cause.
+
+Capture safe diagnostic information, but never include the temporary password.
+
+Return a useful sanitized failure such as:
+
+sysadminctl account creation failed: <safe reason>
+
+9. Maintain credential lifecycle:
+
+prepare
+→ create account
+→ verify complete account
+→ verify standard role
+→ confirm credential
+
+If creation or verification fails:
+
+revoke credential
+
+10. Keep both files byte-identical:
+
+artifacts/asset-desk/agent/laptop_agent.py
+artifacts/asset-desk/public/agent/laptop_agent.py
+
+11. Add focused tests for:
+
+- invalid -role standard regression
+- partial Directory Services record
+- complete standard account verification
+- admin rejection
+- matching Miles partial-account recovery
+- conflicting existing account protection
+- password never present in logs/results
+
+12. Do not deploy.
+
+OUTPUT
+
+Return:
+
+1. Root cause
+2. Correct macOS account creation strategy
+3. Security implications
+4. Partial mpe000 recovery strategy
+5. Files changed
+6. Tests run/results
+7. Exact one-device pilot procedure for MILES-LAP-752 after approval
+
+Stop before deployment.

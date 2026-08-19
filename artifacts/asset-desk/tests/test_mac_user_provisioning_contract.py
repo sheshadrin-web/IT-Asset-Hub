@@ -51,8 +51,10 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
 
     def test_protected_account_and_standard_role_contract_remain(self):
         self.assertIn("miles-it-support", AGENT)
-        self.assertIn('"-role", "standard"', AGENT)
+        self.assertNotIn('"-role", "standard"', AGENT)
+        self.assertIn('"-password", password', AGENT)
         self.assertIn("dseditgroup", AGENT)
+        self.assertIn("_MAC_REQUIRED_ACCOUNT_FIELDS", AGENT)
 
 
 if __name__ == "__main__":

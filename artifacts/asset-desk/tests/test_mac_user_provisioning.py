@@ -11,6 +11,7 @@ import types
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 
 
 AGENT = Path(__file__).parents[1] / "agent" / "laptop_agent.py"
@@ -101,6 +102,75 @@ class MacUserProvisioningTests(unittest.TestCase):
         self.assertNotIn(password, result or "")
         self.assertNotIn(password, error or "")
         self.assertEqual(status, "failed")
+
+    def test_invalid_role_flag_is_not_sent_to_sysadminctl(self):
+        self.assertNotIn('"-role", "standard"', agent._mac_provision_user.__doc__ or "")
+        with patch.object(agent, "_mac_safe_creation_reason", return_value="invalid options"), \
+             patch.object(agent, "_post", return_value={"success": True}), \
+             patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", side_effect=KeyError), \
+             patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=1, stdout="", stderr="unsupported option -role",
+             )) as run:
+            status, _, error = agent._mac_provision_user(
+                {"employee_code": "MPE1340"}, "command-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIn("sysadminctl account creation failed", error or "")
+        sysadmin_calls = [call.args[0] for call in run.call_args_list
+                          if call.args and call.args[0] and call.args[0][0] == "sysadminctl"]
+        self.assertEqual(len(sysadmin_calls), 1)
+        self.assertNotIn("-role", sysadmin_calls[0])
+
+    def test_partial_directory_services_record_is_incomplete(self):
+        partial = SimpleNamespace(
+            returncode=0,
+            stdout="RecordName: mpe000\nmilesEmployeeCode: MPE000\nGeneratedUID: abc\n",
+            stderr="",
+        )
+        with patch.object(agent.subprocess, "run", return_value=partial):
+            complete, _ = agent._mac_dscl_record("mpe000")
+        self.assertFalse(complete)
+
+    def test_complete_standard_account_verification(self):
+        complete = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "UniqueID: 501\nPrimaryGroupID: 20\n"
+                "NFSHomeDirectory: /Users/mpe1340\n"
+                "UserShell: /bin/zsh\nRealName: Test Employee\n"
+            ),
+            stderr="",
+        )
+        with patch.object(agent.subprocess, "run", return_value=complete):
+            verified, _ = agent._mac_dscl_record("mpe1340")
+        self.assertTrue(verified)
+
+    def test_admin_membership_is_rejected(self):
+        admin = SimpleNamespace(returncode=0, stdout="yes mpe1340 is a member of admin", stderr="")
+        with patch.object(agent.subprocess, "run", return_value=admin):
+            self.assertTrue(agent._mac_is_admin("mpe1340"))
+
+    def test_matching_miles_partial_account_cleanup_never_deletes_home(self):
+        deleted = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(agent.subprocess, "run", return_value=deleted) as run:
+            self.assertTrue(agent._mac_cleanup_marked_partial("mpe000"))
+        argv = run.call_args.args[0]
+        self.assertEqual(argv, ["dscl", ".", "-delete", "/Users/mpe000"])
+        self.assertNotIn("rm", argv)
+
+    def test_conflicting_existing_account_is_not_taken_over(self):
+        conflict = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(agent.subprocess, "run", return_value=conflict):
+            self.assertFalse(agent._mac_is_admin("mpe1340"))
+
+    def test_creation_diagnostic_redacts_password(self):
+        password = "Temporary-Secret-123"
+        reason = agent._mac_safe_creation_reason(
+            f"sysadminctl rejected {password}", password
+        )
+        self.assertNotIn(password, reason)
+        self.assertIn("[redacted]", reason)
 
 
 if __name__ == "__main__":
