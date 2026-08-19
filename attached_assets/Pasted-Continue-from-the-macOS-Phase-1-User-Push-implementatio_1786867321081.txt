@@ -1,0 +1,178 @@
+Continue from the macOS Phase 1 User Push implementation you just completed.
+
+DO NOT redesign or redo the existing User Push work.
+
+The remaining blocker is secure temporary credential delivery.
+
+GOAL:
+Allow provision_user to actually create the macOS employee account while securely providing IT with a one-time temporary password.
+
+SECURITY REQUIREMENTS:
+
+1. The temporary password must be generated locally by the macOS MilesAgent using a cryptographically secure random generator.
+
+2. Minimum strength:
+   - at least 20 random characters
+   - upper/lowercase
+   - numbers
+   - safe symbols where compatible with macOS account creation
+
+3. NEVER put the plaintext password in:
+   - device_commands payload
+   - device_commands result
+   - command audit log
+   - provisioning table
+   - activity timeline
+   - agent.log
+   - stdout/stderr logs
+   - collect_system_info
+   - Supabase normal database columns
+   - browser console
+
+4. Build a dedicated one-time credential delivery mechanism.
+
+The credential must:
+   - belong to one asset
+   - belong to one employee code
+   - belong to one provisioning request
+   - expire automatically
+   - be revealable only by an authorized IT admin
+   - be revealable only once
+   - become unavailable after consumption
+   - never be returned by normal asset APIs
+
+5. Prefer encryption at rest if the secret must temporarily pass through backend storage.
+
+Do not invent custom cryptography if the existing stack provides a secure secret/encryption mechanism.
+
+6. The normal provision_user command should continue carrying only:
+
+employee_code
+display_name
+email
+
+The agent derives:
+
+MPE1340 -> mpe1340
+
+7. On successful macOS provisioning:
+
+Create:
+mpe1340
+
+Display name:
+employee full name
+
+Role:
+Standard User
+
+Do NOT add to admin.
+
+Do NOT modify:
+miles-it-support
+
+8. After account creation, securely publish the temporary credential using the dedicated one-time secret mechanism.
+
+The normal agent command result should contain only something like:
+
+"Provisioned standard macOS user mpe1340"
+
+No password.
+
+9. Portal behavior after success:
+
+EMPLOYEE OS ACCOUNT
+
+✓ User Provisioned
+
+Employee:
+<name>
+
+Employee Code:
+MPE1340
+
+OS Username:
+mpe1340
+
+Account Type:
+Standard User
+
+Temporary Login Password:
+[ Reveal Once ]
+
+10. When authorized IT clicks Reveal Once:
+
+Show a strong warning:
+
+"This temporary password will only be displayed once. Copy it now and provide it securely to the employee."
+
+Then display it.
+
+After closing/confirming:
+the portal must not be able to reveal that same secret again.
+
+Show afterward:
+
+Temporary Password:
+Revealed / Consumed
+
+11. Add expiration.
+
+Suggested:
+credential expires after 24 hours if never revealed.
+
+Use project conventions where available.
+
+12. Authorization:
+
+Only appropriate IT portal administrator roles may reveal the temporary credential.
+
+An employee or ordinary portal user must never be able to retrieve it.
+
+13. Do not send the password automatically by acknowledgement email.
+
+Acknowledgement remains completely independent.
+
+14. Do not automatically email the credential in Phase 1.1.
+
+15. Add automated tests for:
+
+- secure random password generation
+- plaintext password never appears in command payload
+- plaintext password never appears in command result
+- plaintext password never appears in audit records
+- plaintext password never appears in agent logs
+- one-time reveal succeeds once
+- second reveal fails
+- expired secret cannot be retrieved
+- unauthorized user cannot retrieve secret
+- secret belongs to correct asset/employee/provision request
+- miles-it-support remains protected
+- mpe1340 remains standard/non-admin
+- existing acknowledgement tests remain unchanged
+- existing Lock/Unlock/Restart tests still pass
+
+16. Review macOS command invocation carefully so the generated password is not accidentally exposed in process listings or persistent shell history where avoidable.
+
+17. Do not implement:
+- Windows
+- Ubuntu
+- user deletion
+- recovery deprovisioning
+- HR separation cleanup
+
+18. When finished, DO NOT DEPLOY.
+
+Give me:
+- files changed
+- secret storage architecture
+- encryption/security approach
+- expiry behavior
+- one-time reveal logic
+- authorization checks
+- exact macOS provisioning sequence
+- test results
+- manual pilot procedure for MILES-LAP-752 / MPE1340
+- security limitations remaining
+
+Stop and wait for approval before deployment.

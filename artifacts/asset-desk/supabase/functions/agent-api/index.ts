@@ -41,6 +41,28 @@ async function rpc(name: string, args: Record<string, unknown>) {
   return { ok: true, data };
 }
 
+function base64(bytes: Uint8Array): string {
+  let value = "";
+  for (const byte of bytes) value += String.fromCharCode(byte);
+  return btoa(value);
+}
+
+async function credentialKey(): Promise<CryptoKey> {
+  const material = Deno.env.get("PROVISIONING_CREDENTIAL_KEY");
+  if (!material) throw new Error("credential encryption key is not configured");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function encryptCredential(password: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv }, await credentialKey(),
+    new TextEncoder().encode(password),
+  ));
+  return `${base64(iv)}.${base64(encrypted)}`;
+}
+
 function isPublicIp(candidate: string): boolean {
   if (!candidate || candidate.length > 64) return false;
   if (candidate.includes(":")) {
@@ -215,6 +237,35 @@ Deno.serve(async (req) => {
         p_error:      body.error  ?? null,
       });
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
+    if (req.method === "POST" && path === "/credentials/prepare") {
+      if (typeof body.password !== "string" || body.password.length < 20) {
+        return json({ success: false, error: "invalid credential request" }, 400);
+      }
+      const ciphertext = await encryptCredential(body.password);
+      const r = await rpc("agent_prepare_provisioning_credential", {
+        p_token: token,
+        p_command_id: body.command_id,
+        p_employee_code: body.employee_code,
+        p_os_username: body.os_username,
+        p_ciphertext: ciphertext,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: "credential preparation failed" }, 400);
+    }
+
+    if (req.method === "POST" && path === "/credentials/confirm") {
+      const r = await rpc("agent_confirm_provisioning_credential", {
+        p_token: token, p_command_id: body.command_id,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: "credential confirmation failed" }, 400);
+    }
+
+    if (req.method === "POST" && path === "/credentials/revoke") {
+      const r = await rpc("agent_revoke_provisioning_credential", {
+        p_token: token, p_command_id: body.command_id,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: "credential revocation failed" }, 400);
     }
 
 
