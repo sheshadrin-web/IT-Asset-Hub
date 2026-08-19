@@ -1876,8 +1876,10 @@ def _mac_employee_marker(username: str) -> str | None:
     if result.returncode != 0:
         return None
     for line in (result.stdout or "").splitlines():
-        if line.startswith("milesEmployeeCode:"):
-            return line.split(":", 1)[1].strip().upper()
+        line = line.strip()
+        for prefix in ("milesEmployeeCode:", "dsAttrTypeNative:milesEmployeeCode:"):
+            if line.startswith(prefix):
+                return line[len(prefix):].strip().upper()
     return None
 
 

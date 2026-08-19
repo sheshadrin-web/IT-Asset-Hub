@@ -132,6 +132,16 @@ class MacUserProvisioningTests(unittest.TestCase):
             complete, _ = agent._mac_dscl_record("mpe000")
         self.assertFalse(complete)
 
+    def test_native_prefixed_employee_marker_is_parsed(self):
+        native_marker = SimpleNamespace(
+            returncode=0,
+            stdout="dsAttrTypeNative:milesEmployeeCode: MPE000\n",
+            stderr="",
+        )
+        with patch.object(agent.subprocess, "run", return_value=native_marker):
+            marker = agent._mac_employee_marker("mpe000")
+        self.assertEqual(marker, "MPE000")
+
     def test_complete_standard_account_verification(self):
         complete = SimpleNamespace(
             returncode=0,
