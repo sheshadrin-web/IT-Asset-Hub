@@ -954,6 +954,7 @@ export default function AssetDetail() {
           {asset.assetType === "Laptop" && asset.id && (
             <MacUserProvisioningCard
               assetId={asset.id}
+              assetTag={asset.assetId}
               assignedUser={{
                 name: asset.assignedTo,
                 email: asset.assignedEmail,

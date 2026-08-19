@@ -719,6 +719,8 @@ def _get(path: str) -> dict:
 
 
 # ── wallpaper (cross-platform) ──────────────────────────────────────────────
+_MAC_WALLPAPER_TARGET_USER: str | None = None
+
 def _screen_size() -> tuple[int, int]:
     """Best-effort current primary-display resolution. Defaults to 1920x1080."""
     try:
@@ -1111,6 +1113,35 @@ def apply_active_wallpaper(force: bool = False) -> tuple[str, str | None]:
         try: _post("/wallpaper/status", {"status": "failed", "error": str(e)})
         except Exception: pass
         return ("failed", str(e))
+
+
+def apply_active_wallpaper_for_user(username: str) -> tuple[str, str | None]:
+    """Apply the active wallpaper in a managed employee's GUI session.
+
+    A never-logged-in employee may not have an Aqua session yet; that is a
+    pending policy result, not a provisioning failure.
+    """
+    global _MAC_WALLPAPER_TARGET_USER
+    if not IS_MAC or not username:
+        return ("failed", "targeted wallpaper is macOS-only")
+    _MAC_WALLPAPER_TARGET_USER = username
+    try:
+        if not _mac_user_has_session(username):
+            _post("/wallpaper/user-status", {
+                "os_username": username, "status": "pending",
+                "error": "employee has not started a graphical session",
+            })
+            return ("pending", "employee has not started a graphical session")
+        status, error = apply_active_wallpaper(force=True)
+        user_status = "applied" if status in ("applied", "skipped") else (
+            "pending" if status == "none" else "failed"
+        )
+        _post("/wallpaper/user-status", {
+            "os_username": username, "status": user_status, "error": error,
+        })
+        return (user_status, error)
+    finally:
+        _MAC_WALLPAPER_TARGET_USER = None
 
 
 # ── remote HARD lock (real OS lockout, honest reporting) ───────────────────
@@ -2073,9 +2104,81 @@ def _mac_provision_user(
         if not isinstance(confirmed, dict) or not confirmed.get("success"):
             _post("/credentials/revoke", {"command_id": command_id})
             return ("failed", None, "secure credential publication could not be confirmed")
-        return ("completed", f"Provisioned standard macOS user {username}", None)
+        wallpaper_status, _wallpaper_error = apply_active_wallpaper_for_user(username)
+        warning = (
+            " User provisioned successfully; wallpaper will retry on next policy sync."
+            if wallpaper_status != "applied" else ""
+        )
+        return ("completed", f"Provisioned standard macOS user {username}.{warning}", None)
     finally:
         # Remove the local reference as soon as the command path is complete.
+        password = ""
+
+
+def _mac_reset_user_password(
+    payload: dict, command_id: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Reset only the mapped standard employee account on macOS."""
+    if not IS_MAC:
+        return ("failed", None, "reset_user_password is macOS only")
+    raw_code = str(payload.get("employee_code") or "").strip()
+    username = raw_code.lower()
+    supplied = str(payload.get("os_username") or "").strip().lower()
+    if not raw_code or supplied != username or username in MAC_PROTECTED_ACCOUNTS:
+        return ("failed", None, "employee identity does not match a permitted managed account")
+    if not command_id:
+        return ("failed", None, "password reset command id is missing")
+    if not _is_root():
+        return ("requires_admin", None, "macOS password reset requires the agent to run as root")
+
+    try:
+        import pwd
+        before = pwd.getpwnam(username)
+    except KeyError:
+        return ("failed", None, "managed employee macOS account does not exist")
+    except Exception as exc:
+        return ("failed", None, f"could not inspect macOS account: {type(exc).__name__}")
+
+    if _mac_employee_marker(username) != raw_code.upper():
+        return ("failed", None, "macOS employee identity marker does not match")
+    complete, _ = _mac_dscl_record(username)
+    if not complete:
+        return ("failed", None, "macOS employee account is incomplete")
+    admin_check = _mac_is_admin(username)
+    if admin_check is None:
+        return ("failed", None, "could not verify existing account role safely")
+    if admin_check:
+        return ("failed", None, "managed employee account unexpectedly has admin privileges")
+
+    credential = _post("/credentials/reveal-reset", {"command_id": command_id})
+    password = credential.get("password") if isinstance(credential, dict) else None
+    if not isinstance(password, str) or len(password) < 20:
+        return ("failed", None, "secure reset credential unavailable")
+    try:
+        result = subprocess.run(
+            ["sysadminctl", "-resetPasswordFor", username, "-newPassword", password],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            timeout=60, creationflags=_NO_WINDOW,
+        )
+        if result.returncode != 0:
+            return (
+                "failed", None,
+                f"macOS password reset failed: {_mac_safe_creation_reason(result.stderr, password)}",
+            )
+        after = pwd.getpwnam(username)
+        if (before.pw_uid, before.pw_gid, before.pw_dir) != (
+            after.pw_uid, after.pw_gid, after.pw_dir
+        ):
+            return ("failed", None, "password reset changed protected account identity fields")
+        if _mac_employee_marker(username) != raw_code.upper():
+            return ("failed", None, "password reset changed the employee identity marker")
+        if _mac_is_admin(username) is not False:
+            return ("failed", None, "password reset changed or obscured the employee role")
+        confirmed = _post("/credentials/confirm-reset", {"command_id": command_id})
+        if not isinstance(confirmed, dict) or not confirmed.get("success"):
+            return ("failed", None, "password reset completed but secure credential publication failed")
+        return ("completed", f"Password reset successfully for macOS user {username}", None)
+    finally:
         password = ""
 
 
@@ -2085,8 +2188,8 @@ def _mac_gui_argv(argv: list[str]) -> list[str]:
     in the user's session, not the bare root daemon context, or they no-op. When the
     agent is not root (legacy per-user LaunchAgent) the argv runs unchanged."""
     if IS_MAC and _is_root():
-        uid = _mac_console_uid()
-        user = _mac_console_user()
+        user = _MAC_WALLPAPER_TARGET_USER or _mac_console_user()
+        uid = _mac_uid_for(user) if _MAC_WALLPAPER_TARGET_USER else _mac_console_uid()
         if uid is not None and user:
             return ["launchctl", "asuser", str(uid), "sudo", "-u", user, *argv]
     return argv
@@ -2812,6 +2915,8 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
             return _release_lock()
     if ctype == "provision_user":
         return _mac_provision_user(cmd.get("payload") or {}, str(cmd.get("id") or ""))
+    if ctype == "reset_user_password":
+        return _mac_reset_user_password(cmd.get("payload") or {}, str(cmd.get("id") or ""))
     if ctype == "notify_restart":
         payload = cmd.get("payload") or {}
         days = payload.get("uptime_days")

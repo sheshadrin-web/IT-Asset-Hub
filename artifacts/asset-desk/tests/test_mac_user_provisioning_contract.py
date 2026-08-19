@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260816000000_mac_user_provisioning.sql").read_text()
+RESET_MIGRATION = (ROOT / "supabase/migrations/20260819000000_mac_password_reset_and_user_wallpaper.sql").read_text()
 AGENT = (ROOT / "agent/laptop_agent.py").read_text()
 AGENT_API = (ROOT / "supabase/functions/agent-api/index.ts").read_text()
 REVEAL_API = (ROOT / "supabase/functions/provisioning-credentials/index.ts").read_text()
@@ -55,6 +56,42 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
         self.assertIn('"-password", password', AGENT)
         self.assertIn("dseditgroup", AGENT)
         self.assertIn("_MAC_REQUIRED_ACCOUNT_FIELDS", AGENT)
+
+    def test_reset_contract_is_encrypted_and_non_destructive(self):
+        self.assertIn("'reset_user_password'", RESET_MIGRATION)
+        self.assertIn("device_user_password_resets", RESET_MIGRATION)
+        self.assertIn("request_user_password_reset", RESET_MIGRATION)
+        self.assertIn("reveal_user_password_reset", RESET_MIGRATION)
+        self.assertIn("reset_status = 'consumed'", RESET_MIGRATION)
+        self.assertIn("protected macOS account cannot be reset", RESET_MIGRATION)
+        self.assertIn("p_actor_user_id IS DISTINCT FROM v_uid", RESET_MIGRATION)
+        self.assertIn("consumed_by = v_uid", RESET_MIGRATION)
+        self.assertNotIn("'password'", RESET_MIGRATION.split("jsonb_build_object", 1)[1].split("RETURNING", 1)[0])
+
+    def test_reset_migration_preserves_lock_unlock_reconciliation(self):
+        self.assertEqual(RESET_MIGRATION.count("CREATE OR REPLACE FUNCTION public.agent_update_command"), 1)
+        self.assertIn("v_ctype = 'lock_screen' AND p_status = 'completed'", RESET_MIGRATION)
+        self.assertIn("v_ctype = 'unlock' AND p_status = 'completed'", RESET_MIGRATION)
+
+    def test_reset_privilege_model_is_restricted(self):
+        self.assertIn("REVOKE ALL ON FUNCTION public.request_user_password_reset(uuid, text) FROM PUBLIC, anon", RESET_MIGRATION)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.request_user_password_reset(uuid, text) TO authenticated", RESET_MIGRATION)
+        self.assertIn("REVOKE ALL ON FUNCTION public.reveal_user_password_reset(uuid, uuid) FROM PUBLIC, anon", RESET_MIGRATION)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.reveal_user_password_reset(uuid, uuid) TO authenticated", RESET_MIGRATION)
+        self.assertIn("REVOKE ALL ON FUNCTION public.agent_reveal_password_reset(text, uuid) FROM PUBLIC, anon, authenticated", RESET_MIGRATION)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.agent_reveal_password_reset(text, uuid) TO service_role", RESET_MIGRATION)
+        self.assertIn("REVOKE ALL ON FUNCTION public.agent_confirm_password_reset(text, uuid) FROM PUBLIC, anon, authenticated", RESET_MIGRATION)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.agent_confirm_password_reset(text, uuid) TO service_role", RESET_MIGRATION)
+        self.assertIn("REVOKE ALL ON FUNCTION public.agent_report_user_wallpaper(text, text, text, text) FROM PUBLIC, anon, authenticated", RESET_MIGRATION)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.agent_report_user_wallpaper(text, text, text, text) TO service_role", RESET_MIGRATION)
+
+    def test_reset_reveal_uses_authenticated_edge_path(self):
+        self.assertIn('body.purpose === "password_reset"', REVEAL_API)
+        self.assertIn('userDb.rpc("reveal_user_password_reset"', REVEAL_API)
+        self.assertIn("global: { headers: { Authorization: `Bearer ${jwt}` } }", REVEAL_API)
+        self.assertIn('rpc("agent_reveal_password_reset"', AGENT_API)
+        self.assertIn('rpc("agent_confirm_password_reset"', AGENT_API)
+        self.assertIn("public._auth_agent(p_token)", RESET_MIGRATION)
 
 
 if __name__ == "__main__":
