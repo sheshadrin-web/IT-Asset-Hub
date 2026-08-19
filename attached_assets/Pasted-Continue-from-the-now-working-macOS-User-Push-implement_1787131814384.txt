@@ -1,0 +1,479 @@
+Continue from the now-working macOS User Push implementation.
+
+We have successfully validated the following on the pilot Mac:
+
+Asset:
+MILES-LAP-752
+
+Permanent IT administrator:
+miles-it-support
+
+Test employee:
+MPE000
+
+Provisioned macOS username:
+mpe000
+
+Validation completed:
+- mpe000 exists
+- UID resolves correctly
+- account is Standard User
+- account is NOT in admin
+- milesEmployeeCode marker is present
+- Asset Hub shows User Provisioned
+- miles-it-support remains Administrator
+
+Do NOT redesign the working User Push flow.
+
+We now want to add two related features:
+
+1. EMPLOYEE WALLPAPER PUSH AFTER USER PROVISIONING
+2. REMOTE OS PASSWORD RESET FROM ASSET HUB
+
+==================================================
+PART A — WALLPAPER AFTER USER PUSH
+==================================================
+
+GOAL
+
+Whenever a new employee macOS user is successfully provisioned through User Push,
+apply the currently active Miles corporate wallpaper to that employee account.
+
+Example:
+
+IT admin:
+miles-it-support
+
+Employee:
+MPE000
+
+macOS account:
+mpe000
+
+After provisioning:
+- mpe000 receives the current active Miles wallpaper
+- miles-it-support is not modified unless existing wallpaper policy already applies to it separately
+
+IMPORTANT
+
+Reuse the EXISTING Miles wallpaper infrastructure.
+
+Do NOT create a second wallpaper system.
+
+The agent already supports update_wallpaper.
+
+Inspect the current:
+- wallpaper API
+- active wallpaper retrieval
+- macOS wallpaper implementation
+- console-user/session handling
+
+Add a helper that can explicitly apply the current wallpaper to a specified managed employee username.
+
+The provisioning sequence should become:
+
+provision_user
+→ create/validate standard employee account
+→ write/verify employee code marker
+→ mark credential ready
+→ apply active corporate wallpaper to employee profile
+→ return provisioning success
+
+Wallpaper failure should NOT delete the successfully created employee account.
+
+If user creation succeeds but wallpaper application fails:
+
+Provisioning should still remain successful,
+but report a non-secret warning such as:
+
+"User provisioned successfully; wallpaper will retry on next policy sync."
+
+The normal wallpaper policy should retry later.
+
+==================================================
+macOS WALLPAPER SESSION ISSUE
+==================================================
+
+The agent runs as root LaunchDaemon.
+
+Do NOT assume root's GUI session.
+
+When applying wallpaper for mpe000, use the correct per-user macOS context.
+
+If the employee has never logged in yet and macOS cannot immediately apply the desktop preference,
+store/queue the wallpaper application so it is applied at that employee's first graphical login
+or next agent policy reconciliation.
+
+Do not require the employee to be Administrator.
+
+==================================================
+PART B — PASSWORD POLICY
+==================================================
+
+IMPORTANT SECURITY DECISION
+
+Do NOT make the production universal password "miles".
+
+For development/pilot testing only, support a configurable test temporary password if needed.
+
+Production behavior should remain secure.
+
+Preferred production workflow:
+
+User Push
+→ secure temporary password
+→ IT reveals once
+→ employee receives password securely
+→ employee changes password later
+
+For password reset:
+
+IT explicitly chooses a new TEMPORARY password through Asset Hub.
+
+Do NOT retrieve the employee's existing password.
+Do NOT display the employee's current password.
+Passwords must never be recoverable.
+
+Password reset means replacing the password with a new temporary password.
+
+==================================================
+PART C — NEW AGENT COMMAND
+==================================================
+
+Add a new command:
+
+reset_user_password
+
+Use the existing device command infrastructure.
+
+Do NOT create a new command transport.
+
+Expected server-generated payload concept:
+
+{
+  "employee_code": "MPE000",
+  "os_username": "mpe000",
+  "credential_reference": "<secure reference>"
+}
+
+Do NOT put plaintext password in normal device_commands payload.
+
+Use the existing secure credential architecture created for User Push wherever possible.
+
+The backend must derive employee identity from:
+
+asset assignment
++
+provisioning record
+
+The frontend must NOT be allowed to arbitrarily reset any local username.
+
+==================================================
+PART D — ASSET HUB UI
+==================================================
+
+In the existing:
+
+EMPLOYEE OS ACCOUNT
+
+card, after provisioning, add:
+
+User Provisioned ✓
+
+Employee:
+Help Desk
+
+Employee Code:
+MPE000
+
+OS Username:
+mpe000
+
+Account Type:
+Standard User
+
+Wallpaper:
+Applied / Pending / Failed
+
+Actions:
+
+[ Reset OS Password ]
+
+Do NOT show:
+- Delete User yet
+- Make Administrator
+- arbitrary username fields
+
+==================================================
+PASSWORD RESET DIALOG
+==================================================
+
+When IT clicks:
+
+Reset OS Password
+
+show:
+
+RESET EMPLOYEE OS PASSWORD
+
+Employee:
+Help Desk
+
+Employee Code:
+MPE000
+
+OS Username:
+mpe000
+
+Device:
+MILES-LAP-752
+
+Then provide:
+
+New Temporary Password
+[________________]
+
+Confirm Temporary Password
+[________________]
+
+Buttons:
+
+Cancel
+Reset Password
+
+Add a password generator option:
+
+[ Generate Secure Password ]
+
+Preferred behavior:
+Generate a strong random password for IT.
+
+Do NOT default production password to "miles".
+
+==================================================
+AUTHORIZED ROLES
+==================================================
+
+Only:
+
+super_admin
+it_admin
+
+may reset an employee OS password.
+
+IT agents or normal employees must not be able to perform this unless current RBAC explicitly allows it and is approved.
+
+==================================================
+PROTECTED ACCOUNTS
+==================================================
+
+Password reset must NEVER affect:
+
+miles-it-support
+root
+daemon
+nobody
+system/service accounts
+
+If the requested username is protected:
+
+FAIL immediately.
+
+Even if the backend sends a bad payload, the AGENT itself must independently reject it.
+
+==================================================
+IDENTITY VALIDATION
+==================================================
+
+Before resetting:
+
+1. Confirm asset is currently assigned.
+2. Confirm provisioning mapping exists.
+3. Confirm employee code matches provisioning record.
+4. Confirm OS username matches normalized employee code.
+5. Confirm account exists.
+6. Confirm milesEmployeeCode marker matches exactly.
+7. Confirm account is not protected.
+8. Confirm account is the expected standard employee account.
+
+Do not reset arbitrary accounts.
+
+==================================================
+macOS PASSWORD RESET
+==================================================
+
+Implement a dedicated helper such as:
+
+_mac_reset_user_password(...)
+
+Use a supported macOS local-account password reset mechanism.
+
+The agent runs as root/system LaunchDaemon.
+
+The reset must work without requiring the employee's existing password.
+
+Do not change:
+- employee UID
+- home directory
+- group membership
+- employee code marker
+- account role
+- asset assignment
+
+mpe000 must remain Standard User.
+
+miles-it-support must remain untouched.
+
+==================================================
+PASSWORD SECURITY
+==================================================
+
+Reuse the existing encrypted credential mechanism.
+
+The new temporary password must NEVER appear in:
+
+- device_commands payload
+- command result
+- activity timeline
+- audit log
+- agent.log
+- collect_system_info
+- browser console
+- normal database plaintext columns
+
+If the macOS API requires the password briefly in a process argument, document that platform limitation and ensure:
+
+- no shell invocation
+- no shell history
+- no logging of argv
+- short-lived subprocess
+- sanitized stderr
+- password deleted from application memory/reference as soon as practical
+
+==================================================
+RESET RESULT
+==================================================
+
+Successful result:
+
+"Password reset successfully for macOS user mpe000"
+
+Portal should show:
+
+Password Reset Successful
+
+Temporary Password
+[ Reveal Once ]
+
+The one-time reveal should use the same secure model as provisioning.
+
+After reveal:
+
+Temporary Password
+Revealed / Consumed
+
+==================================================
+AUDIT
+==================================================
+
+Audit:
+
+action:
+Reset OS Password
+
+asset
+employee
+employee code
+os username
+requested by
+requested at
+completed at
+status
+
+NEVER audit the password.
+
+==================================================
+FAILED RESET
+==================================================
+
+If reset fails:
+
+Portal shows:
+
+Password Reset Failed
+
+Reason:
+<sanitized reason>
+
+Allow:
+
+[ Retry Password Reset ]
+
+Do not automatically retry destructive credential operations.
+
+==================================================
+DO NOT IMPLEMENT YET
+==================================================
+
+Do NOT implement:
+
+- account deletion
+- account renaming
+- administrator promotion
+- Windows password reset
+- Ubuntu password reset
+- HR deprovisioning
+- employee profile deletion
+
+This task is macOS only.
+
+==================================================
+TESTS
+==================================================
+
+Add tests for:
+
+1. Wallpaper is targeted at the managed employee account.
+2. Wallpaper failure does not roll back successful user provisioning.
+3. Wallpaper can be pending until first login.
+4. reset_user_password rejects non-macOS for this phase.
+5. protected miles-it-support cannot be reset.
+6. root cannot be reset.
+7. employee code mismatch fails.
+8. local username mismatch fails.
+9. missing Miles marker fails.
+10. matching managed employee account succeeds.
+11. employee remains non-admin after password reset.
+12. UID/home directory remain unchanged.
+13. password absent from command payload.
+14. password absent from command result.
+15. password absent from logs.
+16. password absent from audit.
+17. one-time reveal works once.
+18. second reveal fails.
+19. unauthorized portal user cannot reset.
+20. existing User Push tests continue passing.
+21. existing Lock/Unlock/Restart tests continue passing.
+22. both laptop_agent.py copies remain byte-identical.
+
+==================================================
+DO NOT DEPLOY
+==================================================
+
+Implement and test locally only.
+
+When finished return:
+
+1. Files changed
+2. Wallpaper integration design
+3. Password reset command design
+4. Portal UI changes
+5. macOS reset implementation
+6. Secret handling
+7. Protected-account protections
+8. Tests/results
+9. Migration changes, if any
+10. Exact pilot test plan for MILES-LAP-752 / MPE000
+
+Do NOT commit/push/deploy automatically.
+Stop for approval.

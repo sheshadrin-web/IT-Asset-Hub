@@ -55,6 +55,20 @@ Deno.serve(async (req) => {
     const { data: userData, error: userError } = await db.auth.getUser(jwt);
     if (userError || !userData.user) return json({ success: false, error: "authentication required" }, 401);
     const body = await req.json().catch(() => ({}));
+    if (body.purpose === "password_reset") {
+      if (typeof body.password !== "string" || body.password.length < 20) {
+        return json({ success: false, error: "invalid temporary password" }, 400);
+      }
+      const ciphertext = await encryptCredential(body.password);
+      const prepared = await db.rpc("request_user_password_reset", {
+        p_asset_id: body.asset_id,
+        p_ciphertext: ciphertext,
+      });
+      if (prepared.error || !prepared.data?.success) {
+        return json({ success: false, error: prepared.error?.message ?? "password reset unavailable" }, 403);
+      }
+      return json(prepared.data);
+    }
     const result = await db.rpc("reveal_provisioning_credential", {
       p_actor_user_id: userData.user.id,
       p_asset_id: body.asset_id,

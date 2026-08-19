@@ -228,6 +228,16 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
     }
 
+    if (req.method === "POST" && path === "/wallpaper/user-status") {
+      const r = await rpc("agent_report_user_wallpaper", {
+        p_token: token,
+        p_os_username: body.os_username,
+        p_status: body.status,
+        p_error: body.error ?? null,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: r.error }, 400);
+    }
+
     if (req.method === "POST" && path === "/commands/status") {
       const r = await rpc("agent_update_command", {
         p_token: token,
@@ -266,6 +276,24 @@ Deno.serve(async (req) => {
         p_token: token, p_command_id: body.command_id,
       });
       return r.ok ? json(r.data) : json({ success: false, error: "credential revocation failed" }, 400);
+    }
+
+    if (req.method === "POST" && path === "/credentials/reveal-reset") {
+      const r = await rpc("agent_reveal_password_reset", {
+        p_token: token, p_command_id: body.command_id,
+      });
+      if (!r.ok || !r.data?.success || typeof r.data.ciphertext !== "string") {
+        return json({ success: false, error: "reset credential unavailable" }, 400);
+      }
+      const password = await decryptCredential(r.data.ciphertext);
+      return json({ success: true, password });
+    }
+
+    if (req.method === "POST" && path === "/credentials/confirm-reset") {
+      const r = await rpc("agent_confirm_password_reset", {
+        p_token: token, p_command_id: body.command_id,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: "reset credential confirmation failed" }, 400);
     }
 
 

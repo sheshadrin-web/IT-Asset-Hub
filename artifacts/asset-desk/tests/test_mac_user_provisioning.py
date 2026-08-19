@@ -182,6 +182,77 @@ class MacUserProvisioningTests(unittest.TestCase):
         self.assertNotIn(password, reason)
         self.assertIn("[redacted]", reason)
 
+    def test_password_reset_rejects_non_macos(self):
+        with patch.object(agent, "IS_MAC", False):
+            status, _, error = agent._mac_reset_user_password(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "reset-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIn("macOS only", error or "")
+
+    def test_password_reset_rejects_protected_account(self):
+        status, _, error = agent._mac_reset_user_password(
+            {"employee_code": "root", "os_username": "root"}, "reset-1"
+        )
+        self.assertEqual(status, "failed")
+        self.assertIn("permitted", error or "")
+
+    def test_password_reset_rejects_username_mismatch(self):
+        status, _, error = agent._mac_reset_user_password(
+            {"employee_code": "MPE1340", "os_username": "other"}, "reset-1"
+        )
+        self.assertEqual(status, "failed")
+        self.assertIn("identity", error or "")
+
+    def test_password_reset_requires_matching_marker(self):
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_dir="/Users/mpe1340")
+        with patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", return_value=account), \
+             patch.object(agent, "_mac_employee_marker", return_value="OTHER"), \
+             patch.object(agent, "_post") as post:
+            status, _, error = agent._mac_reset_user_password(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "reset-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIn("marker", error or "")
+        post.assert_not_called()
+
+    def test_password_reset_preserves_identity_and_confirms_credential(self):
+        account = SimpleNamespace(pw_uid=501, pw_gid=20, pw_dir="/Users/mpe1340")
+        with patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", return_value=account), \
+             patch.object(agent, "_mac_employee_marker", return_value="MPE1340"), \
+             patch.object(agent, "_mac_dscl_record", return_value=(True, "")), \
+             patch.object(agent, "_mac_is_admin", return_value=False), \
+             patch.object(agent, "_post", side_effect=[
+                 {"success": True, "password": "Temporary-Password-123456"},
+                 {"success": True},
+             ]) as post, \
+             patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout="", stderr=""
+             )) as run:
+            status, result, error = agent._mac_reset_user_password(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "reset-1"
+            )
+        self.assertEqual(status, "completed")
+        self.assertIn("mpe1340", result or "")
+        self.assertIsNone(error)
+        self.assertEqual([call.args[0] for call in post.call_args_list],
+                         ["/credentials/reveal-reset", "/credentials/confirm-reset"])
+        argv = run.call_args.args[0]
+        self.assertIn("mpe1340", argv)
+        self.assertNotIn("Temporary-Password-123456", result or "")
+        self.assertNotIn("Temporary-Password-123456", error or "")
+
+    def test_targeted_wallpaper_failure_is_nonfatal(self):
+        with patch.object(agent, "IS_MAC", True), \
+             patch.object(agent, "_mac_user_has_session", return_value=True), \
+             patch.object(agent, "apply_active_wallpaper", return_value=("failed", "session unavailable")), \
+             patch.object(agent, "_post", return_value={"success": True}) as post:
+            status, error = agent.apply_active_wallpaper_for_user("mpe1340")
+        self.assertEqual(status, "failed")
+        self.assertEqual(error, "session unavailable")
+        self.assertEqual(post.call_args.args[0], "/wallpaper/user-status")
 
 if __name__ == "__main__":
     unittest.main()

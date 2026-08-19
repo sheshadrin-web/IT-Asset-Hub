@@ -25,10 +25,14 @@ interface ProvisioningState {
   last_error?: string | null;
   credential_status?: CredentialStatus | null;
   credential_expires_at?: string | null;
+  wallpaper_status?: "applied" | "pending" | "failed" | null;
+  wallpaper_error?: string | null;
+  reset_status?: "prepared" | "available" | "consumed" | "expired" | "revoked" | null;
 }
 
 interface Props {
   assetId: string;
+  assetTag?: string;
   assignedUser?: { id?: string; name?: string; email?: string; ecode?: string };
   device?: {
     status?: string | null;
@@ -49,7 +53,7 @@ function formatDate(value?: string | null): string {
     : "—";
 }
 
-export default function MacUserProvisioningCard({ assetId, assignedUser, device, isAdmin }: Props) {
+export default function MacUserProvisioningCard({ assetId, assetTag, assignedUser, device, isAdmin }: Props) {
   const { toast } = useToast();
   const [state, setState] = useState<ProvisioningState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +63,11 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
   const [revealBusy, setRevealBusy] = useState(false);
+  const [revealPurpose, setRevealPurpose] = useState<"provisioning" | "password_reset">("provisioning");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirm, setResetConfirm] = useState("");
 
   const load = useCallback(async () => {
     if (!supabaseConfigured || !assetId) {
@@ -109,10 +118,10 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
     await load();
   }
 
-  async function revealCredential() {
+  async function revealCredential(purpose: "provisioning" | "password_reset" = "provisioning") {
     setRevealBusy(true);
     const { data, error } = await supabase.functions.invoke("provisioning-credentials", {
-      body: { asset_id: assetId },
+      body: { asset_id: assetId, ...(purpose === "password_reset" ? { purpose } : {}) },
     });
     setRevealBusy(false);
     setRevealOpen(false);
@@ -125,8 +134,52 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
       await load();
       return;
     }
+    setRevealPurpose(purpose);
     setRevealedPassword(data.password);
     setPasswordOpen(true);
+  }
+
+  function generateSecurePassword() {
+    const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+,-.:=@^_";
+    const values = new Uint32Array(28);
+    crypto.getRandomValues(values);
+    setResetPassword(Array.from(values, value => alphabet[value % alphabet.length]).join(""));
+    setResetConfirm("");
+  }
+
+  async function requestPasswordReset() {
+    if (resetPassword.length < 20 || resetPassword !== resetConfirm) {
+      toast({
+        title: "Password reset not ready",
+        description: resetPassword.length < 20
+          ? "Use a temporary password with at least 20 characters."
+          : "The confirmation does not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setResetBusy(true);
+    const { data, error } = await supabase.functions.invoke("provisioning-credentials", {
+      body: { asset_id: assetId, purpose: "password_reset", password: resetPassword },
+    });
+    setResetBusy(false);
+    if (error || !data?.success) {
+      toast({
+        title: "Password reset failed",
+        description: error?.message ?? data?.error ?? "Could not queue the reset.",
+        variant: "destructive",
+      });
+      await load();
+      return;
+    }
+    setResetOpen(false);
+    setResetPassword("");
+    setResetConfirm("");
+    toast({
+      title: "Password reset queued",
+      description: "The Mac agent will replace the employee password on its next command poll.",
+    });
+    await load();
   }
 
   if (!isMac(device) && !state) return null;
@@ -165,6 +218,26 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Account Type</p>
                   <p className="font-medium">Standard User</p>
                 </div>
+                   <div className="mt-3 border-t border-emerald-200 pt-2">
+                     <p className="text-[11px] uppercase tracking-wide text-emerald-700">OS Password Reset</p>
+                     {state?.reset_status === "available" ? (
+                       <Button
+                         size="sm"
+                         variant="outline"
+                         className="mt-1 h-8 gap-1.5"
+                         onClick={() => { setRevealPurpose("password_reset"); setRevealOpen(true); }}
+                         disabled={revealBusy}
+                       >
+                         <KeyRound className="h-3.5 w-3.5" /> Reveal Reset Password Once
+                       </Button>
+                     ) : (
+                       <p className="mt-1 text-xs font-semibold text-emerald-800">
+                         {state?.reset_status === "prepared" ? "Reset queued" :
+                           state?.reset_status === "expired" ? "Expired" :
+                           state?.reset_status === "consumed" ? "Revealed / Consumed" : "Not requested"}
+                       </p>
+                     )}
+                   </div>
               </div>
 
               {status === "provisioned" ? (
@@ -173,6 +246,20 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
                     <CheckCircle2 className="h-4 w-4" /> User Provisioned
                   </p>
                   <p className="mt-1 text-[11px]">Provisioned at {formatDate(state?.provisioned_at)}.</p>
+                   <div className="mt-3 border-t border-emerald-200 pt-2">
+                     <p className="text-[11px] uppercase tracking-wide text-emerald-700">Wallpaper</p>
+                     <p className={cn(
+                       "mt-1 text-xs font-semibold",
+                       state?.wallpaper_status === "applied" ? "text-emerald-800" :
+                         state?.wallpaper_status === "failed" ? "text-red-700" : "text-amber-700",
+                     )}>
+                       {state?.wallpaper_status === "applied" ? "Applied" :
+                         state?.wallpaper_status === "failed" ? "Failed" : "Pending"}
+                     </p>
+                     {state?.wallpaper_error ? (
+                       <p className="mt-1 text-[11px] text-muted-foreground">{state.wallpaper_error}</p>
+                     ) : null}
+                   </div>
                   <div className="mt-3 border-t border-emerald-200 pt-2">
                     <p className="text-[11px] uppercase tracking-wide text-emerald-700">Temporary Login Password</p>
                     {state?.credential_status === "available" ? (
@@ -226,6 +313,16 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
                   {status === "failed" ? "Retry User Push" : "Push User to Device"}
                 </Button>
               )}
+               {status === "provisioned" && (
+                 <Button
+                   variant="outline"
+                   className="w-full gap-2"
+                   onClick={() => setResetOpen(true)}
+                   disabled={!isAdmin || !eligible || inFlight || resetBusy}
+                 >
+                   <KeyRound className="h-4 w-4" /> Reset OS Password
+                 </Button>
+               )}
               {!eligible && status !== "provisioned" && (
                 <p className="text-[11px] text-muted-foreground">
                   User Push requires an assigned active employee and an online managed macOS agent.
@@ -270,7 +367,7 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
       <Dialog open={revealOpen} onOpenChange={setRevealOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Reveal temporary password once?</DialogTitle>
+            <DialogTitle>Reveal {revealPurpose === "password_reset" ? "reset " : ""}temporary password once?</DialogTitle>
             <DialogDescription>
               This temporary password will only be displayed once. Copy it now and provide it securely to the employee.
             </DialogDescription>
@@ -280,9 +377,66 @@ export default function MacUserProvisioningCard({ assetId, assignedUser, device,
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRevealOpen(false)}>Cancel</Button>
-            <Button onClick={() => void revealCredential()} disabled={revealBusy}>
+            <Button onClick={() => void revealCredential(revealPurpose)} disabled={revealBusy}>
               {revealBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Reveal Once
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={resetOpen}
+        onOpenChange={(open) => {
+          setResetOpen(open);
+          if (!open) {
+            setResetPassword("");
+            setResetConfirm("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Employee OS Password</DialogTitle>
+            <DialogDescription>
+              This replaces the current password with a new temporary password. The existing password cannot be retrieved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-4 text-sm">
+            <p><span className="text-muted-foreground">Employee:</span> <b>{state?.employee_name ?? assignedUser?.name}</b></p>
+            <p><span className="text-muted-foreground">Employee Code:</span> <b className="font-mono">{state?.employee_code ?? assignedUser?.ecode}</b></p>
+            <p><span className="text-muted-foreground">OS Username:</span> <b className="font-mono">{state?.os_username}</b></p>
+            <p><span className="text-muted-foreground">Device:</span> <b>{assetTag ?? device?.os_name ?? "Managed Mac"}</b></p>
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-medium">New Temporary Password</label>
+            <input
+              type="password"
+              value={resetPassword}
+              onChange={(event) => setResetPassword(event.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              autoComplete="new-password"
+            />
+            <label className="text-xs font-medium">Confirm Temporary Password</label>
+            <input
+              type="password"
+              value={resetConfirm}
+              onChange={(event) => setResetConfirm(event.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              autoComplete="new-password"
+            />
+            <Button type="button" variant="outline" className="w-full" onClick={generateSecurePassword}>
+              Generate Secure Password
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              The password is encrypted before it reaches the database and is never written to audit or command records.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetOpen(false)}>Cancel</Button>
+            <Button onClick={() => void requestPasswordReset()} disabled={resetBusy}>
+              {resetBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Reset Password
             </Button>
           </DialogFooter>
         </DialogContent>
