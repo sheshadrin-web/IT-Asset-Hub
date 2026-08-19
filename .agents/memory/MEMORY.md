@@ -1,0 +1,1 @@
+- [macOS account provisioning](macos-user-provisioning.md) — sysadminctl password delivery must follow the documented macOS CLI contract; verify Directory Services completeness, not only pwd lookup.
