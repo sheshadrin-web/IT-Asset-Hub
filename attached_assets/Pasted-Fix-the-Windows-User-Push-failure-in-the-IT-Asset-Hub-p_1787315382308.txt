@@ -1,0 +1,409 @@
+Fix the Windows User Push failure in the IT-Asset-Hub project end-to-end.
+
+CURRENT LIVE TEST
+
+I have now tested this on a real freshly prepared Windows laptop.
+
+Device:
+- Windows 11
+- Miles-IT-Support admin account already created manually
+- Miles Agent installed successfully
+- Agent version shown in portal: 0.9.9
+- Device Agent status: Online
+- Device is assigned to an employee
+- Employee OS Account card correctly detects Windows
+- Employee Code: MP1545
+- Expected OS username: mp1545
+- Expected account type: Standard User
+
+When I click:
+
+Push User to Device
+
+the portal returns:
+
+"User Push failed"
+"User Push Phase 1 supports macOS only"
+
+This is incorrect because the cross-platform User Push work was already implemented for Windows and Ubuntu/Linux.
+
+IMPORTANT:
+Do not just hide or change this error message.
+Find the actual server-side/backend restriction that is still enforcing macOS-only User Push and fix the complete execution path.
+
+GOAL
+
+User Push must support:
+
+- macOS
+- Windows
+- Ubuntu/Linux
+
+using the existing provision_user command and the existing agent command architecture.
+
+Do not break the currently working macOS implementation.
+
+--------------------------------------------------
+1. TRACE THE COMPLETE USER PUSH PATH
+--------------------------------------------------
+
+Trace the code from:
+
+Employee OS Account card
+    ->
+Push User to Device button
+    ->
+frontend request
+    ->
+backend / Supabase RPC / Edge Function
+    ->
+command creation
+    ->
+device command queue
+    ->
+agent receives provision_user
+    ->
+platform dispatcher
+    ->
+Windows/macOS/Linux provisioning implementation
+    ->
+command result
+    ->
+portal status
+
+Search the entire repository for strings and conditions including:
+
+"User Push Phase 1 supports macOS only"
+"supports macOS only"
+"Phase 1"
+"provision_user"
+"darwin"
+"macOS"
+"platform"
+"os_family"
+"operating_system"
+
+Find every stale macOS-only guard.
+
+Do not assume the recently added cross-platform migration is actually being used by the live request path.
+
+--------------------------------------------------
+2. CHECK THE DATABASE / RPC PATH
+--------------------------------------------------
+
+Inspect:
+
+artifacts/asset-desk/supabase/migrations/
+
+including:
+
+20260821000000_cross_platform_user_provisioning.sql
+
+and the earlier macOS User Push migration.
+
+Determine whether the new cross-platform migration actually replaces/updates the existing RPC/function used by the frontend.
+
+Check whether the frontend is still calling an older RPC/function containing:
+
+"User Push Phase 1 supports macOS only"
+
+If so, update the real function/RPC used by the application.
+
+The server must accept provision_user only for supported managed laptop OS families:
+
+- Windows
+- macOS
+- Ubuntu/Linux
+
+Do NOT trust a platform value supplied arbitrarily by the frontend.
+
+Determine the platform from trusted registered device/agent information.
+
+--------------------------------------------------
+3. WINDOWS USER PUSH
+--------------------------------------------------
+
+For Windows, provision_user must create:
+
+Username:
+lowercase Employee Code
+
+Example:
+
+Employee Code = MP1545
+Windows username = mp1545
+
+Create a LOCAL Windows account.
+
+Requirements:
+
+- standard user only
+- never Administrator
+- never add to Administrators
+- secure generated temporary password
+- verify account creation
+- verify account is enabled
+- verify it is a standard/non-admin account
+- protect Miles-IT-Support
+- protect Administrator
+- protect DefaultAccount
+- protect Guest
+- protect WDAGUtilityAccount
+- protect system/service accounts
+
+Miles-IT-Support is the permanent IT administrator account and MUST NOT be modified.
+
+If mp1545 does not exist:
+create it.
+
+If mp1545 already exists and is compatible:
+handle idempotently and report success.
+
+If it exists but conflicts with the required identity/account type:
+return a safe explicit conflict error.
+Do not take over an unrelated account.
+
+--------------------------------------------------
+4. WINDOWS EXECUTION CONTEXT
+--------------------------------------------------
+
+The Miles Agent normally runs elevated/system-level.
+
+Make sure Windows provisioning works from the actual background agent execution context.
+
+Do not implement something that only works when laptop_agent.py is manually executed in an interactive PowerShell window.
+
+Use appropriate Windows local-user APIs/PowerShell commands through the existing safe subprocess architecture.
+
+No visible PowerShell/cmd windows should flash for the employee.
+
+Do not expose the generated password in:
+
+- process arguments where avoidable
+- logs
+- command audit logs
+- exceptions
+- portal API responses except the intentional one-time credential reveal mechanism
+
+--------------------------------------------------
+5. COMMAND DISPATCH
+--------------------------------------------------
+
+There should remain ONE command:
+
+provision_user
+
+Do not create:
+
+provision_windows_user
+provision_linux_user
+etc.
+
+Agent dispatch should be:
+
+provision_user
+    |
+    +-- macOS -> existing working macOS provisioning
+    |
+    +-- Windows -> Windows local standard-user provisioning
+    |
+    +-- Linux/Ubuntu -> Linux local standard-user provisioning
+
+Unsupported platforms must return an explicit unsupported-platform result.
+
+--------------------------------------------------
+6. PORTAL
+--------------------------------------------------
+
+The existing Employee OS Account card should remain platform-aware.
+
+Windows example should display:
+
+Assigned Employee: Sidh... / actual assigned employee
+Employee Code: MP1545
+OS Username: mp1545
+Account Type: Standard User
+
+Before push:
+Not Provisioned
+
+After successful push:
+Provisioned
+
+The portal must display the actual command status:
+
+Pending
+Running
+Completed
+Failed
+
+Do not mark an account provisioned merely because the button was clicked.
+
+--------------------------------------------------
+7. ONE-TIME CREDENTIAL
+--------------------------------------------------
+
+Preserve the existing secure credential architecture.
+
+After successful Windows account creation, allow the authorized administrator to reveal/copy the generated credential using the existing one-time credential mechanism.
+
+Do not create a second credential storage system specifically for Windows.
+
+Do not expose credentials in normal command logs.
+
+--------------------------------------------------
+8. MACOS REGRESSION SAFETY
+--------------------------------------------------
+
+macOS User Push is already working in production.
+
+DO NOT rewrite it unnecessarily.
+
+Verify that the fix does not change:
+
+- macOS account creation
+- acknowledgement
+- password handling
+- lock/unlock
+- restart
+- wallpaper
+- agent heartbeat
+- agent authentication
+
+--------------------------------------------------
+9. UBUNTU/LINUX
+--------------------------------------------------
+
+Keep/fix the Ubuntu/Linux path as part of the same cross-platform contract.
+
+Ubuntu user must:
+
+- use lowercase Employee Code
+- be a normal interactive local user
+- have normal UID/home/shell
+- not have sudo/admin/root privileges
+- not modify protected/system accounts
+- support idempotent compatible-account handling
+
+Do not require a live Ubuntu device for this Windows fix, but ensure tests/contracts remain valid.
+
+--------------------------------------------------
+10. TEST THE ACTUAL FAILURE
+--------------------------------------------------
+
+Add a regression test specifically proving that a registered Windows device is NOT rejected with:
+
+"User Push Phase 1 supports macOS only"
+
+Test:
+
+Windows device
++
+active employee assignment
++
+Employee Code MP1545
++
+managed/online agent
++
+User Push
+=
+provision_user command successfully queued
+
+Also test:
+
+macOS -> accepted
+Windows -> accepted
+Ubuntu/Linux -> accepted
+unsupported OS -> rejected
+unmanaged device -> rejected
+no employee -> rejected
+invalid employee code -> rejected
+protected username -> rejected
+
+--------------------------------------------------
+11. FIND DEPLOYMENT GAP
+--------------------------------------------------
+
+Very important:
+
+Determine whether the source code is already correct but production is still running an OLD Supabase function/RPC/migration.
+
+The repository may contain cross-platform code while the live database still contains the Phase 1 macOS-only implementation.
+
+If that is the case, clearly report:
+
+SOURCE CODE: correct/incorrect
+DATABASE MIGRATION: correct/incorrect
+LIVE DATABASE DEPLOYMENT REQUIRED: yes/no
+EDGE FUNCTION DEPLOYMENT REQUIRED: yes/no
+FRONTEND DEPLOYMENT REQUIRED: yes/no
+AGENT UPDATE REQUIRED: yes/no
+
+Do not silently apply production migrations or deploy anything unless explicitly authorized.
+
+--------------------------------------------------
+12. VERSIONING
+--------------------------------------------------
+
+If laptop_agent.py must actually change for this fix:
+
+increment agent version from 0.9.9 to 0.9.10
+
+and synchronize:
+
+artifacts/asset-desk/agent/laptop_agent.py
+artifacts/asset-desk/public/agent/laptop_agent.py
+
+If the problem is only backend/database/frontend and laptop_agent.py requires no change, DO NOT bump the agent version unnecessarily.
+
+--------------------------------------------------
+13. VALIDATION
+--------------------------------------------------
+
+Run all relevant tests.
+
+Run full test suite.
+
+Run frontend TypeScript/build checks.
+
+Verify both agent source copies are identical.
+
+Verify no secrets/tokens/passwords were committed.
+
+Do not modify my configured secrets.
+
+Do not expose any secret values in output.
+
+--------------------------------------------------
+14. DO NOT DEPLOY YET
+--------------------------------------------------
+
+For this task:
+
+DO NOT:
+- deploy production
+- apply Supabase migration
+- push to GitHub
+- change production secrets
+- regenerate device keys
+- execute User Push against a physical laptop
+
+First fix and validate the source code locally.
+
+At completion give me a concise report:
+
+ROOT CAUSE:
+FILES CHANGED:
+DATABASE/RPC CHANGE:
+AGENT CHANGE:
+AGENT VERSION:
+TEST RESULTS:
+BUILD RESULT:
+PRODUCTION DEPLOYMENT REQUIRED:
+SUPABASE MIGRATION REQUIRED:
+EDGE FUNCTION DEPLOYMENT REQUIRED:
+WINDOWS RETEST STEPS:
+
+The key requirement is:
+
+A healthy registered Windows agent must be able to receive the same provision_user command used by macOS, and the backend must no longer reject Windows with "User Push Phase 1 supports macOS only".
