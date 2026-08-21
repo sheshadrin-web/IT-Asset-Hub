@@ -104,6 +104,20 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
         self.assertNotIn("provision_windows_user", CROSS_PLATFORM_MIGRATION)
         self.assertNotIn("provision_linux_user", CROSS_PLATFORM_MIGRATION)
         self.assertIn("REVOKE ALL ON FUNCTION public.request_user_provisioning(uuid) FROM PUBLIC, anon", CROSS_PLATFORM_MIGRATION)
+        legacy = (ROOT / "supabase/migrations/20260816000000_mac_user_provisioning.sql").read_text()
+        self.assertNotIn("User Push Phase 1 supports macOS only", legacy)
+        self.assertIn("v_platform := 'Windows'", legacy)
+        self.assertIn("v_platform := 'Ubuntu/Linux'", legacy)
+
+    def test_windows_mp1545_request_contract_is_not_mac_only(self):
+        # This mirrors the reported live case and guards the actual RPC inputs:
+        # server-side identity/OS detection must queue the shared command.
+        self.assertIn("v_profile.ecode", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("'provision_user'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("'Windows'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("'Ubuntu/Linux'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("v_device.status <> 'online'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("v_device.is_managed IS NOT TRUE", CROSS_PLATFORM_MIGRATION)
 
     def test_agent_and_portal_have_platform_dispatch(self):
         self.assertIn("def _win_provision_user", AGENT)

@@ -147,6 +147,7 @@ DECLARE
   v_device    record;
   v_existing  public.device_user_provisioning;
   v_username  text;
+  v_platform  text;
   v_command   uuid;
   v_row_id    uuid;
   v_tag       text;
@@ -183,8 +184,10 @@ BEGIN
     RAISE EXCEPTION 'assigned employee has an invalid Employee Code';
   END IF;
   IF v_username IN ('root','daemon','nobody','miles-it-support','administrator',
-                    'system','loginwindow','_windowserver') THEN
-    RAISE EXCEPTION 'Employee Code resolves to a protected macOS account';
+                    'defaultaccount','guest','wdagutilityaccount','system',
+                    'local service','network service','loginwindow','_windowserver',
+                    'gdm','messagebus','syslog','_apt') THEN
+    RAISE EXCEPTION 'Employee Code resolves to a protected system account';
   END IF;
 
   SELECT id, os_name, status, is_managed
@@ -193,11 +196,23 @@ BEGIN
    WHERE laptop_asset_id = p_asset_id
    FOR UPDATE;
   IF NOT FOUND OR v_device.is_managed IS NOT TRUE OR v_device.status <> 'online' THEN
-    RAISE EXCEPTION 'macOS agent must be online and managed before User Push';
+    RAISE EXCEPTION 'device agent must be online and managed before User Push';
   END IF;
-  IF lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) NOT LIKE '%mac%'
-     AND lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) NOT LIKE '%darwin%' THEN
-    RAISE EXCEPTION 'User Push Phase 1 supports macOS only';
+  IF lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%mac%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%darwin%' THEN
+    v_platform := 'macOS';
+  ELSIF lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%windows%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%win32%' THEN
+    v_platform := 'Windows';
+  ELSIF lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%ubuntu%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%linux%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%debian%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%fedora%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%rhel%'
+     OR lower(COALESCE(v_device.os_name, v_asset.operating_system, '')) LIKE '%red hat%' THEN
+    v_platform := 'Ubuntu/Linux';
+  ELSE
+    RAISE EXCEPTION 'User Push is not supported for this operating system';
   END IF;
 
   SELECT * INTO v_existing
@@ -235,7 +250,7 @@ BEGIN
     updated_at
   ) VALUES (
     p_asset_id, v_device.id, v_profile.id, upper(v_profile.ecode),
-    v_profile.full_name, v_profile.email, 'macOS', v_username, 'standard',
+    v_profile.full_name, v_profile.email, v_platform, v_username, 'standard',
     'pending', now(), v_uid, NULL, v_command, now()
   )
   ON CONFLICT (asset_id) DO UPDATE SET
