@@ -1,0 +1,802 @@
+Continue from the existing working macOS User Push implementation.
+
+GOAL
+
+Extend the existing provision_user feature to support:
+
+1. Windows
+2. Ubuntu / Linux
+
+macOS User Push is already working and must remain unchanged.
+
+Do NOT redesign the feature.
+Do NOT create separate command types like:
+provision_windows_user
+provision_linux_user
+
+Continue using the existing command:
+
+provision_user
+
+with platform-specific agent implementations.
+
+==================================================
+EXISTING BUSINESS MODEL — DO NOT CHANGE
+==================================================
+
+Permanent IT administrator account:
+
+miles-it-support
+
+This account is created by IT during OS preparation and must remain protected.
+
+The normal lifecycle is:
+
+OS installed
+→ miles-it-support created as Administrator
+→ Miles Agent installed with system/admin privileges
+→ Asset appears online
+→ IT assigns employee
+→ Existing acknowledgement email is sent
+→ IT explicitly clicks Push User to Device
+→ Agent creates employee Standard User
+
+Acknowledgement remains completely independent from User Push.
+
+DO NOT:
+- automatically acknowledge on OS login
+- require acknowledgement before User Push
+- automatically Push User immediately after assignment
+
+==================================================
+IDENTITY RULE
+==================================================
+
+Employee Code is the canonical identity.
+
+Example:
+
+Employee Code:
+MPE1340
+
+Expected OS username:
+
+Windows:
+mpe1340
+
+Ubuntu:
+mpe1340
+
+macOS:
+mpe1340
+
+Do not derive usernames from employee names.
+
+Rules:
+
+- lowercase Employee Code
+- validate safe characters
+- reject malformed Employee Codes
+- employee display name remains metadata only
+- use Employee Code for device-user identity mapping
+
+==================================================
+EXISTING macOS IMPLEMENTATION
+==================================================
+
+The macOS provisioning implementation is already working.
+
+Do not rewrite it.
+
+Use it as the behavioral reference for:
+
+- validation
+- protected account handling
+- provisioning state
+- idempotency
+- temporary credential lifecycle
+- audit results
+- server-side assignment validation
+- frontend states
+- command completion reporting
+
+Only add Windows and Ubuntu implementations.
+
+==================================================
+PROTECTED ACCOUNTS
+==================================================
+
+Centralize protected account rules where practical.
+
+At minimum protect on ALL platforms:
+
+miles-it-support
+
+Never allow employee provisioning logic to:
+
+- overwrite it
+- modify it
+- demote it
+- reset its password
+- rename it
+- treat it as employee identity
+
+WINDOWS also protect:
+
+Administrator
+DefaultAccount
+Guest
+WDAGUtilityAccount
+SYSTEM
+LOCAL SERVICE
+NETWORK SERVICE
+
+and other built-in/system accounts.
+
+UBUNTU also protect:
+
+root
+daemon
+bin
+sys
+sync
+games
+man
+lp
+mail
+news
+uucp
+proxy
+www-data
+backup
+list
+irc
+gnats
+nobody
+systemd-network
+systemd-resolve
+messagebus
+syslog
+_apt
+gdm
+
+and any account below the configured normal-user UID threshold.
+
+Do not hardcode only this list if there is a safer platform-native method to identify system accounts.
+
+==================================================
+WINDOWS USER PUSH
+==================================================
+
+Implement a dedicated helper such as:
+
+_win_provision_user(...)
+
+Do not place the entire implementation inside execute_command().
+
+Requirements:
+
+1. Agent must be running elevated / Administrator / system context.
+
+If not:
+
+return:
+requires_admin
+
+2. Username:
+
+MPE1340
+→
+mpe1340
+
+3. Display/full name:
+
+employee full name
+
+4. Create a LOCAL Windows account.
+
+Do not create:
+- Microsoft account
+- Entra ID account
+- domain account
+
+Phase 1 Windows User Push is local-account provisioning only.
+
+5. Employee account type:
+
+STANDARD USER
+
+It must NOT be member of:
+
+Administrators
+
+6. Prefer native Windows account-management APIs / PowerShell / net user
+according to existing project conventions.
+
+7. Create home/profile normally through Windows account lifecycle.
+
+Do not manually create a fake profile directory.
+
+Windows should create the user profile naturally on first login.
+
+8. Verify after creation:
+
+- local user exists
+- account enabled
+- username matches
+- employee is NOT Administrator
+- miles-it-support remains Administrator
+
+9. Store the Employee Code marker/mapping using the existing provisioning database mapping.
+
+If a safe local marker is useful, implement one without exposing secrets.
+
+==================================================
+WINDOWS TEMPORARY PASSWORD
+==================================================
+
+Reuse the existing secure one-time credential architecture developed for macOS.
+
+Do NOT create a new password transport system.
+
+Requirements:
+
+- password generated locally by the agent
+- cryptographically secure
+- never logged
+- never put in device command payload
+- never put in device command result
+- never put in audit trail
+- encrypted before backend storage
+- one-time reveal through existing provisioning credential flow
+- same expiry behavior as macOS
+
+When invoking Windows account-creation tools, avoid exposing the password in:
+
+- command-line arguments
+- process listings
+- PowerShell history
+- logs
+
+Prefer stdin / secure process invocation where technically possible.
+
+If Windows APIs require different handling, implement the safest available approach and document the limitation.
+
+==================================================
+WINDOWS IDEMPOTENCY
+==================================================
+
+If mpe1340 already exists:
+
+Case A:
+Existing account matches the current provisioning identity and is Standard User.
+
+Return:
+completed
+"User already provisioned"
+
+Case B:
+Existing account is Administrator.
+
+Fail.
+
+Case C:
+Username exists but does not match this provisioning mapping.
+
+Fail.
+
+Never overwrite an existing unrelated Windows user.
+
+==================================================
+UBUNTU USER PUSH
+==================================================
+
+Implement a dedicated helper such as:
+
+_linux_provision_user(...)
+
+Requirements:
+
+1. Agent must run as root/system service.
+
+If not:
+
+return:
+requires_admin
+
+2. Username:
+
+MPE1340
+→
+mpe1340
+
+3. Create normal local Linux user:
+
+home:
+/home/mpe1340
+
+shell:
+normal login shell appropriate for Ubuntu
+
+display/GECOS name:
+employee full name
+
+4. Account must be STANDARD USER.
+
+Do NOT add employee to:
+
+sudo
+admin
+wheel
+
+or any privileged group.
+
+5. Use standard Ubuntu account management.
+
+Preferred conceptual behavior:
+
+useradd/adduser
+home creation
+correct ownership
+password setting safely
+
+Use the platform utilities already present and compatible with supported Ubuntu versions.
+
+6. Verify after creation:
+
+id mpe1340
+
+Verify:
+
+- user exists
+- UID is normal human-user range
+- home directory exists
+- home ownership is correct
+- user is not in sudo/admin/wheel
+- miles-it-support remains privileged/admin
+
+==================================================
+UBUNTU TEMPORARY PASSWORD
+==================================================
+
+Reuse the SAME secure one-time credential flow already used for macOS.
+
+Do not create a different secret storage mechanism.
+
+Password must:
+
+- be generated locally
+- be cryptographically secure
+- never appear in logs
+- never appear in process arguments where avoidable
+- never appear in audit data
+- never appear in command results
+
+Use the safest password-setting mechanism.
+
+Prefer stdin-based tools such as:
+
+chpasswd
+
+if compatible and secure in this execution model.
+
+Do not shell-concatenate passwords.
+
+Do not use:
+
+shell=True
+
+with plaintext credentials.
+
+==================================================
+UBUNTU IDEMPOTENCY
+==================================================
+
+If mpe1340 already exists:
+
+If:
+- account belongs to this provisioning identity
+- user is standard/non-sudo
+- home is valid
+
+return:
+completed
+"User already provisioned"
+
+If:
+- account is privileged
+- mapping conflicts
+- username belongs to unrelated user
+
+return failed.
+
+Never overwrite or repurpose an unrelated Linux account.
+
+==================================================
+PLATFORM DISPATCH
+==================================================
+
+Extend the existing:
+
+provision_user
+
+handler.
+
+Expected behavior:
+
+macOS:
+existing implementation unchanged
+
+Windows:
+call _win_provision_user(...)
+
+Linux/Ubuntu:
+call _linux_provision_user(...)
+
+Unsupported OS:
+return failed with useful message.
+
+Do not duplicate backend command types.
+
+==================================================
+PORTAL UI
+==================================================
+
+Generalize the existing macOS User Provisioning card so it works for:
+
+Windows
+macOS
+Ubuntu
+
+Prefer renaming the component from something Mac-specific if necessary, for example:
+
+MacUserProvisioningCard
+→
+UserProvisioningCard
+
+Only rename if it can be done safely without unrelated refactoring.
+
+The card should show:
+
+EMPLOYEE OS ACCOUNT
+
+Employee:
+<name>
+
+Employee Code:
+MPE1340
+
+OS Username:
+mpe1340
+
+Platform:
+Windows / macOS / Ubuntu
+
+Account Type:
+Standard User
+
+Provisioning:
+Not Provisioned / Pending / Provisioning / Provisioned / Failed
+
+[ Push User to Device ]
+
+==================================================
+PLATFORM ELIGIBILITY
+==================================================
+
+Show User Push for managed devices running:
+
+- Windows
+- macOS
+- Ubuntu/Linux supported by the agent
+
+Do not enable it for unsupported device types.
+
+Require:
+
+- asset assigned
+- employee active
+- ecode available
+- agent installed
+- agent online
+- supported OS
+- no duplicate active provisioning request
+
+==================================================
+CONFIRMATION DIALOG
+==================================================
+
+Before Push User:
+
+Create employee account on this device?
+
+Employee:
+<Employee Name>
+
+Employee Code:
+MPE1340
+
+OS Username:
+mpe1340
+
+Platform:
+Windows / Ubuntu / macOS
+
+Account Type:
+Standard User
+
+Permanent IT Administrator:
+miles-it-support
+
+Message:
+
+This creates a standard employee account.
+The Miles IT Support administrator account will not be modified.
+
+Buttons:
+
+Cancel
+Push User
+
+==================================================
+DATABASE
+==================================================
+
+Reuse the current:
+
+device_user_provisioning
+
+and:
+
+device_user_credentials
+
+architecture.
+
+Do NOT create separate tables per OS.
+
+The provisioning record already includes platform.
+
+Extend status logic only if genuinely required.
+
+Do not duplicate provisioning state.
+
+==================================================
+BACKEND
+==================================================
+
+Keep:
+
+request_user_provisioning
+
+as the single backend request path.
+
+Backend should continue resolving:
+
+- current asset assignment
+- assigned employee
+- Employee Code
+- employee status
+- managed device
+- operating system
+
+server-side.
+
+Do NOT allow frontend to send arbitrary employee identity.
+
+==================================================
+AUDIT
+==================================================
+
+Existing User Push audit behavior should remain.
+
+Record:
+
+asset
+employee name
+Employee Code
+OS username
+platform
+requested by
+requested time
+completed time
+result/error
+
+Never record temporary passwords.
+
+==================================================
+WINDOWS PILOT TEST
+==================================================
+
+Use one controlled Windows laptop.
+
+Expected initial state:
+
+miles-it-support = Administrator
+
+employee account does not exist
+
+After User Push for MPE1340:
+
+mpe1340 exists
+
+mpe1340 = Standard User
+
+mpe1340 NOT in Administrators
+
+miles-it-support remains Administrator
+
+Agent remains running
+
+Portal shows:
+Provisioned
+
+Reveal Once works.
+
+Employee can log in.
+
+==================================================
+UBUNTU PILOT TEST
+==================================================
+
+Use one controlled Ubuntu laptop.
+
+Expected initial state:
+
+miles-it-support = sudo/admin
+
+employee account does not exist
+
+After User Push for MPE1340:
+
+mpe1340 exists
+
+/home/mpe1340 exists
+
+mpe1340 is NOT in sudo/admin/wheel
+
+miles-it-support remains privileged
+
+Agent remains running
+
+Portal shows:
+Provisioned
+
+Reveal Once works.
+
+Employee can log in.
+
+==================================================
+LOCK / UNLOCK IMPORTANT NOTE
+==================================================
+
+Do NOT redesign Lock/Unlock in this task.
+
+However:
+
+Once an employee has a provisioned OS account mapping, verify existing Lock/Unlock code does not accidentally target:
+
+miles-it-support
+
+Do not change the behavior unless needed for compatibility.
+
+If you find a conflict, report it instead of broad-refactoring Lock/Unlock.
+
+==================================================
+ACKNOWLEDGEMENT
+==================================================
+
+Do not change acknowledgement.
+
+Assignment email remains independent.
+
+User login does NOT acknowledge the asset.
+
+User Push does NOT depend on acknowledgement.
+
+==================================================
+DO NOT IMPLEMENT YET
+==================================================
+
+Do NOT implement:
+
+deprovision_user
+employee account deletion
+asset-return cleanup
+HR exit profile deletion
+automatic cleanup on Available
+Windows profile removal
+Linux home-directory removal
+
+Those belong to the next phase.
+
+==================================================
+TESTS
+==================================================
+
+Add tests for WINDOWS:
+
+1. MPE1340 -> mpe1340
+2. requires admin/elevation
+3. miles-it-support protected
+4. Administrator protected
+5. created account is standard
+6. created account not in Administrators
+7. existing valid account is idempotent
+8. conflicting user fails
+9. password never appears in logs
+10. credential publication uses existing secure flow
+
+Add tests for UBUNTU:
+
+11. MPE1340 -> mpe1340
+12. requires root
+13. miles-it-support protected
+14. root protected
+15. gdm/system account protected
+16. account receives normal UID
+17. home directory created
+18. employee not in sudo/admin/wheel
+19. valid existing account is idempotent
+20. conflicting account fails
+21. password never appears in logs
+22. credential publication uses existing secure flow
+
+Regression tests:
+
+23. macOS User Push still passes unchanged
+24. Lock tests pass
+25. Unlock tests pass
+26. Restart tests pass
+27. acknowledgement tests pass
+28. agent source/public copies remain identical
+29. frontend typecheck passes
+30. production build passes
+
+==================================================
+AGENT VERSIONING
+==================================================
+
+Determine whether adding Windows + Ubuntu User Push requires an agent version bump.
+
+If yes:
+
+increment according to the existing project versioning convention.
+
+Do NOT trigger fleet-wide automatic updates.
+
+Prepare the release/update but leave deployment controlled.
+
+==================================================
+DELIVERABLE
+==================================================
+
+Before making changes:
+
+inspect the existing working macOS provisioning implementation and reuse its architecture.
+
+Then implement Windows and Ubuntu support.
+
+When finished provide:
+
+1. Files changed
+2. Windows implementation details
+3. Ubuntu implementation details
+4. Shared provisioning architecture
+5. Protected-account rules
+6. Credential handling
+7. UI changes
+8. Database/backend changes
+9. Tests added
+10. Agent version impact
+11. Windows manual pilot procedure
+12. Ubuntu manual pilot procedure
+13. Rollback procedure
+14. Anything deferred
+
+Do not deploy automatically.
+
+Do not push to main automatically.
+
+Do not execute User Push on any live device automatically.
+
+Stop after implementation/testing and wait for approval.
