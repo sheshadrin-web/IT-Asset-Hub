@@ -1,0 +1,170 @@
+IMPORTANT: The Windows User Push is STILL failing in the live portal with:
+
+"User Push Phase 1 supports macOS only"
+
+The Windows laptop is healthy:
+- MILES-LAP-882
+- Windows 11
+- Agent 0.9.9
+- Agent Online
+- Managed = Yes
+- Employee assigned
+- Employee Code = MP1545
+- Expected username = mp1545
+
+DO NOT change the Windows agent.
+DO NOT reinstall the agent.
+DO NOT change the frontend.
+DO NOT regenerate the device key.
+
+The repository source is already correct.
+
+The live Supabase database is still executing the OLD
+public.request_user_provisioning(uuid)
+function.
+
+I am explicitly authorizing you to APPLY THE REQUIRED USER PUSH MIGRATION
+to the currently configured live Supabase project.
+
+TARGET:
+
+Supabase project:
+dimbgprindvmzoylzyud
+
+Project:
+it-asset-hub
+
+==================================================
+STEP 1 — VERIFY BEFORE CHANGE
+==================================================
+
+Using an approved Supabase management/database connection, inspect the current live definition of:
+
+public.request_user_provisioning(uuid)
+
+Confirm whether it still contains:
+
+"User Push Phase 1 supports macOS only"
+
+Do not execute User Push during this verification.
+
+==================================================
+STEP 2 — APPLY REQUIRED MIGRATIONS
+==================================================
+
+Apply the User Push migrations in correct dependency order.
+
+First ensure the base provisioning migration exists/applies:
+
+artifacts/asset-desk/supabase/migrations/20260816000000_mac_user_provisioning.sql
+
+Then apply:
+
+artifacts/asset-desk/supabase/migrations/20260821000000_cross_platform_user_provisioning.sql
+
+The second migration contains the required replacement:
+
+CREATE OR REPLACE FUNCTION
+public.request_user_provisioning(p_asset_id uuid)
+
+It must support:
+
+macOS
+Windows
+Ubuntu/Linux
+
+Do NOT run unrelated pending migrations.
+
+Do NOT modify production data manually.
+
+==================================================
+STEP 3 — RELOAD POSTGREST
+==================================================
+
+After the SQL applies successfully, reload the PostgREST schema cache:
+
+NOTIFY pgrst, 'reload schema';
+
+==================================================
+STEP 4 — VERIFY LIVE FUNCTION
+==================================================
+
+Read the live function definition again.
+
+Confirm that:
+
+"User Push Phase 1 supports macOS only"
+
+NO LONGER exists.
+
+Confirm the live function contains Windows platform detection similar to:
+
+ELSIF v_os LIKE '%windows%'
+   OR v_os LIKE '%win32%'
+THEN
+   v_platform := 'Windows';
+
+Confirm Ubuntu/Linux detection also exists.
+
+==================================================
+STEP 5 — VERIFY COMMAND SUPPORT
+==================================================
+
+Confirm live device_commands supports:
+
+provision_user
+
+Do not queue a command yet.
+
+==================================================
+STEP 6 — VERIFY TABLES
+==================================================
+
+Confirm these live tables exist:
+
+public.device_user_provisioning
+public.device_user_credentials
+
+Do not display credential ciphertext or secrets.
+
+==================================================
+STEP 7 — STOP BEFORE DEVICE ACTION
+==================================================
+
+After database verification:
+
+STOP.
+
+DO NOT click User Push.
+DO NOT create mp1545.
+DO NOT modify MILES-LAP-882.
+DO NOT deploy a new agent.
+DO NOT regenerate any keys.
+
+I will manually click Push User from the portal after you confirm the
+live database is ready.
+
+==================================================
+REQUIRED FINAL RESPONSE
+==================================================
+
+Give me only:
+
+LIVE RPC BEFORE:
+MIGRATION 20260816000000 STATUS:
+MIGRATION 20260821000000 STATUS:
+POSTGREST RELOAD:
+LIVE RPC AFTER:
+WINDOWS SUPPORT CONFIRMED:
+UBUNTU SUPPORT CONFIRMED:
+provision_user COMMAND CONFIRMED:
+PROVISIONING TABLES CONFIRMED:
+READY FOR WINDOWS RETEST: YES/NO
+
+If you cannot actually execute the migration, say:
+
+BLOCKED — MIGRATION NOT APPLIED
+
+Do NOT say the task is complete merely because the SQL exists in GitHub.
+The task is complete only when the live Supabase function has actually
+been replaced and verified.
