@@ -51,6 +51,7 @@ import shlex
 import tempfile
 import uuid
 import hashlib
+import re
 import secrets
 import string
 import threading
@@ -58,7 +59,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.8"
+AGENT_VERSION       = "0.9.9"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -2101,10 +2102,16 @@ def _linux_uid_threshold() -> int:
 def _linux_user_groups(user: str) -> set[str]:
     try:
         import grp
-        return {
+        groups = {
             entry.gr_name for entry in grp.getgrall()
             if user in entry.gr_mem
         }
+        try:
+            import pwd
+            groups.add(grp.getgrgid(pwd.getpwnam(user).pw_gid).gr_name)
+        except Exception:
+            pass
+        return groups
     except Exception:
         return set()
 

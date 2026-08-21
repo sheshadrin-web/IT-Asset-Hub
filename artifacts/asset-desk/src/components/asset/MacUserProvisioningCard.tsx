@@ -42,9 +42,15 @@ interface Props {
   isAdmin: boolean;
 }
 
-function isMac(device: Props["device"]): boolean {
+function platformLabel(device: Props["device"]): string | null {
   const value = String(device?.os_name ?? "").toLowerCase();
-  return value.includes("mac") || value.includes("darwin");
+  if (value.includes("mac") || value.includes("darwin")) return "macOS";
+  if (value.includes("windows") || value.includes("win32")) return "Windows";
+  if (value.includes("ubuntu") || value.includes("linux") || value.includes("debian")
+    || value.includes("fedora") || value.includes("rhel") || value.includes("red hat")) {
+    return "Ubuntu/Linux";
+  }
+  return null;
 }
 
 function formatDate(value?: string | null): string {
@@ -82,11 +88,13 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
   useEffect(() => { void load(); }, [load]);
 
   const status = state?.provisioning_status ?? "not_provisioned";
+  const platform = state?.platform ?? platformLabel(device);
+  const supportedPlatform = !!platform;
   const eligible = !!assignedUser?.ecode
     && !!device
     && device.status === "online"
     && device.is_managed === true
-    && isMac(device);
+    && supportedPlatform;
   const inFlight = status === "pending" || status === "provisioning";
 
   useEffect(() => {
@@ -113,7 +121,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
       title: data.idempotent ? "User already provisioned" : "User Push queued",
       description: data.idempotent
         ? "The employee account is already recorded as provisioned."
-        : "The macOS agent will process the request on its next command poll.",
+        : "The device agent will process the request on its next command poll.",
     });
     await load();
   }
@@ -177,12 +185,12 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
     setResetConfirm("");
     toast({
       title: "Password reset queued",
-      description: "The Mac agent will replace the employee password on its next command poll.",
+      description: "The macOS agent will replace the employee password on its next command poll.",
     });
     await load();
   }
 
-  if (!isMac(device) && !state) return null;
+  if (!supportedPlatform && !state) return null;
 
   return (
     <>
@@ -191,14 +199,14 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <UserRound className="h-4 w-4 text-muted-foreground" />
             Employee OS Account
-            <span className="ml-auto text-[11px] font-medium text-muted-foreground">macOS only</span>
+            <span className="ml-auto text-[11px] font-medium text-muted-foreground">{platform ?? "Unsupported OS"}</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           {loading ? (
             <p className="text-xs text-muted-foreground">Loading provisioning state…</p>
-          ) : !assignedUser?.name ? (
-            <p className="text-xs text-muted-foreground">Assign an active employee before pushing a user to this Mac.</p>
+           ) : !assignedUser?.name ? (
+             <p className="text-xs text-muted-foreground">Assign an active employee before pushing a user to this device.</p>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -211,14 +219,14 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
                   <p className="font-mono font-medium">{state?.employee_code ?? assignedUser.ecode ?? "—"}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">macOS Username</p>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">OS Username</p>
                   <p className="font-mono font-medium">{state?.os_username ?? assignedUser.ecode?.toLowerCase() ?? "—"}</p>
                 </div>
                 <div>
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Account Type</p>
                   <p className="font-medium">Standard User</p>
                 </div>
-                   <div className="mt-3 border-t border-emerald-200 pt-2">
+                   {platform === "macOS" && <div className="mt-3 border-t border-emerald-200 pt-2">
                      <p className="text-[11px] uppercase tracking-wide text-emerald-700">OS Password Reset</p>
                      {state?.reset_status === "available" ? (
                        <Button
@@ -237,7 +245,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
                            state?.reset_status === "consumed" ? "Revealed / Consumed" : "Not requested"}
                        </p>
                      )}
-                   </div>
+                    </div>}
               </div>
 
               {status === "provisioned" ? (
@@ -291,7 +299,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
                   <p className="flex items-center gap-1.5 text-xs font-semibold">
                     <Loader2 className="h-4 w-4 animate-spin" /> Provisioning employee account…
                   </p>
-                  <p className="mt-1 text-[11px]">Waiting for the macOS device agent.</p>
+                   <p className="mt-1 text-[11px]">Waiting for the {platform ?? "device"} agent.</p>
                 </div>
               ) : (
                 <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
@@ -313,7 +321,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
                   {status === "failed" ? "Retry User Push" : "Push User to Device"}
                 </Button>
               )}
-               {status === "provisioned" && (
+                {status === "provisioned" && platform === "macOS" && (
                  <Button
                    variant="outline"
                    className="w-full gap-2"
@@ -325,7 +333,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
                )}
               {!eligible && status !== "provisioned" && (
                 <p className="text-[11px] text-muted-foreground">
-                  User Push requires an assigned active employee and an online managed macOS agent.
+                   User Push requires an assigned active employee and an online managed agent running Windows, macOS, or Ubuntu/Linux.
                 </p>
               )}
             </>
@@ -336,7 +344,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Create employee account on this Mac?</DialogTitle>
+            <DialogTitle>Create employee account on this {platform ?? "device"}?</DialogTitle>
             <DialogDescription>
               This is an explicit IT action and does not change acknowledgement status.
             </DialogDescription>
@@ -344,7 +352,8 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4 text-sm">
             <p><span className="text-muted-foreground">Employee:</span> <b>{assignedUser?.name}</b></p>
             <p><span className="text-muted-foreground">Employee Code:</span> <b className="font-mono">{assignedUser?.ecode}</b></p>
-            <p><span className="text-muted-foreground">macOS Username:</span> <b className="font-mono">{assignedUser?.ecode?.toLowerCase()}</b></p>
+            <p><span className="text-muted-foreground">OS Username:</span> <b className="font-mono">{assignedUser?.ecode?.toLowerCase()}</b></p>
+            <p><span className="text-muted-foreground">Platform:</span> <b>{platform ?? "Unsupported"}</b></p>
             <p><span className="text-muted-foreground">Account Type:</span> <b>Standard User</b></p>
             <div className="flex items-start gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
@@ -352,7 +361,7 @@ export default function MacUserProvisioningCard({ assetId, assetTag, assignedUse
             </div>
           </div>
           <p className="text-xs text-amber-700">
-            A strong temporary password will be generated locally by the Mac agent and made available to an authorized IT administrator exactly once after successful provisioning.
+             A strong temporary password will be generated locally by the device agent and made available to an authorized IT administrator exactly once after successful provisioning.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
