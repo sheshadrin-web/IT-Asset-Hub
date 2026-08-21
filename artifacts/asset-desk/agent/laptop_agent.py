@@ -51,6 +51,7 @@ import shlex
 import tempfile
 import uuid
 import hashlib
+import re
 import secrets
 import string
 import threading
@@ -58,7 +59,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.8"
+AGENT_VERSION       = "0.9.9"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1951,6 +1952,280 @@ def _mac_safe_creation_reason(stderr: str, password: str) -> str:
     return reason[:240] or "unknown sysadminctl error"
 
 
+WIN_PROVISION_PROTECTED_ACCOUNTS = {
+    "miles-it-support", "administrator", "defaultaccount", "guest",
+    "wdagutilityaccount", "system", "local service", "network service",
+}
+LINUX_PROVISION_PROTECTED_ACCOUNTS = {
+    "miles-it-support", "root", "daemon", "bin", "sys", "sync", "games",
+    "man", "lp", "mail", "news", "uucp", "proxy", "www-data", "backup",
+    "list", "irc", "gnats", "nobody", "systemd-network", "systemd-resolve",
+    "messagebus", "syslog", "_apt", "gdm",
+}
+
+
+def _provisioning_username(employee_code: object) -> tuple[str, str | None]:
+    raw = str(employee_code or "").strip()
+    username = raw.lower()
+    if (
+        not raw or len(raw) > 32 or not raw[0].isalpha()
+        or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for ch in raw)
+    ):
+        return "", "invalid Employee Code"
+    return username, None
+
+
+def _win_local_user_record(user: str) -> dict | None:
+    safe = user.replace("'", "''")
+    output = _ps(
+        f"$u=Get-LocalUser -Name '{safe}' -ErrorAction SilentlyContinue;"
+        "if($u){$u | Select-Object Name,Enabled,Description | ConvertTo-Json -Compress}"
+    )
+    if not output:
+        return None
+    try:
+        value = json.loads(output)
+        return value if isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
+def _win_user_is_administrator(user: str) -> bool | None:
+    safe = user.replace("'", "''")
+    output = _ps(
+        "$members=Get-LocalGroupMember -Group 'Administrators' "
+        "-ErrorAction SilentlyContinue | ForEach-Object {$_.Name};"
+        f"$members | Where-Object {{($_ -split '\\\\')[-1] -ieq '{safe}'}}"
+    )
+    if output:
+        return True
+    # A successful empty PowerShell result is a verified non-member.
+    return False
+
+
+def _win_protected_account_is_admin() -> bool:
+    result = _win_user_is_administrator("miles-it-support")
+    return result is True
+
+
+def _win_provision_user(
+    payload: dict, command_id: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Create or verify one local Windows standard user without changing macOS."""
+    if not IS_WIN:
+        return ("failed", None, "Windows user provisioning is not supported on this platform")
+    username, validation_error = _provisioning_username(payload.get("employee_code"))
+    if validation_error or username in WIN_PROVISION_PROTECTED_ACCOUNTS:
+        return ("failed", None, "invalid or protected Windows employee username")
+    supplied = str(payload.get("os_username") or "").strip().lower()
+    if supplied and supplied != username:
+        return ("failed", None, "Employee Code and Windows username do not match")
+    if str(payload.get("account_type") or "standard").lower() != "standard":
+        return ("failed", None, "employee account must be a Standard User")
+    if not _win_is_admin():
+        return ("requires_admin", None, "Windows user provisioning requires Administrator or SYSTEM context")
+    if not _win_protected_account_is_admin():
+        return ("failed", None, "protected Windows administrator miles-it-support is not an Administrator")
+
+    code = str(payload.get("employee_code") or "").strip().upper()
+    existing = _win_local_user_record(username)
+    if existing is not None:
+        description = str(existing.get("Description") or "")
+        marker = re.search(r"(?i)\bMilesEmployeeCode=([A-Z0-9._-]+)\b", description)
+        admin = _win_user_is_administrator(username)
+        if marker and marker.group(1).upper() == code and existing.get("Enabled") is True and admin is False:
+            return ("completed", f"User already provisioned: {username}", None)
+        if admin is True:
+            return ("failed", None, "existing Windows username is an Administrator; refusing conflict")
+        return ("failed", None, "existing Windows username is not a compatible Miles employee account")
+    if not command_id:
+        return ("failed", None, "provisioning command id is missing")
+
+    password = _mac_temporary_password()
+    display_name = str(payload.get("display_name") or code).replace("\r", " ").replace("\n", " ").strip()[:200]
+    safe_user = username.replace("'", "''")
+    safe_display = display_name.replace("'", "''")
+    script = (
+        "$password=[Console]::In.ReadLine();"
+        "$secure=ConvertTo-SecureString $password -AsPlainText -Force;"
+        f"New-LocalUser -Name '{safe_user}' -Password $secure -FullName '{safe_display}' "
+        f"-Description 'MilesEmployeeCode={code}' -AccountNeverExpires -PasswordNeverExpires:$false "
+        "-ErrorAction Stop | Out-Null"
+    )
+    try:
+        prepared = _post("/credentials/prepare", {
+            "command_id": command_id, "employee_code": code,
+            "os_username": username, "password": password,
+        })
+        if not isinstance(prepared, dict) or not prepared.get("success"):
+            return ("failed", None, "secure credential preparation failed; no account was created")
+        try:
+            created = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                input=password + "\n", stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                text=True, timeout=60, creationflags=_NO_WINDOW,
+            )
+        except Exception as exc:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, f"Windows account creation failed: {type(exc).__name__}")
+        if created.returncode != 0:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Windows account creation failed; diagnostics were withheld")
+        verified = _win_local_user_record(username)
+        admin = _win_user_is_administrator(username)
+        marker_ok = bool(
+            verified and re.search(
+                rf"(?i)\bMilesEmployeeCode={re.escape(code)}\b",
+                str(verified.get("Description") or ""),
+            )
+        )
+        if not verified or verified.get("Enabled") is not True or not marker_ok or admin is not False:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Windows account verification failed: account is not a standard managed user")
+        confirmed = _post("/credentials/confirm", {"command_id": command_id})
+        if not isinstance(confirmed, dict) or not confirmed.get("success"):
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "secure credential publication could not be confirmed")
+        return ("completed", f"Provisioned standard Windows user {username}", None)
+    finally:
+        password = ""
+
+
+def _linux_uid_threshold() -> int:
+    try:
+        value = int(os.environ.get("MILES_LINUX_NORMAL_UID_MIN", "1000"))
+        return max(100, value)
+    except ValueError:
+        return 1000
+
+
+def _linux_user_groups(user: str) -> set[str]:
+    try:
+        import grp
+        groups = {
+            entry.gr_name for entry in grp.getgrall()
+            if user in entry.gr_mem
+        }
+        try:
+            import pwd
+            groups.add(grp.getgrgid(pwd.getpwnam(user).pw_gid).gr_name)
+        except Exception:
+            pass
+        return groups
+    except Exception:
+        return set()
+
+
+def _linux_user_marker(record: object) -> str | None:
+    gecos = str(getattr(record, "pw_gecos", "") or "")
+    match = re.search(r"(?i)\bMilesEmployeeCode=([A-Z0-9._-]+)\b", gecos)
+    return match.group(1).upper() if match else None
+
+
+def _linux_provision_user(
+    payload: dict, command_id: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Create or verify one normal Ubuntu/Linux user without touching macOS."""
+    if not IS_LIN:
+        return ("failed", None, "Linux user provisioning is not supported on this platform")
+    username, validation_error = _provisioning_username(payload.get("employee_code"))
+    if validation_error or username in LINUX_PROVISION_PROTECTED_ACCOUNTS:
+        return ("failed", None, "invalid or protected Linux employee username")
+    supplied = str(payload.get("os_username") or "").strip().lower()
+    if supplied and supplied != username:
+        return ("failed", None, "Employee Code and Linux username do not match")
+    if str(payload.get("account_type") or "standard").lower() != "standard":
+        return ("failed", None, "employee account must be a Standard User")
+    if not _is_root():
+        return ("requires_admin", None, "Linux user provisioning requires root/system-service context")
+    try:
+        import pwd
+        existing = pwd.getpwnam(username)
+    except KeyError:
+        existing = None
+    except Exception as exc:
+        return ("failed", None, f"could not inspect Linux account: {type(exc).__name__}")
+
+    def valid_existing(record: object) -> bool:
+        try:
+            home = str(record.pw_dir)
+            stat = os.stat(home)
+            groups = _linux_user_groups(username)
+            return (
+                int(record.pw_uid) >= _linux_uid_threshold()
+                and home == f"/home/{username}"
+                and stat.st_uid == int(record.pw_uid)
+                and _linux_user_marker(record) == code
+                and not groups.intersection({"sudo", "admin", "wheel"})
+                and _linux_account_locked(username) is False
+            )
+        except Exception:
+            return False
+
+    code = str(payload.get("employee_code") or "").strip().upper()
+    if existing is not None:
+        if valid_existing(existing):
+            return ("completed", f"User already provisioned: {username}", None)
+        if username in LINUX_PROVISION_PROTECTED_ACCOUNTS or int(getattr(existing, "pw_uid", 0)) < _linux_uid_threshold():
+            return ("failed", None, "existing Linux username is a protected/system account")
+        return ("failed", None, "existing Linux username is not a compatible Miles employee account")
+    if not command_id:
+        return ("failed", None, "provisioning command id is missing")
+
+    # The permanent support account must remain privileged when it exists.
+    try:
+        support = pwd.getpwnam("miles-it-support")
+        if not _linux_user_groups("miles-it-support").intersection({"sudo", "admin", "wheel"}):
+            return ("failed", None, "protected Linux administrator miles-it-support is not privileged")
+        _ = support
+    except KeyError:
+        pass
+    except Exception:
+        return ("failed", None, "could not verify protected Linux administrator")
+
+    password = _mac_temporary_password()
+    display_name = str(payload.get("display_name") or code).replace(":", " ").replace("\n", " ").strip()[:200]
+    gecos = f"MilesEmployeeCode={code}, {display_name}"
+    try:
+        prepared = _post("/credentials/prepare", {
+            "command_id": command_id, "employee_code": code,
+            "os_username": username, "password": password,
+        })
+        if not isinstance(prepared, dict) or not prepared.get("success"):
+            return ("failed", None, "secure credential preparation failed; no account was created")
+        created = subprocess.run(
+            ["useradd", "--create-home", "--shell", "/bin/bash",
+             "--comment", gecos, username],
+            input=None, capture_output=True, text=True, timeout=30,
+        )
+        if created.returncode != 0:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Linux account creation failed; diagnostics were withheld")
+        password_set = subprocess.run(
+            ["chpasswd"], input=f"{username}:{password}\n",
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, timeout=30,
+        )
+        if password_set.returncode != 0:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Linux account password setup failed; diagnostics were withheld")
+        try:
+            verified = pwd.getpwnam(username)
+        except Exception:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Linux account could not be verified after creation")
+        if not valid_existing(verified):
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "Linux account verification failed: account is not a standard managed user")
+        confirmed = _post("/credentials/confirm", {"command_id": command_id})
+        if not isinstance(confirmed, dict) or not confirmed.get("success"):
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, "secure credential publication could not be confirmed")
+        return ("completed", f"Provisioned standard Linux user {username}", None)
+    finally:
+        password = ""
+
+
 def _mac_provision_user(
     payload: dict, command_id: str | None = None,
 ) -> tuple[str, str | None, str | None]:
@@ -2914,7 +3189,15 @@ def execute_command(cmd: dict) -> tuple[str, str | None, str | None]:
         with _lock_mutex:
             return _release_lock()
     if ctype == "provision_user":
-        return _mac_provision_user(cmd.get("payload") or {}, str(cmd.get("id") or ""))
+        payload = cmd.get("payload") or {}
+        command_id = str(cmd.get("id") or "")
+        if IS_MAC:
+            return _mac_provision_user(payload, command_id)
+        if IS_WIN:
+            return _win_provision_user(payload, command_id)
+        if IS_LIN:
+            return _linux_provision_user(payload, command_id)
+        return ("failed", None, f"unsupported platform: {sys.platform}")
     if ctype == "reset_user_password":
         return _mac_reset_user_password(cmd.get("payload") or {}, str(cmd.get("id") or ""))
     if ctype == "notify_restart":

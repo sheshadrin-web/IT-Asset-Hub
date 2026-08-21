@@ -254,5 +254,138 @@ class MacUserProvisioningTests(unittest.TestCase):
         self.assertEqual(error, "session unavailable")
         self.assertEqual(post.call_args.args[0], "/wallpaper/user-status")
 
+    def test_windows_employee_code_derives_lowercase_username(self):
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+             patch.object(agent, "_win_is_admin", return_value=False):
+            status, _, error = agent._win_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "win-1"
+            )
+        self.assertEqual(status, "requires_admin")
+        self.assertIn("Administrator", error or "")
+
+    def test_windows_protected_accounts_are_rejected(self):
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True):
+            for code in ("miles-it-support", "Administrator", "Guest"):
+                status, _, error = agent._win_provision_user(
+                    {"employee_code": code, "os_username": code.lower()}, "win-1"
+                )
+                self.assertEqual(status, "failed")
+                self.assertIn("protected", error or "")
+
+    def test_windows_existing_compatible_account_is_idempotent(self):
+        record = {"Name": "mpe1340", "Enabled": True, "Description": "MilesEmployeeCode=MPE1340"}
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+             patch.object(agent, "_win_is_admin", return_value=True), \
+             patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
+             patch.object(agent, "_win_local_user_record", return_value=record), \
+             patch.object(agent, "_win_user_is_administrator", return_value=False):
+            status, result, error = agent._win_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "win-1"
+            )
+        self.assertEqual((status, error), ("completed", None))
+        self.assertIn("already provisioned", result or "")
+
+    def test_windows_existing_admin_conflict_fails(self):
+        record = {"Name": "mpe1340", "Enabled": True, "Description": "MilesEmployeeCode=MPE1340"}
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+             patch.object(agent, "_win_is_admin", return_value=True), \
+             patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
+             patch.object(agent, "_win_local_user_record", return_value=record), \
+             patch.object(agent, "_win_user_is_administrator", return_value=True):
+            status, _, error = agent._win_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "win-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIn("Administrator", error or "")
+
+    def test_windows_password_is_stdin_only_and_not_result(self):
+        record = {"Name": "mpe1340", "Enabled": True, "Description": "MilesEmployeeCode=MPE1340"}
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+             patch.object(agent, "_win_is_admin", return_value=True), \
+             patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
+             patch.object(agent, "_win_local_user_record", side_effect=[None, record]), \
+             patch.object(agent, "_win_user_is_administrator", return_value=False), \
+             patch.object(agent, "_post", side_effect=[{"success": True}, {"success": True}]), \
+             patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout="", stderr=""
+             )) as run:
+            status, result, error = agent._win_provision_user(
+                {"employee_code": "MPE1340", "display_name": "Test Employee"}, "win-1"
+            )
+        self.assertEqual(status, "completed")
+        self.assertNotIn("password", result or "".lower())
+        self.assertIsNone(error)
+        self.assertNotIn("Temporary-", run.call_args.args[0][-1])
+        self.assertTrue(run.call_args.kwargs["input"].strip())
+
+    def test_linux_employee_code_derives_lowercase_username(self):
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True), \
+             patch.object(agent, "_is_root", return_value=False):
+            status, _, error = agent._linux_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "lin-1"
+            )
+        self.assertEqual(status, "requires_admin")
+        self.assertIn("root", error or "")
+
+    def test_linux_protected_accounts_are_rejected(self):
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True):
+            for code in ("miles-it-support", "root", "gdm"):
+                status, _, error = agent._linux_provision_user(
+                    {"employee_code": code, "os_username": code}, "lin-1"
+                )
+                self.assertEqual(status, "failed")
+                self.assertIn("protected", error or "")
+
+    def test_linux_existing_compatible_account_is_idempotent(self):
+        record = SimpleNamespace(
+            pw_uid=1340, pw_dir="/home/mpe1340", pw_gecos="MilesEmployeeCode=MPE1340, Test Employee"
+        )
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True), \
+             patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", return_value=record), \
+             patch.object(agent.os, "stat", return_value=SimpleNamespace(st_uid=1340)), \
+             patch.object(agent, "_linux_user_groups", return_value=set()), \
+             patch.object(agent, "_linux_account_locked", return_value=False):
+            status, result, error = agent._linux_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "lin-1"
+            )
+        self.assertEqual((status, error), ("completed", None))
+        self.assertIn("already provisioned", result or "")
+
+    def test_linux_existing_privileged_conflict_fails(self):
+        record = SimpleNamespace(pw_uid=1340, pw_dir="/home/mpe1340", pw_gecos="MilesEmployeeCode=MPE1340")
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True), \
+             patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", return_value=record), \
+             patch.object(agent, "_linux_user_groups", return_value={"sudo"}):
+            status, _, error = agent._linux_provision_user(
+                {"employee_code": "MPE1340", "os_username": "mpe1340"}, "lin-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIn("compatible", error or "")
+
+    def test_linux_password_uses_chpasswd_stdin_and_never_result(self):
+        record = SimpleNamespace(
+            pw_uid=1340, pw_dir="/home/mpe1340", pw_gecos="MilesEmployeeCode=MPE1340, Test Employee"
+        )
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True), \
+             patch.object(agent, "_is_root", return_value=True), \
+             patch("pwd.getpwnam", side_effect=[KeyError, KeyError, record]), \
+             patch.object(agent, "_linux_user_groups", return_value=set()), \
+             patch.object(agent, "_linux_account_locked", return_value=False), \
+             patch.object(agent.os, "stat", return_value=SimpleNamespace(st_uid=1340)), \
+             patch.object(agent, "_post", side_effect=[{"success": True}, {"success": True}]), \
+             patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout="", stderr=""
+             )) as run:
+            status, result, error = agent._linux_provision_user(
+                {"employee_code": "MPE1340", "display_name": "Test Employee"}, "lin-1"
+            )
+        self.assertEqual(status, "completed")
+        self.assertIsNone(error)
+        self.assertNotIn("MPE1340", run.call_args.args[0])
+        self.assertIn(":", run.call_args.kwargs["input"])
+        self.assertNotIn("password", result or "".lower())
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ import unittest
 ROOT = Path(__file__).parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260816000000_mac_user_provisioning.sql").read_text()
 RESET_MIGRATION = (ROOT / "supabase/migrations/20260819000000_mac_password_reset_and_user_wallpaper.sql").read_text()
+CROSS_PLATFORM_MIGRATION = (ROOT / "supabase/migrations/20260821000000_cross_platform_user_provisioning.sql").read_text()
 AGENT = (ROOT / "agent/laptop_agent.py").read_text()
 AGENT_API = (ROOT / "supabase/functions/agent-api/index.ts").read_text()
 REVEAL_API = (ROOT / "supabase/functions/provisioning-credentials/index.ts").read_text()
@@ -92,6 +93,27 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
         self.assertIn('rpc("agent_reveal_password_reset"', AGENT_API)
         self.assertIn('rpc("agent_confirm_password_reset"', AGENT_API)
         self.assertIn("public._auth_agent(p_token)", RESET_MIGRATION)
+
+    def test_cross_platform_request_uses_one_command_and_server_identity(self):
+        self.assertIn("'provision_user'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("v_platform := 'Windows'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("v_platform := 'Ubuntu/Linux'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("v_platform := 'macOS'", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("public._provisioning_username(v_profile.ecode)", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("platform", CROSS_PLATFORM_MIGRATION)
+        self.assertNotIn("provision_windows_user", CROSS_PLATFORM_MIGRATION)
+        self.assertNotIn("provision_linux_user", CROSS_PLATFORM_MIGRATION)
+        self.assertIn("REVOKE ALL ON FUNCTION public.request_user_provisioning(uuid) FROM PUBLIC, anon", CROSS_PLATFORM_MIGRATION)
+
+    def test_agent_and_portal_have_platform_dispatch(self):
+        self.assertIn("def _win_provision_user", AGENT)
+        self.assertIn("def _linux_provision_user", AGENT)
+        self.assertIn("if IS_WIN:", AGENT.split("if ctype == \"provision_user\":", 1)[1].split("if ctype == \"reset_user_password\":", 1)[0])
+        self.assertIn("if IS_LIN:", AGENT.split("if ctype == \"provision_user\":", 1)[1].split("if ctype == \"reset_user_password\":", 1)[0])
+        card = (ROOT / "src/components/asset/MacUserProvisioningCard.tsx").read_text()
+        self.assertIn("Ubuntu/Linux", card)
+        self.assertIn("Windows", card)
+        self.assertIn("supportedPlatform", card)
 
 
 if __name__ == "__main__":
