@@ -278,12 +278,35 @@ class MacUserProvisioningTests(unittest.TestCase):
              patch.object(agent, "_win_is_admin", return_value=True), \
              patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
              patch.object(agent, "_win_local_user_record", return_value=record), \
-             patch.object(agent, "_win_user_is_administrator", return_value=False):
+              patch.object(agent, "_win_user_is_administrator", return_value=False), \
+               patch.object(agent, "_post", return_value={
+                   "success": True, "credential_status": "available"
+               }), \
+              patch.object(agent, "_win_prepare_employee_signin", return_value=(True, None)), \
+              patch.object(agent, "_win_verify_employee_signin", return_value=(True, None)):
             status, result, error = agent._win_provision_user(
                 {"employee_code": "MPE1340", "os_username": "mpe1340"}, "win-1"
             )
         self.assertEqual((status, error), ("completed", None))
         self.assertIn("already provisioned", result or "")
+
+    def test_windows_existing_account_without_available_credential_does_not_complete(self):
+        record = {"Name": "mpi545", "Enabled": True, "Description": "MilesEmployeeCode=MPI545"}
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+             patch.object(agent, "_win_is_admin", return_value=True), \
+             patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
+             patch.object(agent, "_win_local_user_record", return_value=record), \
+             patch.object(agent, "_win_user_is_administrator", return_value=False), \
+             patch.object(agent, "_post", return_value={
+                 "success": True, "credential_status": "revoked"
+             }) as post:
+            status, result, error = agent._win_provision_user(
+                {"employee_code": "MPI545", "os_username": "mpi545"}, "win-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIsNone(result)
+        self.assertIn("credential recovery", error or "")
+        self.assertEqual(post.call_args.args[0], "/credentials/status")
 
     def test_windows_existing_admin_conflict_fails(self):
         record = {"Name": "mpe1340", "Enabled": True, "Description": "MilesEmployeeCode=MPE1340"}
@@ -305,6 +328,8 @@ class MacUserProvisioningTests(unittest.TestCase):
              patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
              patch.object(agent, "_win_local_user_record", side_effect=[None, record]), \
              patch.object(agent, "_win_user_is_administrator", return_value=False), \
+              patch.object(agent, "_win_prepare_employee_signin", return_value=(True, None)), \
+              patch.object(agent, "_win_verify_employee_signin", return_value=(True, None)), \
              patch.object(agent, "_post", side_effect=[{"success": True}, {"success": True}]), \
              patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
                  returncode=0, stdout="", stderr=""
@@ -317,6 +342,41 @@ class MacUserProvisioningTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertNotIn("Temporary-", run.call_args.args[0][-1])
         self.assertTrue(run.call_args.kwargs["input"].strip())
+
+    def test_windows_signin_preparation_repairs_membership_and_hidden_flag(self):
+        with patch.object(agent, "_win_user_in_standard_users_group", side_effect=[False, True]), \
+              patch.object(agent, "_win_add_to_standard_users_group", return_value=True), \
+              patch.object(agent, "_win_userlist_visibility", side_effect=["HIDDEN", "NOT_CONFIGURED"]), \
+              patch.object(agent, "_win_remove_userlist_hidden_flag", return_value=True):
+            ready, error = agent._win_prepare_employee_signin("mpi545")
+        self.assertTrue(ready)
+        self.assertIsNone(error)
+
+    def test_windows_interactive_logon_failure_revokes_prepared_credential(self):
+        record = {"Name": "mpi545", "Enabled": True, "Description": "MilesEmployeeCode=MPI545"}
+        with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_WIN", True), \
+              patch.object(agent, "_win_is_admin", return_value=True), \
+              patch.object(agent, "_win_protected_account_is_admin", return_value=True), \
+              patch.object(agent, "_win_local_user_record", side_effect=[None, record]), \
+              patch.object(agent, "_win_user_is_administrator", return_value=False), \
+              patch.object(agent, "_win_prepare_employee_signin", return_value=(True, None)), \
+              patch.object(agent, "_win_verify_employee_signin", return_value=(
+                  False, "interactive Windows logon verification failed (Win32 error 1385)"
+              )), \
+              patch.object(agent, "_post", side_effect=[{"success": True}, {"success": True}]) as post, \
+              patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                  returncode=0, stdout="", stderr=""
+              )):
+            status, result, error = agent._win_provision_user(
+                {"employee_code": "MPI545", "display_name": "Test Employee"}, "win-1"
+            )
+        self.assertEqual(status, "failed")
+        self.assertIsNone(result)
+        self.assertIn("interactive Windows logon", error or "")
+        self.assertEqual(
+            [call.args[0] for call in post.call_args_list],
+            ["/credentials/prepare", "/credentials/revoke"],
+        )
 
     def test_linux_employee_code_derives_lowercase_username(self):
         with patch.object(agent, "IS_MAC", False), patch.object(agent, "IS_LIN", True), \

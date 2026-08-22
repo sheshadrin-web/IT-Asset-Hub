@@ -59,7 +59,7 @@ from datetime import datetime, timezone
 
 import requests
 
-AGENT_VERSION       = "0.9.9"
+AGENT_VERSION       = "0.9.10"
 DEFAULT_API_BASE    = "https://dimbgprindvmzoylzyud.supabase.co/functions/v1/agent-api"
 API_BASE            = os.environ.get("MILES_AGENT_API_BASE", DEFAULT_API_BASE)
 # Where the latest laptop_agent.py is served. Mirrors DEFAULT_API_BASE so silent
@@ -1993,19 +1993,160 @@ def _win_local_user_record(user: str) -> dict | None:
 def _win_user_is_administrator(user: str) -> bool | None:
     safe = user.replace("'", "''")
     output = _ps(
-        "$members=Get-LocalGroupMember -Group 'Administrators' "
-        "-ErrorAction SilentlyContinue | ForEach-Object {$_.Name};"
-        f"$members | Where-Object {{($_ -split '\\\\')[-1] -ieq '{safe}'}}"
-    )
-    if output:
+        "$ErrorActionPreference='Stop';"
+        f"$u=Get-LocalUser -Name '{safe}' -ErrorAction SilentlyContinue;"
+        "if(-not $u){'UNKNOWN';exit};"
+        "$members=Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop;"
+        "if($members | Where-Object {$_.SID -eq $u.SID}){'MEMBER'}else{'NOT_MEMBER'}"
+    ).strip().upper()
+    if output == "MEMBER":
         return True
-    # A successful empty PowerShell result is a verified non-member.
-    return False
+    if output == "NOT_MEMBER":
+        return False
+    return None
 
 
 def _win_protected_account_is_admin() -> bool:
     result = _win_user_is_administrator("miles-it-support")
     return result is True
+
+
+_WIN_BUILTIN_USERS_SID = "S-1-5-32-545"
+_WIN_USERLIST_KEY = r"HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
+
+
+def _win_user_in_standard_users_group(user: str) -> bool | None:
+    """Return whether a local account belongs to the built-in Users group.
+
+    The group SID avoids relying on the localized display name (``Users`` /
+    ``Benutzer`` / etc.) on Windows Home Single Language installations.
+    """
+    safe = user.replace("'", "''")
+    output = _ps(
+        "$ErrorActionPreference='Stop';"
+        f"$u=Get-LocalUser -Name '{safe}' -ErrorAction SilentlyContinue;"
+        "if(-not $u){'UNKNOWN';exit};"
+        f"$members=Get-LocalGroupMember -SID '{_WIN_BUILTIN_USERS_SID}' -ErrorAction Stop;"
+        "if($members | Where-Object {$_.SID -eq $u.SID}){'MEMBER'}else{'NOT_MEMBER'}"
+    ).strip().upper()
+    if output == "MEMBER":
+        return True
+    if output == "NOT_MEMBER":
+        return False
+    return None
+
+
+def _win_add_to_standard_users_group(user: str) -> bool:
+    """Add the account to the built-in standard Users group, if absent."""
+    safe = user.replace("'", "''")
+    output = _ps(
+        "$ErrorActionPreference='Stop';"
+        f"$u=Get-LocalUser -Name '{safe}' -ErrorAction Stop;"
+        f"$g=Get-LocalGroup -SID '{_WIN_BUILTIN_USERS_SID}' -ErrorAction Stop;"
+        "Add-LocalGroupMember -Group $g -Member $u -ErrorAction Stop;"
+        "'OK'"
+    ).strip().upper()
+    return output == "OK"
+
+
+def _win_userlist_visibility(user: str) -> str:
+    """Return HIDDEN, VISIBLE, NOT_CONFIGURED, or UNKNOWN for Winlogon UserList."""
+    safe = user.replace("'", "''")
+    output = _ps(
+        "$ErrorActionPreference='Stop';"
+        f"$key=Get-Item -Path '{_WIN_USERLIST_KEY}' -ErrorAction SilentlyContinue;"
+        "if(-not $key){'NOT_CONFIGURED';exit};"
+        f"if($key.GetValueNames() -notcontains '{safe}'){{'NOT_CONFIGURED';exit}};"
+        f"if([int]$key.GetValue('{safe}') -eq 0){{'HIDDEN'}}else{{'VISIBLE'}}"
+    ).strip().upper()
+    return output if output in {"HIDDEN", "VISIBLE", "NOT_CONFIGURED"} else "UNKNOWN"
+
+
+def _win_remove_userlist_hidden_flag(user: str) -> bool:
+    """Remove only this employee's explicit Winlogon hide flag."""
+    safe = user.replace("'", "''")
+    output = _ps(
+        "$ErrorActionPreference='Stop';"
+        f"Remove-ItemProperty -Path '{_WIN_USERLIST_KEY}' -Name '{safe}' -ErrorAction Stop;"
+        "'OK'"
+    ).strip().upper()
+    return output == "OK"
+
+
+def _win_can_interactively_logon(user: str, password: str) -> tuple[bool, str | None]:
+    """Validate credentials and interactive-logon policy without creating a desktop."""
+    if not IS_WIN:
+        return False, "interactive Windows logon verification is unavailable on this platform"
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        token = wintypes.HANDLE()
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        advapi32.LogonUserW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+            wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
+        ]
+        advapi32.LogonUserW.restype = wintypes.BOOL
+        # LOGON32_LOGON_INTERACTIVE verifies the same local logon right used by
+        # the Windows sign-in screen. It returns a token only; it does not
+        # create a user session or auto-log the employee into the device.
+        ok = advapi32.LogonUserW(user, ".", password, 2, 0, ctypes.byref(token))
+        if ok:
+            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(token)
+            return True, None
+        return False, f"interactive Windows logon verification failed (Win32 error {ctypes.get_last_error()})"
+    except Exception as exc:
+        return False, f"interactive Windows logon verification could not run ({type(exc).__name__})"
+
+
+def _win_prepare_employee_signin(user: str) -> tuple[bool, str | None]:
+    """Repair only employee-specific visibility prerequisites before verification."""
+    membership = _win_user_in_standard_users_group(user)
+    if membership is None:
+        return False, "could not verify Windows standard Users group membership"
+    if membership is False:
+        if not _win_add_to_standard_users_group(user):
+            return False, "could not add employee account to the Windows standard Users group"
+        if _win_user_in_standard_users_group(user) is not True:
+            return False, "Windows standard Users group membership could not be confirmed"
+
+    visibility = _win_userlist_visibility(user)
+    if visibility == "UNKNOWN":
+        return False, "could not inspect Windows per-user sign-in visibility"
+    if visibility == "HIDDEN":
+        if not _win_remove_userlist_hidden_flag(user):
+            return False, "could not remove Windows per-user sign-in hide flag"
+        if _win_userlist_visibility(user) == "HIDDEN":
+            return False, "Windows per-user sign-in hide flag remains active"
+
+    return True, None
+
+
+def _win_verify_employee_signin(
+    user: str, employee_code: str, password: str | None,
+) -> tuple[bool, str | None]:
+    """Verify the account is a usable standard local sign-in, not just a SAM row."""
+    record = _win_local_user_record(user)
+    marker_ok = bool(
+        record and re.search(
+            rf"(?i)\bMilesEmployeeCode={re.escape(employee_code)}\b",
+            str(record.get("Description") or ""),
+        )
+    )
+    if not record or record.get("Enabled") is not True or not marker_ok:
+        return False, "Windows account verification failed: account is not an enabled managed user"
+    if _win_user_is_administrator(user) is not False:
+        return False, "Windows account verification failed: employee account is an Administrator"
+    if _win_user_in_standard_users_group(user) is not True:
+        return False, "Windows account verification failed: employee is not in the standard Users group"
+    if _win_userlist_visibility(user) == "HIDDEN":
+        return False, "Windows account verification failed: employee is hidden from sign-in"
+    if password is not None:
+        eligible, reason = _win_can_interactively_logon(user, password)
+        if not eligible:
+            return False, reason or "Windows account verification failed: interactive local logon is unavailable"
+    return True, None
 
 
 def _win_provision_user(
@@ -2034,6 +2175,28 @@ def _win_provision_user(
         marker = re.search(r"(?i)\bMilesEmployeeCode=([A-Z0-9._-]+)\b", description)
         admin = _win_user_is_administrator(username)
         if marker and marker.group(1).upper() == code and existing.get("Enabled") is True and admin is False:
+            # An existing account has no password in this process. Never
+            # regenerate or retrieve the one-time credential merely to retry
+            # User Push. Completion is safe only when the server proves this
+            # exact command already has a credential that was made available
+            # after a successful first-run verification.
+            attestation = _post("/credentials/status", {"command_id": command_id})
+            if (
+                not isinstance(attestation, dict)
+                or not attestation.get("success")
+                or attestation.get("credential_status") != "available"
+            ):
+                return (
+                    "failed", None,
+                    "existing Windows account requires credential recovery; "
+                    "no verified available credential is bound to this command",
+                )
+            prepared, reason = _win_prepare_employee_signin(username)
+            if not prepared:
+                return ("failed", None, reason or "Windows sign-in preparation failed")
+            verified, reason = _win_verify_employee_signin(username, code, None)
+            if not verified:
+                return ("failed", None, reason or "Windows sign-in verification failed")
             return ("completed", f"User already provisioned: {username}", None)
         if admin is True:
             return ("failed", None, "existing Windows username is an Administrator; refusing conflict")
@@ -2071,17 +2234,14 @@ def _win_provision_user(
         if created.returncode != 0:
             _post("/credentials/revoke", {"command_id": command_id})
             return ("failed", None, "Windows account creation failed; diagnostics were withheld")
-        verified = _win_local_user_record(username)
-        admin = _win_user_is_administrator(username)
-        marker_ok = bool(
-            verified and re.search(
-                rf"(?i)\bMilesEmployeeCode={re.escape(code)}\b",
-                str(verified.get("Description") or ""),
-            )
-        )
-        if not verified or verified.get("Enabled") is not True or not marker_ok or admin is not False:
+        signin_prepared, reason = _win_prepare_employee_signin(username)
+        if not signin_prepared:
             _post("/credentials/revoke", {"command_id": command_id})
-            return ("failed", None, "Windows account verification failed: account is not a standard managed user")
+            return ("failed", None, reason or "Windows sign-in preparation failed")
+        verified, reason = _win_verify_employee_signin(username, code, password)
+        if not verified:
+            _post("/credentials/revoke", {"command_id": command_id})
+            return ("failed", None, reason or "Windows sign-in verification failed")
         confirmed = _post("/credentials/confirm", {"command_id": command_id})
         if not isinstance(confirmed, dict) or not confirmed.get("success"):
             _post("/credentials/revoke", {"command_id": command_id})

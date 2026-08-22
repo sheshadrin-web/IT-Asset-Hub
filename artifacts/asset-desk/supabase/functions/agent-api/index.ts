@@ -271,6 +271,13 @@ Deno.serve(async (req) => {
       return r.ok ? json(r.data) : json({ success: false, error: "credential confirmation failed" }, 400);
     }
 
+    if (req.method === "POST" && path === "/credentials/status") {
+      const r = await rpc("agent_get_provisioning_credential_status", {
+        p_token: token, p_command_id: body.command_id,
+      });
+      return r.ok ? json(r.data) : json({ success: false, error: "credential status unavailable" }, 400);
+    }
+
     if (req.method === "POST" && path === "/credentials/revoke") {
       const r = await rpc("agent_revoke_provisioning_credential", {
         p_token: token, p_command_id: body.command_id,

@@ -12,7 +12,9 @@ ROOT = Path(__file__).parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260816000000_mac_user_provisioning.sql").read_text()
 RESET_MIGRATION = (ROOT / "supabase/migrations/20260819000000_mac_password_reset_and_user_wallpaper.sql").read_text()
 CROSS_PLATFORM_MIGRATION = (ROOT / "supabase/migrations/20260821000000_cross_platform_user_provisioning.sql").read_text()
+WINDOWS_SIGNIN_MIGRATION = (ROOT / "supabase/migrations/20260822000000_windows_user_push_signin_verification.sql").read_text()
 AGENT = (ROOT / "agent/laptop_agent.py").read_text()
+PUBLIC_AGENT = (ROOT / "public/agent/laptop_agent.py").read_text()
 AGENT_API = (ROOT / "supabase/functions/agent-api/index.ts").read_text()
 REVEAL_API = (ROOT / "supabase/functions/provisioning-credentials/index.ts").read_text()
 
@@ -36,6 +38,23 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
         self.assertIn("AES-GCM", AGENT_API)
         self.assertIn("ciphertext", AGENT_API)
         self.assertIn("device_user_credentials", MIGRATION)
+
+    def test_existing_windows_account_replay_requires_non_secret_attestation(self):
+        self.assertIn("/credentials/status", AGENT)
+        self.assertIn("credential_status", AGENT)
+        self.assertIn("agent_get_provisioning_credential_status", AGENT_API)
+        self.assertIn("agent_get_provisioning_credential_status", WINDOWS_SIGNIN_MIGRATION)
+        self.assertIn("TO service_role", WINDOWS_SIGNIN_MIGRATION)
+        self.assertNotIn("ciphertext", WINDOWS_SIGNIN_MIGRATION.split("DECLARE", 1)[1])
+        self.assertNotIn("password", WINDOWS_SIGNIN_MIGRATION.split("DECLARE", 1)[1].lower())
+
+    def test_credential_attestation_expires_stale_available_credentials(self):
+        self.assertIn("credential_status = 'expired'", WINDOWS_SIGNIN_MIGRATION)
+        self.assertIn("c.expires_at <= now()", WINDOWS_SIGNIN_MIGRATION)
+        self.assertIn("IF v_status <> 'available'", WINDOWS_SIGNIN_MIGRATION)
+
+    def test_public_agent_is_an_exact_mirror_of_agent_source(self):
+        self.assertEqual(AGENT, PUBLIC_AGENT)
 
     def test_reveal_is_one_time_and_expiring(self):
         self.assertIn("credential_status = 'consumed'", MIGRATION)
