@@ -1,0 +1,65 @@
+Investigate and permanently fix Windows User Push end-to-end. Do not just patch this one laptop manually.
+
+Current production test device: MILES-LAP-882
+Employee code: MPI545
+Expected Windows username: mpi545
+Account type: Standard User.
+
+The portal successfully queues User Push and reports User Provisioned. The Windows agent successfully creates the local account. We verified on the physical Windows device:
+
+Get-LocalUser shows mpi545 exists and is Enabled=True.
+net user mpi545 shows the account is active and has description MilesEmployeeCode=MPI545.
+Get-LocalGroupMember -Group "Administrators" contains only the built-in Administrator and Miles-IT-Support, so mpi545 is correctly NOT an administrator.
+
+Actual bug: after signing out/restarting Windows, the Windows sign-in screen displays only Miles-IT-Support. There is no mpi545 tile and no Other user option. Therefore provisioning is being marked successful before verifying that the employee account is actually usable from the Windows sign-in UI.
+
+We also checked:
+
+dontdisplaylastusername = 0
+
+HideFastUserSwitching is not configured.
+
+A manual HKLM\...\Winlogon\SpecialAccounts\UserList\mpi545 = 1 test did not solve the sign-in experience, so do NOT treat that registry entry alone as the solution.
+
+Your task:
+
+Trace the complete Windows provision_user implementation in the agent and determine why a newly created standard local user is not available/selectable at the Windows 11 sign-in screen.
+
+Inspect all Windows-specific provisioning code, account creation flags, local security/account policies, Winlogon configuration, credential-provider/sign-in behavior, user enumeration behavior, and any policy/configuration created by the agent or OS setup.
+
+Compare the Windows implementation with the working macOS User Push behavior, but implement the correct Windows-native solution rather than copying macOS assumptions.
+
+The final Windows workflow must:
+
+Create or update the requested local employee account idempotently.
+Keep Miles-IT-Support as the protected administrator account.
+Keep the employee account as a Standard User unless the portal explicitly requests Administrator.
+Ensure the provisioned employee account can actually be selected/logged into after sign-out/reboot.
+Preserve the generated temporary password and existing Reveal Once security flow.
+Do not auto-login as the employee.
+Do not expose passwords/tokens in logs.
+Do not weaken Windows security globally just to make the account appear.
+Do not report User Provisioned merely because New-LocalUser succeeded.
+
+Add a post-provision verification stage. Before reporting success, verify at minimum:
+
+local account exists;
+account is enabled;
+correct account type/group membership;
+account is not accidentally hidden by agent-managed Windows configuration;
+account is eligible for interactive local logon;
+temporary credential metadata is successfully stored.
+
+If any required postcondition fails, return a precise failure to the portal rather than marking the command successful.
+
+Also investigate whether Windows 11 Home Single Language has different sign-in enumeration behavior relevant to local accounts and make the implementation compatible with the OS detected by the agent.
+
+Important: inspect the actual repository implementation first. Do not assume the root cause. Do not modify Supabase migrations/RPCs unless evidence shows they are involved; the command is already reaching the Windows agent and the account is being created.
+
+Add regression tests covering this exact Windows scenario and existing macOS/Ubuntu behavior. Run the full test suite/build.
+
+If the fix requires a Windows agent code change, bump the agent version, commit it, push to main, and report exactly how I should update the agent on MILES-LAP-882.
+
+Do NOT delete mpi545, Miles-IT-Support, or modify the physical test device automatically during diagnosis. Do not queue another User Push until the code fix is ready.
+
+At completion report: ROOT CAUSE / FILES CHANGED / WINDOWS FIX / POST-PROVISION VERIFICATION / AGENT VERSION / TEST RESULTS / DEPLOYMENT STATUS / EXACT RETEST STEPS.
