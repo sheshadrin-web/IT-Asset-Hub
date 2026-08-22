@@ -11,7 +11,10 @@ const db = createClient(url, serviceKey, {
 });
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+  // supabase-js sends x-client-info with browser function invocations. If it
+  // is omitted, the browser rejects the preflight before the request reaches
+  // the authenticated reveal handler.
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
