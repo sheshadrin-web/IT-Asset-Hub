@@ -1,2 +1,3 @@
 - [macOS account provisioning](macos-user-provisioning.md) — sysadminctl password delivery must follow the documented macOS CLI contract; verify Directory Services completeness, not only pwd lookup.
 - [Supabase migration history](supabase-migration-history.md) — linked production projects may lack local migration tracking; push only approved idempotent migrations from an isolated CLI directory.
+- [Supabase Edge browser CORS](supabase-edge-cors.md) — browser calls through supabase-js require x-client-info in the function preflight allow-list.

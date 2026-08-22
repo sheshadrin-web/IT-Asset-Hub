@@ -51,6 +51,9 @@ class MacProvisioningCredentialContractTests(unittest.TestCase):
         self.assertIn("await decryptCredential(result.data.ciphertext)", REVEAL_API)
         self.assertNotIn("ciphertext });", REVEAL_API)
 
+    def test_reveal_cors_allows_supabase_browser_client_headers(self):
+        self.assertIn('"Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info"', REVEAL_API)
+
     def test_protected_account_and_standard_role_contract_remain(self):
         self.assertIn("miles-it-support", AGENT)
         self.assertNotIn('"-role", "standard"', AGENT)
